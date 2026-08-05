@@ -1,0 +1,1618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JSW Multi-Post — Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #080808;
+  --bg2: #0e0e0e;
+  --bg3: #141414;
+  --surface: rgba(255,255,255,0.03);
+  --surface2: rgba(255,255,255,0.06);
+  --border: rgba(255,255,255,0.08);
+  --border-strong: rgba(255,255,255,0.14);
+  --text: #fafafa;
+  --text2: #a1a1aa;
+  --text3: #71717a;
+  --accent: #6366f1;
+  --accent2: #818cf8;
+  --pink: #ec4899;
+  --green: #10b981;
+  --red: #ef4444;
+  --serif: 'Instrument Serif', Georgia, serif;
+  --sans: 'Inter', -apple-system, sans-serif;
+}
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+}
+
+/* Ambient glow */
+body::before {
+  content: '';
+  position: fixed;
+  top: -200px; left: 50%;
+  transform: translateX(-50%);
+  width: 1000px; height: 500px;
+  background: radial-gradient(ellipse, rgba(99,102,241,0.08), transparent 70%);
+  filter: blur(60px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Noise overlay */
+body::after {
+  content: '';
+  position: fixed; inset: 0;
+  pointer-events: none; z-index: 9999;
+  opacity: 0.02;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' /%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' /%3E%3C/svg%3E");
+  mix-blend-mode: overlay;
+}
+
+/* ============ AUTH SCREEN ============ */
+.auth-wrap {
+  display: none;
+  min-height: 100vh;
+  position: relative;
+  z-index: 1;
+}
+.auth-wrap.active { display: flex; }
+
+.auth-left {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 40px;
+  max-width: 520px;
+  margin: 0 auto;
+}
+
+.auth-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 48px;
+}
+
+.auth-brand-icon {
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--accent), var(--pink));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.auth-brand-name {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.auth h1 {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -1.5px;
+  margin-bottom: 8px;
+}
+
+.auth h1 em {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+  background: linear-gradient(135deg, var(--accent2), var(--pink));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.auth-sub {
+  color: var(--text3);
+  font-size: 15px;
+  margin-bottom: 32px;
+}
+
+.auth-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.auth-tab {
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text3);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+}
+
+.auth-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.auth-field {
+  margin-bottom: 16px;
+}
+
+.auth-field label {
+  display: block;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text2);
+  margin-bottom: 6px;
+}
+
+.auth-field input {
+  width: 100%;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  padding: 14px 16px;
+  font-size: 15px;
+  font-family: var(--sans);
+  transition: all 0.2s;
+}
+.auth-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.15);
+}
+
+.auth-btn {
+  width: 100%;
+  padding: 14px;
+  border-radius: 10px;
+  border: none;
+  background: linear-gradient(135deg, var(--accent), #7c3aed);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  margin-top: 8px;
+}
+.auth-btn:hover { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(99,102,241,0.3); }
+.auth-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.auth-error {
+  color: var(--red);
+  font-size: 13px;
+  margin-top: 12px;
+  display: none;
+}
+.auth-error.active { display: block; }
+
+.auth-right {
+  flex: 1;
+  background: linear-gradient(135deg, #0f0a1f 0%, #1a0a2e 50%, #0f1a2f 100%);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 60px;
+  position: relative;
+  overflow: hidden;
+}
+
+.auth-right::before {
+  content: '';
+  position: absolute;
+  top: 20%; right: -10%;
+  width: 500px; height: 500px;
+  background: radial-gradient(circle, rgba(99,102,241,0.15), transparent 60%);
+  filter: blur(40px);
+}
+
+.auth-right::after {
+  content: '';
+  position: absolute;
+  bottom: 10%; left: -5%;
+  width: 400px; height: 400px;
+  background: radial-gradient(circle, rgba(236,72,153,0.1), transparent 60%);
+  filter: blur(40px);
+}
+
+.auth-feature {
+  position: relative;
+  z-index: 1;
+  margin-bottom: 32px;
+}
+
+.auth-feature h2 {
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -1px;
+  margin-bottom: 8px;
+  line-height: 1.2;
+}
+
+.auth-feature h2 em {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+}
+
+.auth-feature-list {
+  list-style: none;
+  margin-top: 24px;
+}
+
+.auth-feature-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 0;
+  color: var(--text2);
+  font-size: 14px;
+}
+
+.auth-feature-list svg {
+  flex-shrink: 0;
+  color: var(--green);
+}
+
+/* ============ DASHBOARD LAYOUT ============ */
+.app-wrap {
+  display: none;
+  min-height: 100vh;
+  position: relative;
+  z-index: 1;
+}
+.app-wrap.active { display: grid; grid-template-columns: 240px 1fr; }
+
+/* Sidebar */
+.sidebar {
+  background: var(--bg2);
+  border-right: 1px solid var(--border);
+  padding: 20px 0;
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  overflow-y: auto;
+}
+
+.sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 20px 24px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+
+.sidebar-brand-icon {
+  width: 32px; height: 32px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, var(--accent), var(--pink));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.sidebar-brand-name {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.sidebar-nav {
+  padding: 0 12px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+  color: var(--text3);
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.15s;
+  margin-bottom: 2px;
+}
+
+.nav-item:hover { color: var(--text2); background: var(--surface); }
+
+.nav-item.active {
+  color: var(--text);
+  background: linear-gradient(135deg, rgba(99,102,241,0.12), rgba(236,72,153,0.06));
+  border: 1px solid rgba(99,102,241,0.2);
+}
+
+.nav-item svg { flex-shrink: 0; }
+
+.sidebar-footer {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border);
+}
+
+.sidebar-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.sidebar-avatar {
+  width: 32px; height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--pink));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.sidebar-user-email {
+  font-size: 12px;
+  color: var(--text3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.logout-btn {
+  width: 100%;
+  padding: 8px;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text3);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-family: var(--sans);
+}
+.logout-btn:hover { color: var(--red); border-color: var(--red); }
+
+/* Main */
+.main {
+  padding: 32px 40px;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.page-header {
+  margin-bottom: 32px;
+}
+
+.page-header h1 {
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -1px;
+  margin-bottom: 4px;
+}
+
+.page-header h1 em {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+}
+
+.page-header p {
+  color: var(--text3);
+  font-size: 14px;
+}
+
+/* Cards */
+.card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  margin-bottom: 16px;
+  transition: border-color 0.2s;
+}
+.card:hover { border-color: var(--border-strong); }
+
+.card h3 {
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 16px;
+}
+
+/* Stat cards */
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.stat-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 24px;
+  position: relative;
+  overflow: hidden;
+}
+
+.stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0.5;
+}
+
+.stat-value {
+  font-size: 36px;
+  font-weight: 800;
+  letter-spacing: -1.5px;
+  background: linear-gradient(135deg, var(--accent2), var(--pink));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.stat-label {
+  font-size: 13px;
+  color: var(--text3);
+  margin-top: 4px;
+  font-weight: 500;
+}
+
+/* Form elements */
+.form-group { margin-bottom: 16px; }
+
+.form-group label {
+  display: block;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text2);
+  margin-bottom: 6px;
+}
+
+.form-input, .form-textarea, .form-select {
+  width: 100%;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  padding: 12px 14px;
+  font-size: 14px;
+  font-family: var(--sans);
+  transition: all 0.2s;
+}
+
+.form-textarea {
+  min-height: 120px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.form-input:focus, .form-textarea:focus, .form-select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(99,102,241,0.12);
+}
+
+.form-select {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg width='12' height='8' viewBox='0 0 12 8' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2371717a' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+  padding-right: 36px;
+}
+
+/* Toggle */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+}
+
+.toggle-row span { font-size: 14px; color: var(--text2); }
+
+.switch {
+  position: relative;
+  width: 42px; height: 24px;
+}
+.switch input { display: none; }
+.switch .slider {
+  position: absolute; inset: 0;
+  background: #333;
+  border-radius: 24px;
+  cursor: pointer;
+  transition: 0.3s;
+}
+.switch .slider::before {
+  content: '';
+  position: absolute;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  top: 3px; left: 3px;
+  transition: 0.3s;
+}
+.switch input:checked + .slider { background: var(--accent); }
+.switch input:checked + .slider::before { transform: translateX(18px); }
+
+/* Buttons */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  font-family: var(--sans);
+  transition: all 0.2s;
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent), #7c3aed);
+  color: #fff;
+}
+.btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(99,102,241,0.3); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+.btn-ghost {
+  background: var(--bg3);
+  color: var(--text2);
+  border: 1px solid var(--border);
+}
+.btn-ghost:hover { background: var(--surface2); border-color: var(--border-strong); }
+
+.btn-sm { padding: 8px 16px; font-size: 13px; }
+
+/* Group list items */
+.list-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  margin-bottom: 8px;
+}
+
+.list-item-icon {
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--accent), var(--pink));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.list-item-info { flex: 1; min-width: 0; }
+.list-item-name { font-size: 14px; font-weight: 600; margin-bottom: 2px; }
+.list-item-meta { font-size: 12px; color: var(--text3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.list-item-remove {
+  background: none;
+  border: none;
+  color: var(--text3);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  transition: all 0.15s;
+}
+.list-item-remove:hover { color: var(--red); background: rgba(239,68,68,0.08); }
+
+/* Group checkbox list */
+.group-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  margin-bottom: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.group-check:hover { border-color: var(--border-strong); }
+.group-check.selected { border-color: var(--accent); background: rgba(99,102,241,0.06); }
+
+.group-check input { accent-color: var(--accent); width: 16px; height: 16px; }
+.group-check label { flex: 1; cursor: pointer; font-size: 14px; }
+
+/* Chart bars */
+.chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  height: 180px;
+  padding: 20px 0;
+}
+
+.chart-bar {
+  flex: 1;
+  background: linear-gradient(180deg, var(--accent), rgba(99,102,241,0.2));
+  border-radius: 6px 6px 0 0;
+  min-height: 4px;
+  position: relative;
+  transition: all 0.3s;
+  cursor: default;
+}
+
+.chart-bar:hover {
+  background: linear-gradient(180deg, var(--accent2), rgba(129,140,248,0.3));
+}
+
+.chart-bar-label {
+  position: absolute;
+  bottom: -24px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: var(--text3);
+}
+
+.chart-bar-value {
+  position: absolute;
+  top: -22px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 11px;
+  color: var(--text2);
+  font-weight: 600;
+  opacity: 0;
+  transition: opacity 0.2s;
+}
+.chart-bar:hover .chart-bar-value { opacity: 1; }
+
+/* Finder */
+.finder-input {
+  width: 100%;
+  background: var(--bg3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text);
+  padding: 14px;
+  font-size: 14px;
+  font-family: var(--sans);
+  min-height: 60px;
+  resize: vertical;
+  transition: all 0.2s;
+}
+.finder-input:focus { outline: none; border-color: var(--accent); }
+
+.finder-chip {
+  display: inline-block;
+  padding: 5px 12px;
+  border-radius: 100px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text2);
+  font-size: 12px;
+  cursor: pointer;
+  margin: 4px 4px 0 0;
+  transition: all 0.2s;
+}
+.finder-chip:hover { border-color: var(--accent); color: var(--text); }
+
+/* Toast */
+.toast {
+  position: fixed;
+  bottom: 24px; right: 24px;
+  background: var(--bg2);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  padding: 14px 20px;
+  font-size: 14px;
+  z-index: 10000;
+  transform: translateY(100px);
+  opacity: 0;
+  transition: all 0.3s;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.toast.show { transform: translateY(0); opacity: 1; }
+.toast.success { border-left: 3px solid var(--green); }
+.toast.error { border-left: 3px solid var(--red); }
+
+/* Empty state */
+.empty {
+  text-align: center;
+  padding: 48px 20px;
+  color: var(--text3);
+}
+.empty-icon { font-size: 40px; margin-bottom: 12px; opacity: 0.5; }
+.empty p { font-size: 14px; }
+
+/* Responsive */
+@media (max-width: 768px) {
+  .app-wrap.active { grid-template-columns: 1fr; }
+  .sidebar { display: none; }
+  .auth-right { display: none; }
+  .main { padding: 20px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ============ AUTH SCREEN ============ -->
+<div class="auth-wrap active" id="authWrap">
+  <div class="auth-left">
+    <div class="auth-brand">
+      <div class="auth-brand-icon">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+      </div>
+      <span class="auth-brand-name">JSW Multi-Post</span>
+    </div>
+
+    <h1>Welcome <em>back.</em></h1>
+    <p class="auth-sub">Sign in to manage your Facebook group posting.</p>
+
+    <div class="auth-tabs">
+      <div class="auth-tab active" id="tabSignin" onclick="switchAuth('signin')">Sign In</div>
+      <div class="auth-tab" id="tabSignup" onclick="switchAuth('signup')">Create Account</div>
+    </div>
+
+    <form id="authForm" onsubmit="handleAuth(event)">
+      <div class="auth-field">
+        <label>Email</label>
+        <input type="email" id="authEmail" required placeholder="you@example.com">
+      </div>
+      <div class="auth-field">
+        <label>Password</label>
+        <input type="password" id="authPass" required placeholder="••••••••" minlength="6">
+      </div>
+      <button type="submit" class="auth-btn" id="authBtn">Sign In</button>
+    </form>
+    <div class="auth-error" id="authError"></div>
+  </div>
+
+  <div class="auth-right">
+    <div class="auth-feature">
+      <h2>Post to <em>every</em><br>group at once.</h2>
+      <p style="color:var(--text2);font-size:15px;max-width:380px;">The cleanest way to manage multi-group Facebook posting. AI-powered, scheduled, open source.</p>
+      <ul class="auth-feature-list">
+        <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> AI-powered post generation</li>
+        <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Schedule posts in advance</li>
+        <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Group finder tool</li>
+        <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Analytics dashboard</li>
+        <li><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> No external servers</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ============ APP ============ -->
+<div class="app-wrap" id="appWrap">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <div class="sidebar-brand-icon">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+      </div>
+      <span class="sidebar-brand-name">JSW Multi-Post</span>
+    </div>
+
+    <nav class="sidebar-nav" id="sidebarNav">
+      <div class="nav-item active" data-page="dashboard" onclick="navigate('dashboard')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+        Dashboard
+      </div>
+      <div class="nav-item" data-page="compose" onclick="navigate('compose')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 113 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        Compose
+      </div>
+      <div class="nav-item" data-page="groups" onclick="navigate('groups')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+        Groups
+      </div>
+      <div class="nav-item" data-page="schedule" onclick="navigate('schedule')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg>
+        Schedule
+      </div>
+      <div class="nav-item" data-page="analytics" onclick="navigate('analytics')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        Analytics
+      </div>
+      <div class="nav-item" data-page="settings" onclick="navigate('settings')">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        Settings
+      </div>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="sidebar-user">
+        <div class="sidebar-avatar" id="sidebarAvatar">U</div>
+        <span class="sidebar-user-email" id="sidebarEmail">user@example.com</span>
+      </div>
+      <button class="logout-btn" onclick="handleLogout()">Sign Out</button>
+    </div>
+  </aside>
+
+  <!-- Main content -->
+  <main class="main" id="mainContent"></main>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ============ SUPABASE INIT ============
+const SUPA_URL = 'https://xacehhtgvubcqdoltazg.supabase.co';
+const SUPA_KEY = 'sb_publishable_1TNu5hqotJ7GGQXfjliivQ_ttK51EAA';
+const sb = supabase.createClient(SUPA_URL, SUPA_KEY);
+
+let currentUser = null;
+let authMode = 'signin';
+
+// ============ AUTH ============
+function switchAuth(mode) {
+  authMode = mode;
+  document.getElementById('tabSignin').classList.toggle('active', mode === 'signin');
+  document.getElementById('tabSignup').classList.toggle('active', mode === 'signup');
+  document.getElementById('authBtn').textContent = mode === 'signin' ? 'Sign In' : 'Create Account';
+  document.getElementById('authError').classList.remove('active');
+}
+
+async function handleAuth(e) {
+  e.preventDefault();
+  const email = document.getElementById('authEmail').value;
+  const pass = document.getElementById('authPass').value;
+  const btn = document.getElementById('authBtn');
+  const err = document.getElementById('authError');
+
+  btn.disabled = true;
+  btn.textContent = authMode === 'signin' ? 'Signing in...' : 'Creating account...';
+  err.classList.remove('active');
+
+  try {
+    let result;
+    if (authMode === 'signin') {
+      result = await sb.auth.signInWithPassword({ email, password: pass });
+    } else {
+      result = await sb.auth.signUp({ email, password: pass });
+    }
+
+    if (result.error) throw result.error;
+    if (result.data.user) {
+      currentUser = result.data.user;
+      showApp();
+    }
+  } catch (e) {
+    err.textContent = e.message;
+    err.classList.add('active');
+    btn.disabled = false;
+    btn.textContent = authMode === 'signin' ? 'Sign In' : 'Create Account';
+  }
+}
+
+async function handleLogout() {
+  await sb.auth.signOut();
+  currentUser = null;
+  document.getElementById('appWrap').classList.remove('active');
+  document.getElementById('authWrap').classList.add('active');
+}
+
+// Check existing session
+sb.auth.getSession().then(({ data }) => {
+  if (data.session?.user) {
+    currentUser = data.session.user;
+    showApp();
+  }
+});
+
+sb.auth.onAuthStateChange((event, session) => {
+  if (event === 'SIGNED_IN' && session?.user) {
+    currentUser = session.user;
+    showApp();
+  } else if (event === 'SIGNED_OUT') {
+    currentUser = null;
+    document.getElementById('appWrap').classList.remove('active');
+    document.getElementById('authWrap').classList.add('active');
+  }
+});
+
+function showApp() {
+  document.getElementById('authWrap').classList.remove('active');
+  document.getElementById('appWrap').classList.add('active');
+  const email = currentUser.email;
+  document.getElementById('sidebarEmail').textContent = email;
+  document.getElementById('sidebarAvatar').textContent = email[0].toUpperCase();
+
+  // Route
+  const hash = window.location.hash.slice(1) || 'dashboard';
+  navigate(hash);
+}
+
+// ============ NAVIGATION ============
+function navigate(page) {
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.querySelector(`.nav-item[data-page="${page}"]`)?.classList.add('active');
+  window.location.hash = page;
+
+  const pages = {
+    dashboard: renderDashboard,
+    compose: renderCompose,
+    groups: renderGroups,
+    schedule: renderSchedule,
+    analytics: renderAnalytics,
+    settings: renderSettings
+  };
+
+  (pages[page] || renderDashboard)();
+}
+
+// ============ TOAST ============
+function toast(msg, type = 'success') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show ' + type;
+  setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+// ============ SUPABASE HELPERS ============
+async function fetchGroups() {
+  const { data, error } = await sb.from('jsw_groups').select('*').order('created_at', { ascending: false });
+  return error ? [] : data;
+}
+
+async function addGroup(url, name) {
+  const { error } = await sb.from('jsw_groups').insert({
+    user_id: currentUser.id,
+    group_url: url,
+    group_name: name || url.split('/').pop()
+  });
+  return !error;
+}
+
+async function removeGroup(id) {
+  await sb.from('jsw_groups').delete().eq('id', id);
+}
+
+async function fetchSettings() {
+  const { data } = await sb.from('jsw_settings').select('*').eq('user_id', currentUser.id).single();
+  return data || {};
+}
+
+async function saveSettings(settings) {
+  const existing = await fetchSettings();
+  if (existing.id) {
+    await sb.from('jsw_settings').update(settings).eq('id', existing.id);
+  } else {
+    await sb.from('jsw_settings').insert({ user_id: currentUser.id, ...settings });
+  }
+}
+
+async function fetchSchedules() {
+  const { data, error } = await sb.from('jsw_schedules').select('*').order('created_at', { ascending: false });
+  return error ? [] : data;
+}
+
+async function fetchPosts() {
+  const { data, error } = await sb.from('jsw_posts').select('*').order('created_at', { ascending: false });
+  return error ? [] : data;
+}
+
+// ============ PAGE: DASHBOARD ============
+async function renderDashboard() {
+  const main = document.getElementById('mainContent');
+  main.innerHTML = `
+    <div class="page-header">
+      <h1>Dashboard</h1>
+      <p>Welcome back. Here's your posting overview.</p>
+    </div>
+    <div id="dashContent"><p style="color:var(--text3)">Loading...</p></div>
+  `;
+
+  const [groups, schedules, posts] = await Promise.all([fetchGroups(), fetchSchedules(), fetchPosts()]);
+  const weekAgo = new Date(Date.now() - 7 * 86400000);
+  const postsThisWeek = posts.filter(p => new Date(p.created_at) > weekAgo).length;
+
+  document.getElementById('dashContent').innerHTML = `
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-value">${groups.length}</div>
+        <div class="stat-label">Groups Managed</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${posts.length}</div>
+        <div class="stat-label">Total Posts</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${postsThisWeek}</div>
+        <div class="stat-label">Posts This Week</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${schedules.length}</div>
+        <div class="stat-label">Active Schedules</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Recent Activity</h3>
+      ${posts.length === 0 ? `
+        <div class="empty">
+          <div class="empty-icon">📝</div>
+          <p>No posts yet. Head to <a href="#" onclick="navigate('compose');return false" style="color:var(--accent2)">Compose</a> to create your first post.</p>
+        </div>
+      ` : posts.slice(0, 5).map(p => `
+        <div class="list-item">
+          <div class="list-item-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+          </div>
+          <div class="list-item-info">
+            <div class="list-item-name">${(p.message || '').substring(0, 60)}${p.message?.length > 60 ? '...' : ''}</div>
+            <div class="list-item-meta">${new Date(p.created_at).toLocaleDateString()} · ${(JSON.parse(p.groups || '[]')).length} groups</div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+
+    <div class="card">
+      <h3>Quick Actions</h3>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <button class="btn btn-primary btn-sm" onclick="navigate('compose')">New Post</button>
+        <button class="btn btn-ghost btn-sm" onclick="navigate('groups')">Add Groups</button>
+        <button class="btn btn-ghost btn-sm" onclick="navigate('schedule')">Schedule</button>
+      </div>
+    </div>
+  `;
+}
+
+// ============ PAGE: COMPOSE ============
+let selectedGroupIds = new Set();
+
+async function renderCompose() {
+  const main = document.getElementById('mainContent');
+  main.innerHTML = `
+    <div class="page-header">
+      <h1>Compose</h1>
+      <p>Write once, post everywhere.</p>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 320px;gap:20px;align-items:start" id="composeGrid">
+      <div>
+        <div class="card">
+          <div class="form-group">
+            <label>Your Message</label>
+            <textarea class="form-textarea" id="composeMsg" placeholder="Write your post..."></textarea>
+          </div>
+
+          <div class="toggle-row">
+            <span>Enable AI refinement</span>
+            <label class="switch"><input type="checkbox" id="composeAI"><span class="slider"></span></label>
+          </div>
+
+          <div id="aiSettings" style="display:none;margin-bottom:16px">
+            <div class="form-group">
+              <label>AI System Prompt</label>
+              <textarea class="form-textarea" id="composeAIPrompt" placeholder="e.g. Rewrite as an engaging Facebook post with emojis and a CTA. Under 200 words." style="min-height:60px"></textarea>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Image URL (optional)</label>
+            <input type="url" class="form-input" id="composeImg" placeholder="https://example.com/image.jpg">
+          </div>
+
+          <div class="form-group">
+            <label>Delay Between Posts (seconds)</label>
+            <input type="number" class="form-input" id="composeDelay" value="30" min="5" max="300">
+          </div>
+
+          <div style="display:flex;gap:12px">
+            <button class="btn btn-primary" id="postBtn" onclick="handlePost()">Copy & Post</button>
+            <button class="btn btn-ghost" onclick="saveDraft()">Save Draft</button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <h3>Select Groups</h3>
+          <div id="composeGroups"><p style="color:var(--text3);font-size:13px">Loading groups...</p></div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('composeAI').addEventListener('change', (e) => {
+    document.getElementById('aiSettings').style.display = e.target.checked ? 'block' : 'none';
+  });
+
+  const groups = await fetchGroups();
+  selectedGroupIds.clear();
+  renderComposeGroups(groups);
+}
+
+function renderComposeGroups(groups) {
+  const el = document.getElementById('composeGroups');
+  if (groups.length === 0) {
+    el.innerHTML = '<p style="color:var(--text3);font-size:13px">No groups yet. <a href="#" onclick="navigate(\'groups\');return false" style="color:var(--accent2)">Add some first.</a></p>';
+    return;
+  }
+  el.innerHTML = groups.map(g => `
+    <div class="group-check" onclick="toggleGroup('${g.id}', this)">
+      <input type="checkbox" id="g_${g.id}">
+      <label for="g_${g.id}">${g.group_name}</label>
+    </div>
+  `).join('');
+}
+
+function toggleGroup(id, el) {
+  const cb = el.querySelector('input');
+  cb.checked = !cb.checked;
+  el.classList.toggle('selected', cb.checked);
+  if (cb.checked) selectedGroupIds.add(id);
+  else selectedGroupIds.delete(id);
+}
+
+async function handlePost() {
+  const msg = document.getElementById('composeMsg').value.trim();
+  if (!msg) { toast('Write a message first', 'error'); return; }
+  if (selectedGroupIds.size === 0) { toast('Select at least one group', 'error'); return; }
+
+  // Copy to clipboard — user pastes into extension
+  try {
+    await navigator.clipboard.writeText(msg);
+    toast('Message copied to clipboard. Open the extension to post.');
+  } catch (e) {
+    toast('Copy failed. Select text manually.', 'error');
+  }
+
+  // Log to Supabase
+  const groups = await fetchGroups();
+  const selected = groups.filter(g => selectedGroupIds.has(g.id)).map(g => g.group_url);
+  await sb.from('jsw_posts').insert({
+    user_id: currentUser.id,
+    message: msg,
+    groups: JSON.stringify(selected),
+    status: 'pending'
+  });
+}
+
+async function saveDraft() {
+  const msg = document.getElementById('composeMsg').value.trim();
+  if (!msg) { toast('Nothing to save', 'error'); return; }
+
+  const { error } = await sb.from('jsw_drafts').insert({
+    user_id: currentUser.id,
+    message: msg,
+    image_url: document.getElementById('composeImg').value || '',
+    ai_prompt: document.getElementById('composeAIPrompt')?.value || ''
+  });
+
+  if (!error) toast('Draft saved');
+}
+
+// ============ PAGE: GROUPS ============
+async function renderGroups() {
+  const main = document.getElementById('mainContent');
+  main.innerHTML = `
+    <div class="page-header">
+      <h1>Groups</h1>
+      <p>Manage your target Facebook groups.</p>
+    </div>
+
+    <div class="card">
+      <h3>Add Group</h3>
+      <div style="display:flex;gap:10px">
+        <input type="text" class="form-input" id="groupUrlInput" placeholder="facebook.com/groups/your-group" style="flex:1">
+        <button class="btn btn-primary btn-sm" onclick="handleAddGroup()">Add</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Group Finder</h3>
+      <p style="color:var(--text3);font-size:13px;margin-bottom:12px">Describe your brand to find relevant groups.</p>
+      <textarea class="finder-input" id="finderInput" placeholder="e.g. We sell eco-friendly fitness gear for active women"></textarea>
+      <div style="margin-top:8px">
+        <span class="finder-chip" onclick="document.getElementById('finderInput').value='Digital marketing agency helping small businesses'; findGroups()">Marketing</span>
+        <span class="finder-chip" onclick="document.getElementById('finderInput').value='Online store selling handmade jewelry'; findGroups()">Jewelry</span>
+        <span class="finder-chip" onclick="document.getElementById('finderInput').value='SaaS tool for project management'; findGroups()">SaaS</span>
+        <span class="finder-chip" onclick="document.getElementById('finderInput').value='Meal prep delivery for busy professionals'; findGroups()">Food</span>
+      </div>
+      <button class="btn btn-ghost btn-sm" style="margin-top:12px" onclick="findGroups()">Find Groups</button>
+      <div id="finderResults" style="margin-top:16px"></div>
+    </div>
+
+    <div class="card">
+      <h3>Your Groups</h3>
+      <div id="groupsList"><p style="color:var(--text3);font-size:13px">Loading...</p></div>
+    </div>
+  `;
+
+  refreshGroupsList();
+}
+
+async function handleAddGroup() {
+  let url = document.getElementById('groupUrlInput').value.trim();
+  if (!url) return;
+  if (!url.startsWith('http')) url = 'https://facebook.com/groups/' + url;
+  url = url.replace(/\/$/, '');
+  const name = url.split('/').pop();
+
+  const ok = await addGroup(url, name);
+  if (ok) {
+    document.getElementById('groupUrlInput').value = '';
+    toast('Group added');
+    refreshGroupsList();
+  } else {
+    toast('Failed to add group', 'error');
+  }
+}
+
+async function refreshGroupsList() {
+  const el = document.getElementById('groupsList');
+  if (!el) return;
+  const groups = await fetchGroups();
+  if (groups.length === 0) {
+    el.innerHTML = '<div class="empty"><div class="empty-icon">👥</div><p>No groups yet. Add one above.</p></div>';
+    return;
+  }
+  el.innerHTML = groups.map(g => `
+    <div class="list-item">
+      <div class="list-item-icon">${g.group_name[0]?.toUpperCase() || 'G'}</div>
+      <div class="list-item-info">
+        <div class="list-item-name">${g.group_name}</div>
+        <div class="list-item-meta">${g.group_url}</div>
+      </div>
+      <button class="list-item-remove" onclick="handleRemoveGroup('${g.id}')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+      </button>
+    </div>
+  `).join('');
+}
+
+async function handleRemoveGroup(id) {
+  await removeGroup(id);
+  toast('Group removed');
+  refreshGroupsList();
+}
+
+// ============ GROUP FINDER (ported from landing page) ============
+const CATEGORY_MAP = {
+  fitness: { keywords: ['fitness','gym','workout','exercise','yoga','pilates','crossfit','running','personal trainer','health coach'], searches: ['fitness business','gym owners','personal training business','fitness marketing','health entrepreneurs'] },
+  marketing: { keywords: ['marketing','seo','advertising','social media','ppc','google ads','facebook ads','digital marketing','agency','branding','copywriting'], searches: ['digital marketing agency','social media marketing business','SEO professionals','marketing agency growth','freelance marketers'] },
+  ecommerce: { keywords: ['ecommerce','e-commerce','shopify','dropshipping','amazon fba','online store','etsy','ebay','fulfillment'], searches: ['ecommerce business owners','shopify business','amazon fba business','dropshipping business','etsy sellers'] },
+  saas: { keywords: ['saas','software','startup','tech startup','app development','web app','b2b','platform'], searches: ['SaaS founders','software startup','B2B software business','tech entrepreneurs','indie hackers'] },
+  consulting: { keywords: ['consulting','coach','mentoring','advisory','freelance','professional services'], searches: ['business coaches','consulting business','freelance business','coaching growth','professional services'] },
+  realestate: { keywords: ['real estate','realtor','property','housing','rental','airbnb','flipping','mortgage'], searches: ['real estate business','realtor networking','airbnb business','real estate investors'] },
+  finance: { keywords: ['finance','accounting','bookkeeping','tax','financial','investing','crypto','fintech'], searches: ['accounting business','bookkeeping business','financial advisor business','fintech startup'] },
+  fashion: { keywords: ['fashion','clothing','apparel','streetwear','boutique','jewelry','handmade','accessories','artisan'], searches: ['fashion business','clothing business','jewelry business','handmade business','boutique owners'] },
+  art: { keywords: ['art','painting','illustration','design','graphic design','creative','photography'], searches: ['art business','creative business','photography business','selling art online','graphic design business'] },
+  beauty: { keywords: ['beauty','cosmetics','skincare','makeup','salon','spa','hair','nails'], searches: ['beauty business','salon owners','skincare business','cosmetics business'] },
+  food: { keywords: ['food','restaurant','cafe','coffee','bakery','catering','food truck','baking'], searches: ['restaurant business','food business','coffee shop business','food truck business','catering business'] },
+  home: { keywords: ['home','furniture','decor','interior design','garden','landscaping','renovation','construction'], searches: ['interior design business','home renovation business','landscaping business','construction business'] },
+  parenting: { keywords: ['baby','kids','children','parenting','mom','toddler','family','childcare','toys'], searches: ['mom business','parenting business','kids product business','baby product business'] },
+  pets: { keywords: ['pet','dog','cat','animal','veterinary','pet food','pet supplies','grooming'], searches: ['pet business','dog business','pet supply business','pet grooming business'] },
+  education: { keywords: ['education','course','training','teaching','tutoring','online course','ebook','workshop'], searches: ['online course business','education business','training business','tutoring business'] },
+  tech: { keywords: ['tech','technology','app','software','hardware','gadget','electronics','ai','gaming'], searches: ['tech startup founders','app development business','gaming business','hardware startup'] },
+};
+
+function findGroups() {
+  const input = document.getElementById('finderInput')?.value.trim().toLowerCase();
+  if (!input) return;
+  const results = document.getElementById('finderResults');
+  results.innerHTML = '<p style="color:var(--text3);font-size:13px;padding:12px 0">Searching...</p>';
+
+  setTimeout(() => {
+    const scores = {};
+    Object.entries(CATEGORY_MAP).forEach(([name, cat]) => {
+      let score = 0;
+      cat.keywords.forEach(kw => { if (input.includes(kw)) score += kw.length > 6 ? 3 : 2; });
+      if (score > 0) scores[name] = score;
+    });
+
+    const matched = Object.entries(scores)
+      .map(([name, score]) => ({ name, score, searches: CATEGORY_MAP[name].searches }))
+      .sort((a, b) => b.score - a.score).slice(0, 3);
+
+    if (matched.length === 0) {
+      results.innerHTML = '<p style="color:var(--text3);font-size:13px;padding:12px 0">No matches. Try describing your industry or audience.</p>';
+      return;
+    }
+
+    let html = '';
+    matched.forEach(cat => {
+      cat.searches.forEach(s => {
+        const url = 'https://www.facebook.com/search/groups/?q=' + encodeURIComponent(s);
+        html += `
+          <div class="list-item" style="cursor:pointer" onclick="window.open('${url}','_blank')">
+            <div class="list-item-icon">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+            </div>
+            <div class="list-item-info">
+              <div class="list-item-name">${s.replace(/\b\w/g, c => c.toUpperCase())}</div>
+              <div class="list-item-meta">Click to search on Facebook</div>
+            </div>
+          </div>
+        `;
+      });
+    });
+    results.innerHTML = html;
+  }, 800);
+}
+
+// ============ PAGE: SCHEDULE ============
+async function renderSchedule() {
+  const main = document.getElementById('mainContent');
+  main.innerHTML = `
+    <div class="page-header">
+      <h1>Schedule</h1>
+      <p>Automate your posting.</p>
+    </div>
+
+    <div class="card">
+      <h3>Create Schedule</h3>
+      <div class="form-group">
+        <label>Message</label>
+        <textarea class="form-textarea" id="schedMsg" placeholder="Post message..."></textarea>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+        <div class="form-group">
+          <label>Frequency</label>
+          <select class="form-select" id="schedFreq">
+            <option value="once">Once</option>
+            <option value="daily" selected>Daily</option>
+            <option value="weekly">Weekly</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Time</label>
+          <input type="text" class="form-input" id="schedTime" value="09:00" placeholder="09:00">
+        </div>
+        <div class="form-group">
+          <label>Day (weekly)</label>
+          <select class="form-select" id="schedDay">
+            <option value="1">Mon</option><option value="2">Tue</option><option value="3">Wed</option>
+            <option value="4">Thu</option><option value="5">Fri</option><option value="6">Sat</option>
+            <option value="0">Sun</option>
+          </select>
+        </div>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="handleAddSchedule()">+ Add Schedule</button>
+    </div>
+
+    <div class="card">
+      <h3>Active Schedules</h3>
+      <div id="schedList"><p style="color:var(--text3);font-size:13px">Loading...</p></div>
+    </div>
+  `;
+
+  refreshScheduleList();
+}
+
+async function handleAddSchedule() {
+  const msg = document.getElementById('schedMsg').value.trim();
+  if (!msg) { toast('Write a message', 'error'); return; }
+
+  const groups = await fetchGroups();
+  const groupUrls = groups.map(g => g.group_url);
+
+  const { error } = await sb.from('jsw_schedules').insert({
+    user_id: currentUser.id,
+    message: msg,
+    groups: JSON.stringify(groupUrls),
+    frequency: document.getElementById('schedFreq').value,
+    post_time: document.getElementById('schedTime').value || '09:00',
+    day_of_week: parseInt(document.getElementById('schedDay').value),
+    ai_enabled: false
+  });
+
+  if (!error) {
+    toast('Schedule created');
+    document.getElementById('schedMsg').value = '';
+    refreshScheduleList();
+  }
+}
+
+async function refreshScheduleList() {
+  const el = document.getElementById('schedList');
+  if (!el) return;
+  const schedules = await fetchSchedules();
+  if (schedules.length === 0) {
+    el.innerHTML = '<div class="empty"><div class="empty-icon">⏰</div><p>No schedules yet.</p></div>';
+    return;
+  }
+  el.innerHTML = schedules.map(s => {
+    const freqLabel = { once: 'Once', daily: 'Daily', weekly: 'Weekly' }[s.frequency];
+    const dayLabel = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][s.day_of_week];
+    const detail = s.frequency === 'weekly' ? `${dayLabel} ${s.post_time}` : s.post_time;
+    return `
+      <div class="list-item">
+        <div class="list-item-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12,6 12,12 16,14"/></svg>
+        </div>
+        <div class="list-item-info">
+          <div class="list-item-name">${freqLabel} · ${detail}</div>
+          <div class="list-item-meta">${(s.message || '').substring(0, 50)}...</div>
+        </div>
+        <button class="list-item-remove" onclick="handleRemoveSchedule('${s.id}')">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        </button>
+      </div>
+    `;
+  }).join('');
+}
+
+async function handleRemoveSchedule(id) {
+  await sb.from('jsw_schedules').delete().eq('id', id);
+  toast('Schedule removed');
+  refreshScheduleList();
+}
+
+// ============ PAGE: ANALYTICS ============
+async function renderAnalytics() {
+  const main = document.getElementById('mainContent');
+  main.innerHTML = `
+    <div class="page-header">
+      <h1>Analytics</h1>
+      <p>Track your posting activity.</p>
+    </div>
+    <div id="analyticsContent"><p style="color:var(--text3)">Loading...</p></div>
+  `;
+
+  const [groups, posts] = await Promise.all([fetchGroups(), fetchPosts()]);
+
+  // Build last 7 days chart
+  const days = [];
+  for (let i = 6; i >= 0; i--) {
+    const date = new Date(Date.now() - i * 86400000);
+    const dayPosts = posts.filter(p => {
+      const d = new Date(p.created_at);
+      return d.toDateString() === date.toDateString();
+    }).length;
+    days.push({
+      label: date.toLocaleDateString('en', { weekday: 'short' }),
+      count: dayPosts
+    });
+  }
+
+  const maxCount = Math.max(...days.map(d => d.count), 1);
+
+  document.getElementById('analyticsContent').innerHTML = `
+    <div class="stat-grid">
+      <div class="stat-card">
+        <div class="stat-value">${posts.length}</div>
+        <div class="stat-label">Total Posts</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${groups.length}</div>
+        <div class="stat-label">Groups</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value">${posts.reduce((sum, p) => sum + (JSON.parse(p.groups || '[]')).length, 0)}</div>
+        <div class="stat-label">Total Group Posts</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Posting Activity — Last 7 Days</h3>
+      <div class="chart">
+        ${days.map(d => `
+          <div class="chart-bar" style="height:${(d.count / maxCount) * 100}%">
+            <span class="chart-bar-value">${d.count}</span>
+            <span class="chart-bar-label">${d.label}</span>
+          </div>
+        `).join('')}
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Post History</h3>
+      ${posts.length === 0 ? '<div class="empty"><p>No posts yet.</p></div>' : posts.slice(0, 10).map(p => `
+        <div class="list-item">
+          <div class="list-item-icon">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+          </div>
+          <div class="list-item-info">
+            <div class="list-item-name">${(p.message || '').substring(0, 60)}${p.message?.length > 60 ? '...' : ''}</div>
+            <div class="list-item-meta">${new Date(p.created_at).toLocaleString()} · ${(JSON.parse(p.groups || '[]')).length} groups · ${p.status}</div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+// ============ PAGE: SETTINGS ============
+async function renderSettings() {
+  const main = document.getElementById('mainContent');
+  main.innerHTML = `
+    <div class="page-header">
+      <h1>Settings</h1>
+      <p>Configure your AI and posting preferences.</p>
+    </div>
+
+    <div class="card">
+      <h3>AI Configuration</h3>
+      <div class="toggle-row">
+        <span>Enable AI post refinement</span>
+        <label class="switch"><input type="checkbox" id="setAI"><span class="slider"></span></label>
+      </div>
+      <div class="form-group">
+        <label>AI Provider</label>
+        <select class="form-select" id="setProvider">
+          <option value="openai">OpenAI (GPT-4o)</option>
+          <option value="anthropic">Anthropic (Claude)</option>
+          <option value="gemini">Google Gemini</option>
+          <option value="openrouter">OpenRouter (100+ models)</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>API Key</label>
+        <input type="password" class="form-input" id="setKey" placeholder="sk-...">
+      </div>
+      <div class="form-group">
+        <label>Model</label>
+        <input type="text" class="form-input" id="setModel" placeholder="gpt-4o-mini">
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Posting Defaults</h3>
+      <div class="form-group">
+        <label>Default Delay Between Posts (seconds)</label>
+        <input type="number" class="form-input" id="setDelay" value="30" min="5" max="300">
+      </div>
+    </div>
+
+    <button class="btn btn-primary" onclick="handleSaveSettings()">Save Settings</button>
+  `;
+
+  const settings = await fetchSettings();
+  if (settings.ai_enabled) document.getElementById('setAI').checked = true;
+  if (settings.ai_provider) document.getElementById('setProvider').value = settings.ai_provider;
+  if (settings.api_key_encrypted) document.getElementById('setKey').value = settings.api_key_encrypted;
+  if (settings.ai_model) document.getElementById('setModel').value = settings.ai_model;
+  if (settings.default_delay) document.getElementById('setDelay').value = settings.default_delay;
+}
+
+async function handleSaveSettings() {
+  const settings = {
+    ai_enabled: document.getElementById('setAI').checked,
+    ai_provider: document.getElementById('setProvider').value,
+    api_key_encrypted: document.getElementById('setKey').value,
+    ai_model: document.getElementById('setModel').value,
+    default_delay: parseInt(document.getElementById('setDelay').value) || 30,
+  };
+  await saveSettings(settings);
+  toast('Settings saved');
+}
+</script>
+</body>
+</html>
