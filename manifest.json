@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "JSW Multi-Post",
   "short_name": "JSW MP",
-  "version": "2.0.0",
-  "description": "Post to multiple Facebook groups at once. AI-powered prompts, scheduled posts, clean local code.",
+  "version": "2.1.0",
+  "description": "Post to multiple Facebook groups at once. AI-powered prompts, scheduled posts, dashboard pairing.",
   "author": "JSW Enterprises",
   "icons": {
     "16": "icons/icon16.png",
@@ -42,6 +42,12 @@
     "*://api.openai.com/*",
     "*://api.anthropic.com/*",
     "*://generativelanguage.googleapis.com/*",
-    "*://openrouter.ai/*"
-  ]
+    "*://openrouter.ai/*",
+    "*://*.supabase.co/*"
+  ],
+  "externally_connectable": {
+    "matches": [
+      "https://jack108510.github.io/*"
+    ]
+  }
 }

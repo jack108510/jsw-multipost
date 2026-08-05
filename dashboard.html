@@ -1,0 +1,1427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JSW Multi-Post — Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+/* ============================================================
+   JSW MULTI-POST DASHBOARD — PREMIUM DARK UI
+   ============================================================ */
+*,*::before,*::after { margin:0; padding:0; box-sizing:border-box; }
+
+:root{
+  --bg:#080808; --bg-2:#0b0b0b; --card:#0e0e0e; --card-2:#131313;
+  --border:rgba(255,255,255,0.08); --border-2:rgba(255,255,255,0.14);
+  --text:#f4f4f5; --text-2:#a1a1aa; --text-3:#71717a;
+  --accent:#6366f1; --accent-2:#ec4899; --green:#22c55e; --yellow:#eab308; --red:#ef4444;
+  --grad:linear-gradient(135deg,#6366f1,#ec4899);
+  --grad-subtle:linear-gradient(135deg,rgba(99,102,241,0.12),rgba(236,72,153,0.12));
+  --radius:14px;
+}
+
+html,body{height:100%;}
+body{
+  font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  background:var(--bg); color:var(--text);
+  font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased;
+  overflow:hidden;
+}
+.serif{font-family:'Instrument Serif',serif; font-weight:400;}
+
+/* Noise texture overlay */
+body::before{
+  content:''; position:fixed; inset:0; z-index:9999; pointer-events:none;
+  opacity:0.02;
+  background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+button,input,textarea,select{font-family:inherit; color:inherit;}
+button{cursor:pointer; border:none; background:none;}
+a{color:inherit; text-decoration:none;}
+::-webkit-scrollbar{width:8px; height:8px;}
+::-webkit-scrollbar-track{background:transparent;}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1); border-radius:4px;}
+::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,0.2);}
+
+/* ============================================================
+   AUTH SCREEN
+   ============================================================ */
+#authScreen{
+  position:fixed; inset:0; display:flex; z-index:100;
+  background:var(--bg);
+}
+.auth-left{
+  flex:1; display:flex; align-items:center; justify-content:center;
+  padding:40px; position:relative;
+}
+.auth-right{
+  flex:1; position:relative; overflow:hidden;
+  background:linear-gradient(135deg,#0a0a0a 0%,#0e0a14 50%,#140a12 100%);
+  display:flex; flex-direction:column; justify-content:center; padding:60px;
+}
+.auth-right::before{
+  content:''; position:absolute; inset:-50%;
+  background:radial-gradient(circle at 30% 40%,rgba(99,102,241,0.25),transparent 50%),
+             radial-gradient(circle at 70% 70%,rgba(236,72,153,0.2),transparent 50%);
+  animation:float 18s ease-in-out infinite alternate;
+}
+@keyframes float{0%{transform:translate(0,0) rotate(0);} 100%{transform:translate(-40px,-30px) rotate(10deg);}}
+
+.auth-card{
+  width:100%; max-width:400px;
+}
+.auth-logo{
+  display:flex; align-items:center; gap:10px; margin-bottom:32px;
+}
+.auth-logo .mark{
+  width:38px; height:38px; border-radius:10px; background:var(--grad);
+  display:flex; align-items:center; justify-content:center;
+  box-shadow:0 4px 20px rgba(99,102,241,0.4);
+}
+.auth-logo span{font-size:15px; font-weight:700; letter-spacing:-0.3px;}
+
+.auth-headline{
+  font-size:38px; line-height:1.1; letter-spacing:-1.2px; margin-bottom:10px;
+}
+.auth-sub{color:var(--text-2); margin-bottom:32px; font-size:14px;}
+
+.auth-tabs{
+  display:flex; gap:4px; padding:4px; background:var(--card);
+  border:1px solid var(--border); border-radius:10px; margin-bottom:24px;
+}
+.auth-tab{
+  flex:1; padding:10px; border-radius:7px; font-size:13px; font-weight:600;
+  color:var(--text-3); transition:all .2s;
+}
+.auth-tab.active{background:var(--bg-2); color:var(--text);}
+
+.field{margin-bottom:16px;}
+.field label{
+  display:block; font-size:11px; font-weight:600; letter-spacing:.4px;
+  text-transform:uppercase; color:var(--text-3); margin-bottom:8px;
+}
+.field input, .field textarea, .field select{
+  width:100%; background:var(--card); border:1px solid var(--border);
+  border-radius:10px; padding:12px 14px; font-size:14px; transition:all .2s;
+}
+.field input:focus, .field textarea:focus, .field select:focus{
+  outline:none; border-color:var(--accent);
+  box-shadow:0 0 0 3px rgba(99,102,241,0.15);
+}
+
+.btn{
+  display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  padding:11px 18px; border-radius:10px; font-size:13px; font-weight:600;
+  transition:all .2s; white-space:nowrap;
+}
+.btn-primary{
+  background:var(--grad); color:#fff; box-shadow:0 4px 16px rgba(99,102,241,0.3);
+}
+.btn-primary:hover{transform:translateY(-1px); box-shadow:0 6px 24px rgba(99,102,241,0.45);}
+.btn-primary:disabled{opacity:.5; cursor:not-allowed; transform:none; box-shadow:none;}
+.btn-ghost{
+  background:var(--card); border:1px solid var(--border); color:var(--text-2);
+}
+.btn-ghost:hover{background:var(--card-2); color:var(--text); border-color:var(--border-2);}
+.btn-block{width:100%;}
+
+.auth-right-inner{position:relative; z-index:1; max-width:440px;}
+.feature-eyebrow{
+  font-size:11px; font-weight:600; letter-spacing:1.5px; text-transform:uppercase;
+  color:var(--accent-2); margin-bottom:14px;
+}
+.feature-title{
+  font-size:44px; line-height:1.1; letter-spacing:-1px; margin-bottom:24px;
+}
+.feature-title em{font-family:'Instrument Serif',serif; font-style:italic; font-weight:400;}
+.feature-list{list-style:none; display:flex; flex-direction:column; gap:14px;}
+.feature-list li{display:flex; align-items:flex-start; gap:12px; font-size:14px; color:var(--text-2);}
+.feature-list svg{flex-shrink:0; margin-top:1px; color:var(--accent);}
+
+/* ============================================================
+   APP SHELL
+   ============================================================ */
+#app{display:none; height:100vh; }
+#app.active{display:grid; grid-template-columns:240px 1fr;}
+
+/* Sidebar */
+.sidebar{
+  background:rgba(14,14,14,0.6); backdrop-filter:blur(20px);
+  -webkit-backdrop-filter:blur(20px);
+  border-right:1px solid var(--border);
+  display:flex; flex-direction:column; padding:20px 14px;
+  position:relative; z-index:10;
+}
+.sidebar::after{
+  content:''; position:absolute; top:0; left:0; right:0; height:1px;
+  background:linear-gradient(90deg,transparent,rgba(99,102,241,0.5),rgba(236,72,153,0.5),transparent);
+}
+.sb-logo{display:flex; align-items:center; gap:10px; padding:8px 10px; margin-bottom:28px;}
+.sb-logo .mark{width:30px; height:30px; border-radius:8px; background:var(--grad);
+  display:flex; align-items:center; justify-content:center;}
+.sb-logo span{font-size:14px; font-weight:700;}
+
+.nav-section{margin-bottom:8px;}
+.nav-label{font-size:10px; font-weight:600; letter-spacing:.8px; text-transform:uppercase;
+  color:var(--text-3); padding:0 10px; margin-bottom:6px;}
+.nav-item{
+  display:flex; align-items:center; gap:10px; padding:9px 10px;
+  border-radius:8px; font-size:13px; font-weight:500; color:var(--text-2);
+  transition:all .15s; margin-bottom:2px; position:relative;
+}
+.nav-item:hover{background:var(--card); color:var(--text);}
+.nav-item.active{background:var(--card-2); color:var(--text);}
+.nav-item.active::before{
+  content:''; position:absolute; left:0; top:50%; transform:translateY(-50%);
+  width:3px; height:16px; border-radius:2px; background:var(--grad);
+}
+.nav-item svg{flex-shrink:0; opacity:.8;}
+.nav-badge{margin-left:auto; font-size:10px; background:var(--grad-subtle);
+  border:1px solid var(--border); padding:1px 6px; border-radius:6px; color:var(--text-2);}
+
+.sb-bottom{margin-top:auto;}
+.sb-status{
+  display:flex; align-items:center; gap:10px; padding:10px;
+  background:var(--card); border:1px solid var(--border); border-radius:10px; margin-bottom:8px;
+}
+.sb-status .dot{width:8px; height:8px; border-radius:50%; background:var(--text-3); flex-shrink:0;}
+.sb-status .dot.green{background:var(--green); box-shadow:0 0 8px var(--green); animation:pulse 2s infinite;}
+.sb-status .dot.yellow{background:var(--yellow); box-shadow:0 0 8px var(--yellow); animation:pulse 1.2s infinite;}
+@keyframes pulse{0%,100%{opacity:1;} 50%{opacity:.4;}}
+.sb-status .info{font-size:12px; line-height:1.3;}
+.sb-status .info small{display:block; color:var(--text-3); font-size:10px;}
+.sb-logout{width:100%; text-align:left; color:var(--text-3); font-size:12px;
+  padding:8px 10px; border-radius:8px;}
+.sb-logout:hover{background:var(--card); color:var(--red);}
+
+/* Main */
+.main{overflow-y:auto; position:relative;}
+.topbar{
+  position:sticky; top:0; z-index:20; display:flex; align-items:center; justify-content:space-between;
+  padding:16px 32px; background:rgba(8,8,8,0.7); backdrop-filter:blur(16px);
+  -webkit-backdrop-filter:blur(16px); border-bottom:1px solid var(--border);
+}
+.page-title{font-size:20px; font-weight:700; letter-spacing:-0.4px;}
+.page-title em{font-family:'Instrument Serif',serif; font-style:italic; font-weight:400;}
+.topbar-right{display:flex; align-items:center; gap:10px;}
+
+.content{padding:32px; max-width:1100px;}
+
+/* Cards */
+.card{
+  background:var(--card); border:1px solid var(--border); border-radius:var(--radius);
+  padding:20px; position:relative; overflow:hidden; transition:border-color .2s;
+}
+.card::before{
+  content:''; position:absolute; top:0; left:0; right:0; height:1px;
+  background:linear-gradient(90deg,transparent,rgba(99,102,241,0.5),transparent);
+  opacity:0; transition:opacity .3s;
+}
+.card:hover::before{opacity:1;}
+.card:hover{border-color:var(--border-2);}
+.card h3{font-size:13px; font-weight:700; margin-bottom:4px;}
+.card .desc{font-size:12px; color:var(--text-3); margin-bottom:16px;}
+
+/* Stat cards */
+.stats-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:28px;}
+.stat{
+  background:var(--card); border:1px solid var(--border); border-radius:var(--radius);
+  padding:18px 20px; position:relative; overflow:hidden;
+}
+.stat::before{
+  content:''; position:absolute; top:0; left:0; right:0; height:1px;
+  background:linear-gradient(90deg,rgba(99,102,241,0.6),rgba(236,72,153,0.4));
+}
+.stat-label{font-size:11px; font-weight:600; letter-spacing:.4px; text-transform:uppercase;
+  color:var(--text-3); margin-bottom:6px;}
+.stat-value{font-size:28px; font-weight:700; letter-spacing:-0.5px;}
+.stat-value em{font-family:'Instrument Serif',serif; font-style:italic; font-weight:400;}
+.stat-trend{font-size:11px; color:var(--green); margin-top:4px;}
+
+/* Grid layouts */
+.grid-2{display:grid; grid-template-columns:1fr 1fr; gap:16px;}
+.grid-3{display:grid; grid-template-columns:repeat(3,1fr); gap:16px;}
+.section-title{font-size:15px; font-weight:700; margin-bottom:14px; display:flex; align-items:center; gap:8px;}
+
+/* Jobs list */
+.job{
+  display:flex; align-items:center; gap:14px; padding:14px 16px;
+  background:var(--card); border:1px solid var(--border); border-radius:10px; margin-bottom:8px;
+  transition:all .2s;
+}
+.job:hover{border-color:var(--border-2); transform:translateX(2px);}
+.job-icon{
+  width:36px; height:36px; border-radius:9px; background:var(--card-2);
+  display:flex; align-items:center; justify-content:center; flex-shrink:0; color:var(--text-2);
+}
+.job-body{flex:1; min-width:0;}
+.job-msg{font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.job-meta{font-size:11px; color:var(--text-3); margin-top:2px;}
+
+.badge{
+  display:inline-flex; align-items:center; gap:5px; font-size:10px; font-weight:700;
+  padding:3px 8px; border-radius:6px; letter-spacing:.4px; text-transform:uppercase;
+}
+.badge .dot{width:6px; height:6px; border-radius:50%;}
+.badge.pending{background:rgba(161,161,170,0.12); color:var(--text-2);}
+.badge.pending .dot{background:var(--text-3); animation:pulse 2s infinite;}
+.badge.processing{background:rgba(234,179,8,0.12); color:var(--yellow);}
+.badge.processing .dot{background:var(--yellow); animation:pulse 1.2s infinite;}
+.badge.done{background:rgba(34,197,94,0.12); color:var(--green);}
+.badge.done .dot{background:var(--green);}
+.badge.failed{background:rgba(239,68,68,0.12); color:var(--red);}
+.badge.failed .dot{background:var(--red);}
+
+/* Waiting indicator (live status during post) */
+.waiting-box{
+  display:none; margin-top:16px; padding:18px; border-radius:12px;
+  background:var(--card-2); border:1px solid var(--border-2);
+}
+.waiting-box.active{display:block;}
+.waiting-pulse{
+  display:flex; align-items:center; gap:12px; margin-bottom:8px;
+}
+.waiting-pulse .ring{
+  width:14px; height:14px; border-radius:50%; background:var(--yellow);
+  box-shadow:0 0 0 0 var(--yellow); animation:ring-pulse 1.5s infinite;
+}
+@keyframes ring-pulse{
+  0%{box-shadow:0 0 0 0 rgba(234,179,8,0.6);}
+  70%{box-shadow:0 0 0 14px rgba(234,179,8,0);}
+  100%{box-shadow:0 0 0 0 rgba(234,179,8,0);}
+}
+.waiting-text{font-size:13px; font-weight:600;}
+.waiting-sub{font-size:12px; color:var(--text-3); padding-left:26px;}
+
+/* Forms */
+.toggle{
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  padding:12px 14px; background:var(--card-2); border:1px solid var(--border);
+  border-radius:10px; margin-bottom:12px;
+}
+.toggle span{font-size:13px;}
+.switch{position:relative; width:40px; height:22px; flex-shrink:0;}
+.switch input{display:none;}
+.switch .slider{position:absolute; inset:0; background:rgba(255,255,255,0.1);
+  border-radius:22px; transition:.25s; cursor:pointer;}
+.switch .slider::before{content:''; position:absolute; width:16px; height:16px;
+  border-radius:50%; background:#fff; top:3px; left:3px; transition:.25s;}
+.switch input:checked + .slider{background:var(--grad);}
+.switch input:checked + .slider::before{transform:translateX(18px);}
+
+input[type="range"]{
+  -webkit-appearance:none; width:100%; height:4px; border-radius:2px;
+  background:rgba(255,255,255,0.1); outline:none;
+}
+input[type="range"]::-webkit-slider-thumb{
+  -webkit-appearance:none; width:16px; height:16px; border-radius:50%;
+  background:var(--grad); cursor:pointer; box-shadow:0 2px 8px rgba(99,102,241,0.5);
+}
+
+.group-chips{display:flex; flex-wrap:wrap; gap:6px;}
+.chip{
+  display:inline-flex; align-items:center; gap:6px; padding:6px 10px;
+  background:var(--card-2); border:1px solid var(--border); border-radius:8px;
+  font-size:12px; cursor:pointer; transition:all .15s;
+}
+.chip:hover{border-color:var(--border-2);}
+.chip.selected{background:var(--grad-subtle); border-color:var(--accent); color:var(--text);}
+.chip .x{opacity:.5; font-size:14px; line-height:1;}
+
+/* Group finder */
+.finder-input-row{display:flex; gap:8px; margin-bottom:14px;}
+.finder-result{
+  display:flex; align-items:center; gap:12px; padding:12px;
+  background:var(--card-2); border:1px solid var(--border); border-radius:10px;
+  margin-bottom:6px; transition:all .15s;
+}
+.finder-result:hover{border-color:var(--border-2); transform:translateY(-1px);}
+.finder-result .cat{
+  font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:.4px;
+  color:var(--accent-2);
+}
+
+/* Charts */
+.chart-bars{display:flex; align-items:flex-end; gap:8px; height:160px; padding-top:20px;}
+.bar-col{flex:1; display:flex; flex-direction:column; align-items:center; gap:8px; height:100%; justify-content:flex-end;}
+.bar{width:100%; max-width:36px; background:var(--grad); border-radius:6px 6px 0 0;
+  transition:height .6s cubic-bezier(.2,.8,.2,1); min-height:2px; position:relative;}
+.bar-day{font-size:10px; color:var(--text-3); font-weight:600;}
+
+/* Toasts */
+#toasts{position:fixed; bottom:24px; right:24px; z-index:9000; display:flex; flex-direction:column; gap:8px;}
+.toast{
+  display:flex; align-items:center; gap:10px; padding:12px 16px;
+  background:var(--card); border:1px solid var(--border-2); border-radius:10px;
+  font-size:13px; font-weight:500; box-shadow:0 10px 40px rgba(0,0,0,0.5);
+  animation:slideIn .3s cubic-bezier(.2,.8,.2,1); min-width:240px;
+}
+@keyframes slideIn{from{transform:translateX(120%); opacity:0;} to{transform:translateX(0); opacity:1;}}
+.toast.success{border-left:3px solid var(--green);}
+.toast.error{border-left:3px solid var(--red);}
+.toast.info{border-left:3px solid var(--accent);}
+.toast svg{flex-shrink:0;}
+
+.empty-state{
+  text-align:center; padding:48px 20px; color:var(--text-3);
+}
+.empty-state svg{margin-bottom:12px; opacity:.4;}
+.empty-state h4{font-size:14px; font-weight:600; color:var(--text-2); margin-bottom:4px;}
+
+.setup-error{
+  background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.3);
+  border-radius:12px; padding:20px; margin-bottom:20px;
+}
+.setup-error h4{color:var(--red); font-size:14px; margin-bottom:6px; display:flex; align-items:center; gap:8px;}
+.setup-error a{color:var(--accent); text-decoration:underline;}
+
+.kv{display:flex; justify-content:space-between; padding:10px 0; border-bottom:1px solid var(--border); font-size:13px;}
+.kv:last-child{border-bottom:none;}
+.kv span:first-child{color:var(--text-3);}
+
+.pairing-display{
+  display:flex; align-items:center; gap:16px; padding:20px;
+  background:var(--grad-subtle); border:1px solid var(--border-2);
+  border-radius:12px; margin-bottom:16px;
+}
+.pairing-code{
+  font-family:'Instrument Serif',serif; font-size:40px; letter-spacing:8px;
+  font-weight:400; line-height:1;
+}
+.pairing-steps{font-size:12px; color:var(--text-2); line-height:1.7;}
+.pairing-steps ol{padding-left:18px;}
+
+.quick-actions{display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:16px;}
+.quick-action{
+  padding:16px; background:var(--card-2); border:1px solid var(--border);
+  border-radius:10px; text-align:left; transition:all .2s;
+}
+.quick-action:hover{border-color:var(--accent); transform:translateY(-2px);
+  box-shadow:0 8px 24px rgba(99,102,241,0.15);}
+.quick-action svg{margin-bottom:8px; color:var(--accent);}
+.quick-action h4{font-size:13px; font-weight:600; margin-bottom:2px;}
+.quick-action p{font-size:11px; color:var(--text-3);}
+
+/* Responsive */
+@media(max-width:900px){
+  #app.active{grid-template-columns:1fr;}
+  .sidebar{display:none;}
+  .stats-grid{grid-template-columns:repeat(2,1fr);}
+  .grid-2,.grid-3,.quick-actions{grid-template-columns:1fr;}
+  #authScreen{flex-direction:column;}
+  .auth-right{display:none;}
+}
+
+.page{display:none; animation:fadeIn .3s ease;}
+.page.active{display:block;}
+@keyframes fadeIn{from{opacity:0; transform:translateY(6px);} to{opacity:1; transform:translateY(0);}}
+</style>
+</head>
+<body>
+
+<!-- ============================================================ AUTH SCREEN ============================================================ -->
+<div id="authScreen">
+  <div class="auth-left">
+    <div class="auth-card">
+      <div class="auth-logo">
+        <div class="mark"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></div>
+        <span>JSW Multi-Post</span>
+      </div>
+      <h1 class="auth-headline">Welcome <em class="serif">back</em></h1>
+      <p class="auth-sub">Sign in to manage your posting dashboard.</p>
+
+      <div class="auth-tabs">
+        <button class="auth-tab active" data-mode="signin" onclick="switchAuthMode('signin')">Sign In</button>
+        <button class="auth-tab" data-mode="signup" onclick="switchAuthMode('signup')">Create Account</button>
+      </div>
+
+      <form id="authForm" onsubmit="handleAuth(event)">
+        <div class="field">
+          <label>Email</label>
+          <input type="email" id="authEmail" required placeholder="you@example.com" autocomplete="email">
+        </div>
+        <div class="field">
+          <label>Password</label>
+          <input type="password" id="authPassword" required minlength="6" placeholder="Min 6 characters" autocomplete="current-password">
+        </div>
+        <button type="submit" class="btn btn-primary btn-block" id="authSubmit">
+          <span id="authBtnText">Sign In</span>
+        </button>
+      </form>
+      <p id="authError" style="color:var(--red); font-size:12px; margin-top:14px; min-height:16px;"></p>
+    </div>
+  </div>
+
+  <div class="auth-right">
+    <div class="auth-right-inner">
+      <div class="feature-eyebrow">Posting Dashboard</div>
+      <h2 class="feature-title">Post to <em>hundreds</em> of groups from one place.</h2>
+      <ul class="feature-list">
+        <li>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+          <span>Pair your Chrome extension and trigger posts remotely from this dashboard.</span>
+        </li>
+        <li>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+          <span>AI-powered message refinement with OpenAI, Anthropic, Gemini, and OpenRouter.</span>
+        </li>
+        <li>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+          <span>Built-in Group Finder matches your niche to 20+ category search queries.</span>
+        </li>
+        <li>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+          <span>Recurring schedules, draft history, and real-time success analytics.</span>
+        </li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ APP ============================================================ -->
+<div id="app">
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sb-logo">
+      <div class="mark"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></div>
+      <span>JSW Multi-Post</span>
+    </div>
+
+    <div class="nav-section">
+      <div class="nav-label">Workspace</div>
+      <a class="nav-item active" data-route="overview" onclick="navigate('overview')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        Overview
+      </a>
+      <a class="nav-item" data-route="compose" onclick="navigate('compose')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        Compose
+      </a>
+      <a class="nav-item" data-route="groups" onclick="navigate('groups')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+        Groups <span class="nav-badge" id="navGroupCount">0</span>
+      </a>
+      <a class="nav-item" data-route="schedule" onclick="navigate('schedule')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        Schedule
+      </a>
+      <a class="nav-item" data-route="analytics" onclick="navigate('analytics')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+        Analytics
+      </a>
+      <a class="nav-item" data-route="settings" onclick="navigate('settings')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+        Settings
+      </a>
+    </div>
+
+    <div class="sb-bottom">
+      <div class="sb-status">
+        <div class="dot" id="extDot"></div>
+        <div class="info">
+          <span id="extStatusText">Extension idle</span>
+          <small id="extStatusSub">No active jobs</small>
+        </div>
+      </div>
+      <button class="sb-logout" onclick="signOut()">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px; margin-right:6px;"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        Sign out
+      </button>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <main class="main">
+    <div class="topbar">
+      <div class="page-title" id="pageTitle">Overview</div>
+      <div class="topbar-right">
+        <button class="btn btn-ghost" onclick="navigate('compose')">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          New Post
+        </button>
+      </div>
+    </div>
+
+    <div class="content">
+
+      <!-- Setup error placeholder -->
+      <div id="setupErrorBox"></div>
+
+      <!-- ================= OVERVIEW ================= -->
+      <section class="page active" id="page-overview">
+        <div class="stats-grid" id="statsGrid">
+          <div class="stat"><div class="stat-label">Total Posts</div><div class="stat-value" id="statPosts">—</div><div class="stat-trend">All time</div></div>
+          <div class="stat"><div class="stat-label">Groups</div><div class="stat-value" id="statGroups">—</div><div class="stat-trend">Saved</div></div>
+          <div class="stat"><div class="stat-label">Scheduled</div><div class="stat-value" id="statSchedules">—</div><div class="stat-trend">Active</div></div>
+          <div class="stat"><div class="stat-label">Success Rate</div><div class="stat-value" id="statSuccess">—</div><div class="stat-trend">Last 30 days</div></div>
+        </div>
+
+        <div class="grid-2">
+          <div>
+            <div class="section-title">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+              Recent Jobs
+            </div>
+            <div id="recentJobs"></div>
+          </div>
+          <div>
+            <div class="section-title">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+              Quick Actions
+            </div>
+            <div class="quick-actions">
+              <button class="quick-action" onclick="navigate('compose')">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                <h4>New Post</h4><p>Compose and send now</p>
+              </button>
+              <button class="quick-action" onclick="navigate('groups')">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <h4>Find Groups</h4><p>Discover new audiences</p>
+              </button>
+              <button class="quick-action" onclick="navigate('schedule')">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                <h4>Schedule</h4><p>Set up recurring posts</p>
+              </button>
+            </div>
+            <div class="card" style="margin-top:16px;">
+              <h3>Extension Status</h3>
+              <div class="desc">Your Chrome extension must be paired to execute posts.</div>
+              <div id="extPairingInfo"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= COMPOSE ================= -->
+      <section class="page" id="page-compose">
+        <div class="grid-2">
+          <div>
+            <div class="card">
+              <h3>Message</h3>
+              <div class="desc">This is what gets posted to each group.</div>
+              <div class="field"><textarea id="composeMessage" rows="6" placeholder="Write your post..." style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:14px;resize:vertical;"></textarea></div>
+
+              <div class="toggle">
+                <span>AI Refinement — rewrite message before posting</span>
+                <label class="switch"><input type="checkbox" id="composeAiEnabled"><span class="slider"></span></label>
+              </div>
+
+              <div class="field" id="aiPromptWrap" style="display:none;">
+                <label>AI System Prompt</label>
+                <textarea id="composeAiPrompt" rows="3" placeholder="e.g. Rewrite as an engaging FB post with a hook and CTA." style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:13px;resize:vertical;"></textarea>
+              </div>
+
+              <div class="field">
+                <label>Image URL (optional)</label>
+                <input type="url" id="composeImage" placeholder="https://example.com/image.jpg">
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div class="card">
+              <h3>Target Groups</h3>
+              <div class="desc">Select which saved groups to post to.</div>
+              <div class="group-chips" id="composeGroupSelect">
+                <span style="color:var(--text-3);font-size:12px;">No groups saved yet. Add some in the Groups tab.</span>
+              </div>
+            </div>
+            <div class="card" style="margin-top:16px;">
+              <h3>Delay Between Posts</h3>
+              <div class="desc">Seconds to wait between each group post.</div>
+              <div style="display:flex; align-items:center; gap:12px;">
+                <input type="range" id="composeDelay" min="5" max="120" value="30">
+                <span id="composeDelayVal" style="font-family:'Instrument Serif',serif; font-size:22px; min-width:50px; text-align:right;">30s</span>
+              </div>
+            </div>
+            <button class="btn btn-primary btn-block" id="postNowBtn" style="margin-top:16px; padding:14px;" onclick="createPostJob()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+              Post Now
+            </button>
+            <div class="waiting-box" id="composeWaiting">
+              <div class="waiting-pulse">
+                <div class="ring"></div>
+                <div class="waiting-text" id="composeWaitingText">Waiting for extension...</div>
+              </div>
+              <div class="waiting-sub" id="composeWaitingSub">Your Chrome extension will pick this up automatically.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= GROUPS ================= -->
+      <section class="page" id="page-groups">
+        <div class="grid-2">
+          <div>
+            <div class="card">
+              <h3>Your Groups</h3>
+              <div class="desc">Saved groups used for posting.</div>
+              <div style="display:flex; gap:8px; margin-bottom:14px;">
+                <input type="text" id="newGroupUrl" placeholder="facebook.com/groups/123" style="flex:1;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;">
+                <button class="btn btn-primary" onclick="addGroup()">Add</button>
+              </div>
+              <div id="groupsList"></div>
+            </div>
+          </div>
+          <div>
+            <div class="card">
+              <h3>Group Finder</h3>
+              <div class="desc">Describe your niche and get FB group search links.</div>
+              <div class="finder-input-row">
+                <input type="text" id="finderInput" placeholder="e.g. I sell yoga mats and meditation courses" style="flex:1;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;">
+                <button class="btn btn-primary" id="finderBtn" onclick="runFinder()">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  Find
+                </button>
+              </div>
+              <div id="finderResults"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= SCHEDULE ================= -->
+      <section class="page" id="page-schedule">
+        <div class="grid-2">
+          <div>
+            <div class="card">
+              <h3>Create Schedule</h3>
+              <div class="desc">Recurring posts run via the extension.</div>
+              <div class="field">
+                <label>Message</label>
+                <textarea id="schedMessage" rows="4" placeholder="Post message..." style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:13px;resize:vertical;"></textarea>
+              </div>
+              <div class="grid-3" style="gap:8px;">
+                <div class="field">
+                  <label>Frequency</label>
+                  <select id="schedFreq" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;">
+                    <option value="once">Once</option><option value="hourly">Hourly</option>
+                    <option value="daily" selected>Daily</option><option value="weekly">Weekly</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label>Time</label>
+                  <input type="text" id="schedTime" value="09:00" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;">
+                </div>
+                <div class="field">
+                  <label>Day</label>
+                  <select id="schedDay" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;">
+                    <option value="1">Mon</option><option value="2">Tue</option><option value="3">Wed</option>
+                    <option value="4">Thu</option><option value="5">Fri</option><option value="6">Sat</option><option value="0">Sun</option>
+                  </select>
+                </div>
+              </div>
+              <div class="toggle">
+                <span>Use AI refinement</span>
+                <label class="switch"><input type="checkbox" id="schedAi"><span class="slider"></span></label>
+              </div>
+              <button class="btn btn-primary btn-block" onclick="addSchedule()">Create Schedule</button>
+            </div>
+          </div>
+          <div>
+            <div class="section-title">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+              Active Schedules
+            </div>
+            <div id="schedulesList"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= ANALYTICS ================= -->
+      <section class="page" id="page-analytics">
+        <div class="grid-2" style="margin-bottom:16px;">
+          <div class="stat"><div class="stat-label">Success Rate</div><div class="stat-value" id="anSuccess">—</div></div>
+          <div class="stat"><div class="stat-label">Failed Posts</div><div class="stat-value" id="anFailed">—</div></div>
+        </div>
+        <div class="card">
+          <h3>Posts — Last 7 Days</h3>
+          <div class="desc">Daily posting volume.</div>
+          <div class="chart-bars" id="chartBars"></div>
+        </div>
+        <div class="card" style="margin-top:16px;">
+          <h3>Status Breakdown</h3>
+          <div id="statusBreakdown"></div>
+        </div>
+      </section>
+
+      <!-- ================= SETTINGS ================= -->
+      <section class="page" id="page-settings">
+        <div class="grid-2">
+          <div>
+            <div class="card">
+              <h3>AI Configuration</h3>
+              <div class="desc">Used by the extension to refine messages.</div>
+              <div class="field">
+                <label>Provider</label>
+                <select id="setProvider" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;">
+                  <option value="openai">OpenAI</option>
+                  <option value="anthropic">Anthropic</option>
+                  <option value="gemini">Google Gemini</option>
+                  <option value="openrouter">OpenRouter</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>API Key</label>
+                <input type="password" id="setApiKey" placeholder="sk-..." style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;">
+              </div>
+              <div class="field">
+                <label>Model</label>
+                <input type="text" id="setModel" placeholder="gpt-4o-mini" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;">
+              </div>
+              <div class="field">
+                <label>Default Delay (seconds)</label>
+                <input type="number" id="setDelay" value="30" min="5" max="300" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;">
+              </div>
+              <button class="btn btn-primary btn-block" onclick="saveSettings()">Save Settings</button>
+            </div>
+          </div>
+          <div>
+            <div class="card">
+              <h3>Extension Pairing</h3>
+              <div class="desc">Enter this code in your Chrome extension to connect.</div>
+              <div id="pairingArea"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+/* ============================================================
+   JSW MULTI-POST DASHBOARD — APP LOGIC
+   ============================================================ */
+
+const SUPABASE_URL = 'https://xacehhtgvubcqdoltazg.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_1TNu5hqotJ7GGQXfjliivQ_ttK51EAA';
+
+let sb, session, user, authMode='signin';
+let activeJobPoller=null;
+let groupsCache=[];
+let settingsCache={};
+
+try {
+  sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+} catch(e) {
+  document.getElementById('authError').textContent = 'Failed to init Supabase client: ' + e.message;
+}
+
+/* ============================================================
+   AUTH
+   ============================================================ */
+function switchAuthMode(mode){
+  authMode = mode;
+  document.querySelectorAll('.auth-tab').forEach(t=>t.classList.toggle('active', t.dataset.mode===mode));
+  document.getElementById('authBtnText').textContent = mode==='signin' ? 'Sign In' : 'Create Account';
+  document.getElementById('authError').textContent = '';
+}
+
+async function handleAuth(e){
+  e.preventDefault();
+  const email = document.getElementById('authEmail').value.trim();
+  const password = document.getElementById('authPassword').value;
+  const errEl = document.getElementById('authError');
+  const btn = document.getElementById('authSubmit');
+  errEl.textContent='';
+  btn.disabled=true;
+
+  try {
+    let result;
+    if (authMode==='signin') {
+      result = await sb.auth.signInWithPassword({ email, password });
+    } else {
+      result = await sb.auth.signUp({ email, password });
+    }
+    if (result.error) throw result.error;
+    if (authMode==='signup' && result.data?.user && !result.data?.session) {
+      errEl.style.color='var(--green)';
+      errEl.textContent = 'Check your email to confirm your account, then sign in.';
+    } else if (result.data?.session) {
+      await onAuthSuccess(result.data);
+    }
+  } catch(err) {
+    errEl.style.color='var(--red)';
+    errEl.textContent = err.message || 'Authentication failed';
+  } finally {
+    btn.disabled=false;
+  }
+}
+
+async function onAuthSuccess(s){
+  session = s.session; user = s.user;
+  document.getElementById('authScreen').style.display='none';
+  document.getElementById('app').classList.add('active');
+
+  // Check if tables exist
+  await checkSchema();
+  // Load everything
+  await Promise.all([loadSettings(), loadGroups(), loadOverview(), checkExtensionStatus()]);
+  // Start global job watcher
+  startGlobalJobWatcher();
+}
+
+async function signOut(){
+  await sb.auth.signOut();
+  session=null; user=null;
+  if (activeJobPoller) clearInterval(activeJobPoller);
+  document.getElementById('app').classList.remove('active');
+  document.getElementById('authScreen').style.display='flex';
+}
+
+/* ============================================================
+   SCHEMA CHECK
+   ============================================================ */
+async function checkSchema(){
+  const box = document.getElementById('setupErrorBox');
+  const { error } = await sb.from('jsw_groups').select('id').limit(1);
+  if (error && (error.code==='42P01' || error.message.includes('relation') || error.message.includes('does not exist'))) {
+    box.innerHTML = `<div class="setup-error">
+      <h4><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      Database tables not set up yet</h4>
+      <p style="font-size:13px;color:var(--text-2);margin-bottom:10px;">Run the <code style="background:var(--card-2);padding:2px 6px;border-radius:4px;">schema.sql</code> script in your Supabase SQL Editor to create the required tables.</p>
+      <a href="https://supabase.com/dashboard/project/xacehhtgvubcqdoltazg/sql/new" target="_blank">Open Supabase SQL Editor →</a>
+    </div>`;
+    return false;
+  }
+  box.innerHTML='';
+  return true;
+}
+
+/* ============================================================
+   NAVIGATION
+   ============================================================ */
+const PAGE_TITLES = {overview:'Overview',compose:'Compose',groups:'Groups',schedule:'Schedule',analytics:'Analytics',settings:'Settings'};
+
+function navigate(route){
+  document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
+  document.getElementById('page-'+route).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.route===route));
+  document.getElementById('pageTitle').innerHTML = PAGE_TITLES[route].replace(/(\w+)$/, '<em class="serif">$1</em>');
+
+  if (route==='overview') loadOverview();
+  if (route==='compose') renderComposeGroups();
+  if (route==='groups') renderGroupsList();
+  if (route==='schedule') renderSchedules();
+  if (route==='analytics') loadAnalytics();
+  if (route==='settings') renderSettingsPage();
+  if (location.hash !== '#'+route) history.replaceState(null,'','#'+route);
+}
+
+window.addEventListener('hashchange', ()=>{
+  const r = location.hash.slice(1) || 'overview';
+  if (PAGE_TITLES[r]) navigate(r);
+});
+
+/* ============================================================
+   GROUPS
+   ============================================================ */
+async function loadGroups(){
+  const { data, error } = await sb.from('jsw_groups').select('*').order('created_at',{ascending:false});
+  if (error) { if (!isNoTable(error)) toast('Failed to load groups: '+error.message,'error'); return; }
+  groupsCache = data || [];
+  document.getElementById('navGroupCount').textContent = groupsCache.length;
+}
+
+function isNoTable(e){ return e && (e.code==='42P01' || (e.message||'').includes('relation') || (e.message||'').includes('does not exist')); }
+
+async function addGroup(){
+  const input = document.getElementById('newGroupUrl');
+  let url = input.value.trim();
+  if (!url) return;
+  if (!url.startsWith('http')) url = 'https://facebook.com/groups/' + url;
+  url = url.replace(/\/$/,'');
+  const name = url.split('/').pop() || url;
+  const { error } = await sb.from('jsw_groups').insert({ user_id:user.id, group_url:url, group_name:name });
+  if (error) { toast('Error: '+error.message,'error'); return; }
+  input.value='';
+  await loadGroups();
+  renderGroupsList();
+  toast('Group added','success');
+}
+
+async function removeGroup(id){
+  const { error } = await sb.from('jsw_groups').delete().eq('id',id);
+  if (error) { toast('Error: '+error.message,'error'); return; }
+  await loadGroups();
+  renderGroupsList();
+  renderComposeGroups();
+  toast('Group removed','info');
+}
+
+function renderGroupsList(){
+  const el = document.getElementById('groupsList');
+  if (!groupsCache.length) {
+    el.innerHTML = emptyState('No groups yet','Add a Facebook group URL to get started.');
+    return;
+  }
+  el.innerHTML = groupsCache.map(g=>`
+    <div class="job">
+      <div class="job-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div>
+      <div class="job-body"><div class="job-msg">${esc(g.group_name||g.group_url)}</div>
+      <div class="job-meta"><a href="${esc(g.group_url)}" target="_blank" style="color:var(--accent);">${esc(g.group_url)}</a></div></div>
+      <button class="btn btn-ghost" style="padding:6px 10px;" onclick="removeGroup('${g.id}')">Remove</button>
+    </div>`).join('');
+}
+
+function renderComposeGroups(){
+  const el = document.getElementById('composeGroupSelect');
+  if (!groupsCache.length) {
+    el.innerHTML = '<span style="color:var(--text-3);font-size:12px;">No groups saved. Add some in the Groups tab.</span>';
+    return;
+  }
+  el.innerHTML = groupsCache.map(g=>`<div class="chip" data-id="${g.id}" onclick="toggleGroupChip(this)">
+    <span>${esc(g.group_name||g.group_url.split('/').pop())}</span></div>`).join('');
+}
+
+function toggleGroupChip(el){
+  el.classList.toggle('selected');
+}
+
+function getSelectedGroups(){
+  const selected = [...document.querySelectorAll('#composeGroupSelect .chip.selected')];
+  return selected.map(c=>groupsCache.find(g=>g.id===c.dataset.id)).filter(Boolean).map(g=>({url:g.group_url,name:g.group_name}));
+}
+
+/* ============================================================
+   COMPOSE / POST JOB
+   ============================================================ */
+document.addEventListener('change', e=>{
+  if (e.target.id==='composeAiEnabled') {
+    document.getElementById('aiPromptWrap').style.display = e.target.checked ? 'block':'none';
+  }
+});
+document.addEventListener('input', e=>{
+  if (e.target.id==='composeDelay') {
+    document.getElementById('composeDelayVal').textContent = e.target.value+'s';
+  }
+});
+
+async function createPostJob(){
+  const message = document.getElementById('composeMessage').value.trim();
+  const groups = getSelectedGroups();
+  if (!message) { toast('Write a message first','error'); return; }
+  if (!groups.length) { toast('Select at least one group','error'); return; }
+
+  const imageUrl = document.getElementById('composeImage').value.trim() || null;
+  const delay = parseInt(document.getElementById('composeDelay').value) || 30;
+  const aiEnabled = document.getElementById('composeAiEnabled').checked;
+  const aiPrompt = document.getElementById('composeAiPrompt').value.trim() || null;
+
+  const btn = document.getElementById('postNowBtn');
+  btn.disabled = true;
+
+  const { data, error } = await sb.from('jsw_post_jobs').insert({
+    user_id:user.id, message, image_url:imageUrl, groups, delay,
+    ai_enabled:aiEnabled, ai_prompt:aiPrompt, status:'pending'
+  }).select();
+
+  if (error) { toast('Failed to create job: '+error.message,'error'); btn.disabled=false; return; }
+
+  const job = data[0];
+  toast('Post job created — waiting for extension','info');
+  showWaiting('Waiting for extension...','Your Chrome extension will pick this up automatically.');
+  pollJobStatus(job.id);
+}
+
+function showWaiting(text, sub){
+  const box = document.getElementById('composeWaiting');
+  box.classList.add('active');
+  document.getElementById('composeWaitingText').textContent = text;
+  document.getElementById('composeWaitingSub').textContent = sub;
+}
+
+function hideWaiting(){
+  document.getElementById('composeWaiting').classList.remove('active');
+}
+
+function pollJobStatus(jobId){
+  if (activeJobPoller) clearInterval(activeJobPoller);
+  activeJobPoller = setInterval(async ()=>{
+    const { data, error } = await sb.from('jsw_post_jobs').select('*').eq('id',jobId).maybeSingle();
+    if (error || !data) return;
+    const status = data.status;
+    setExtensionStatus(status==='processing'?'processing':(status==='pending'?'idle':'idle'),
+      status==='pending' ? 'Waiting for extension...' :
+      status==='processing' ? 'Posting in progress...' :
+      status==='done' ? 'Post complete' :
+      status==='failed' ? 'Post failed' : 'Idle', data.error||'');
+
+    if (status==='pending') showWaiting('Waiting for extension...','Your Chrome extension will pick this up automatically.');
+    else if (status==='processing') showWaiting('Extension is posting...','Your groups are being posted to right now.');
+    else if (status==='done') {
+      hideWaiting();
+      clearInterval(activeJobPoller); activeJobPoller=null;
+      document.getElementById('postNowBtn').disabled=false;
+      toast('Post completed successfully','success');
+      // Also write a history record
+      await sb.from('jsw_posts').insert({ user_id:user.id, message:data.message, groups:data.groups, status:'success', posted_at:new Date().toISOString() });
+      await loadOverview();
+    } else if (status==='failed') {
+      hideWaiting();
+      clearInterval(activeJobPoller); activeJobPoller=null;
+      document.getElementById('postNowBtn').disabled=false;
+      toast('Post failed: '+(data.error||'unknown'),'error');
+      await sb.from('jsw_posts').insert({ user_id:user.id, message:data.message, groups:data.groups, status:'failed', posted_at:new Date().toISOString() });
+    }
+  }, 2000);
+}
+
+/* ============================================================
+   GLOBAL JOB WATCHER (sidebar status)
+   ============================================================ */
+function startGlobalJobWatcher(){
+  setInterval(async ()=>{
+    if (!user) return;
+    const { data } = await sb.from('jsw_post_jobs').select('status').eq('user_id',user.id).order('created_at',{ascending:false}).limit(5);
+    if (!data || !data.length) { setExtensionStatus('idle','Extension idle','No active jobs'); return; }
+    const latest = data[0];
+    if (latest.status==='pending') setExtensionStatus('idle','Waiting for extension','Job pending');
+    else if (latest.status==='processing') setExtensionStatus('processing','Posting in progress','Extension active');
+    else setExtensionStatus('idle','Extension idle','No active jobs');
+  }, 5000);
+}
+
+function setExtensionStatus(dotClass, text, sub){
+  const dot = document.getElementById('extDot');
+  dot.className = 'dot ' + (dotClass==='processing'?'yellow':(dotClass==='connected'?'green':''));
+  document.getElementById('extStatusText').textContent = text;
+  document.getElementById('extStatusSub').textContent = sub;
+}
+
+/* ============================================================
+   OVERVIEW
+   ============================================================ */
+async function loadOverview(){
+  if (!user) return;
+  const [posts, groups, schedules, jobs] = await Promise.all([
+    sb.from('jsw_posts').select('id,status', { count:'exact' }).eq('user_id',user.id),
+    sb.from('jsw_groups').select('id', { count:'exact' }).eq('user_id',user.id),
+    sb.from('jsw_schedules').select('id', { count:'exact' }).eq('user_id',user.id),
+    sb.from('jsw_post_jobs').select('*').eq('user_id',user.id).order('created_at',{ascending:false}).limit(10)
+  ]);
+
+  document.getElementById('statPosts').innerHTML = posts.count||0;
+  document.getElementById('statGroups').innerHTML = groups.count||0;
+  document.getElementById('statSchedules').innerHTML = schedules.count||0;
+
+  // Success rate from posts
+  const { data: allPosts } = await sb.from('jsw_posts').select('status').eq('user_id',user.id);
+  let successRate = '—';
+  if (allPosts && allPosts.length) {
+    const ok = allPosts.filter(p=>p.status==='success').length;
+    successRate = Math.round((ok/allPosts.length)*100)+'%';
+  }
+  document.getElementById('statSuccess').innerHTML = successRate;
+
+  // Recent jobs
+  const rj = document.getElementById('recentJobs');
+  if (!jobs.data || !jobs.data.length) {
+    rj.innerHTML = emptyState('No jobs yet','Create a post to see it here.');
+  } else {
+    rj.innerHTML = jobs.data.map(j=>jobRow(j)).join('');
+  }
+
+  // Extension pairing info
+  renderExtPairingInfo();
+}
+
+function jobRow(j){
+  const msg = (j.message||'').substring(0,60);
+  const time = new Date(j.created_at).toLocaleString();
+  return `<div class="job">
+    <div class="job-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></div>
+    <div class="job-body"><div class="job-msg">${esc(msg)}</div><div class="job-meta">${time} · ${(j.groups||[]).length} group(s)</div></div>
+    <span class="badge ${j.status}"><span class="dot"></span>${j.status}</span>
+  </div>`;
+}
+
+function renderExtPairingInfo(){
+  const el = document.getElementById('extPairingInfo');
+  if (!settingsCache.pairing_code) {
+    el.innerHTML = '<div style="font-size:12px;color:var(--text-3);">Extension not paired. Generate a pairing code in <strong style="color:var(--text);">Settings</strong>.</div>';
+  } else {
+    el.innerHTML = `<div style="display:flex;align-items:center;gap:10px;">
+      <span class="badge done"><span class="dot"></span>Paired</span>
+      <span style="font-size:12px;color:var(--text-2);">Code: <strong style="font-family:\'Instrument Serif\',serif;letter-spacing:3px;font-size:16px;">${settingsCache.pairing_code}</strong></span>
+    </div>`;
+  }
+}
+
+/* ============================================================
+   GROUP FINDER (ported from index.html)
+   ============================================================ */
+const CATEGORY_MAP = {
+  fitness:{keywords:['fitness','gym','workout','exercise','yoga','pilates','crossfit','running','marathon','bodybuilding','weightlifting','cardio','zumba','barre','personal trainer','health coach'],searches:['fitness business','fitness professionals','gym owners','yoga business','personal training business','health and fitness entrepreneurs','fitness marketing']},
+  yoga:{keywords:['yoga','meditation','mindfulness','wellness','yogi','asana','chakra','spiritual'],searches:['yoga teachers','yoga studio owners','yoga business','wellness entrepreneurs','meditation business','holistic health business']},
+  nutrition:{keywords:['nutrition','diet','meal prep','healthy eating','dietitian','meal plan','supplements','vitamins','protein','organic food','keto','vegan','plant based'],searches:['nutrition business','meal prep business','health food business','dietitian entrepreneurs','supplement business','organic food business']},
+  marketing:{keywords:['marketing','seo','advertising','social media','ppc','google ads','facebook ads','content marketing','email marketing','digital marketing','agency','branding','copywriting'],searches:['digital marketing agency owners','social media marketing business','SEO professionals','marketing agency growth','freelance marketers','digital marketing entrepreneurs','advertising agency owners']},
+  ecommerce:{keywords:['ecommerce','e-commerce','shopify','dropshipping','amazon fba','online store','etsy','ebay','product sourcing','inventory','fulfillment'],searches:['ecommerce business owners','shopify business owners','amazon fba business','dropshipping business','etsy business','ecommerce entrepreneurs','online retail business']},
+  saas:{keywords:['saas','software','startup','tech startup','app development','web app','subscription','b2b','enterprise','platform','crm','erp'],searches:['SaaS founders','software startup business','B2B software business','tech startup entrepreneurs','indie hackers','micro saas business','startup founders']},
+  consulting:{keywords:['consulting','coach','mentoring','advisory','freelance','contractor','professional services','b2b services'],searches:['business coaches','consulting business owners','freelance business owners','coaching business growth','professional services business','b2b consulting']},
+  realestate:{keywords:['real estate','realtor','property','housing','rental','airbnb','flipping','mortgage','investment property'],searches:['real estate business owners','realtor business networking','airbnb business','real estate investors network','property management business']},
+  finance:{keywords:['finance','accounting','bookkeeping','tax','financial planning','investing','crypto','forex','trading','fintech'],searches:['accounting business owners','bookkeeping business','financial advisor business','crypto business','fintech startup business','tax business owners']},
+  fashion:{keywords:['fashion','clothing','apparel','streetwear','boutique','tshirt','accessories','jewelry','handmade','crafts','etsy seller','artisan'],searches:['fashion business owners','clothing business owners','jewelry business','handmade business owners','etsy business community','boutique business owners','accessories business']},
+  art:{keywords:['art','painting','illustration','design','graphic design','creative','photography','photographer','fine art','print'],searches:['art business owners','creative business owners','photography business owners','etsy artists','selling art online','graphic design business']},
+  beauty:{keywords:['beauty','cosmetics','skincare','makeup','salon','spa','hair','nails','barber','beauty products'],searches:['beauty business owners','salon business owners','skincare business','cosmetics business','spa business owners','beauty entrepreneurs']},
+  food:{keywords:['food','restaurant','cafe','coffee','bakery','catering','food truck','baking','cooking','recipe','artisan food','craft food'],searches:['restaurant business owners','food business owners','coffee shop business','food truck business','catering business owners','bakery business owners']},
+  hospitality:{keywords:['hotel','hospitality','tourism','travel','event planning','catering','venue','wedding'],searches:['hotel business owners','event planning business','tourism business owners','wedding business networking','hospitality business owners']},
+  home:{keywords:['home','furniture','decor','interior design','garden','landscaping','renovation','construction','contractor','cleaning'],searches:['interior design business','home renovation business','landscaping business owners','construction business owners','cleaning business owners','furniture business']},
+  parenting:{keywords:['baby','kids','children','parenting','mom','toddler','pregnancy','family','childcare','toys','kids clothing'],searches:['mom business owners','parenting business','kids product business','baby product business','family business networking']},
+  pets:{keywords:['pet','dog','cat','animal','veterinary','pet food','pet supplies','grooming'],searches:['pet business owners','dog business owners','pet supply business','veterinary business','pet grooming business']},
+  education:{keywords:['education','course','training','teaching','tutoring','online course','ebook','workshop','certification','learning'],searches:['online course business owners','education business owners','training business owners','tutoring business','ebook publishing business']},
+  automotive:{keywords:['car','auto','automotive','vehicle','mechanic','car parts','detailing','dealership'],searches:['auto repair business owners','car dealership business','auto detailing business','automotive business networking']},
+  outdoor:{keywords:['outdoor','camping','hiking','fishing','hunting','skiing','biking','cycling','climbing','adventure'],searches:['outdoor business owners','camping business','cycling business owners','adventure tourism business']},
+  tech:{keywords:['tech','technology','app','software','hardware','gadget','electronics','iot','ai','blockchain','gaming'],searches:['tech startup founders','app development business','gaming business owners','hardware startup business','AI business networking']}
+};
+
+function matchCategories(text){
+  const scores={};
+  Object.entries(CATEGORY_MAP).forEach(([name,cat])=>{
+    let score=0;
+    cat.keywords.forEach(kw=>{ if(text.includes(kw)) score += kw.length>6?3:2; });
+    if(score>0) scores[name]=score;
+  });
+  return Object.entries(scores).map(([name,score])=>({name,score,searches:CATEGORY_MAP[name].searches})).sort((a,b)=>b.score-a.score).slice(0,4);
+}
+
+function runFinder(){
+  const input = document.getElementById('finderInput').value.trim().toLowerCase();
+  const el = document.getElementById('finderResults');
+  if (!input || input.length<4) { toast('Describe your niche in more detail','error'); return; }
+  const matched = matchCategories(input);
+  if (!matched.length) {
+    el.innerHTML = '<div style="color:var(--text-3);font-size:12px;padding:12px;">No matches. Try describing your product, audience, or industry.</div>';
+    return;
+  }
+  const groups=[];
+  matched.forEach(cat=>{
+    cat.searches.forEach(s=>{
+      groups.push({
+        name:s.replace(/\b\w/g,c=>c.toUpperCase()),
+        category:cat.name,
+        url:'https://www.facebook.com/search/groups/?q='+encodeURIComponent(s)
+      });
+    });
+  });
+  const seen=new Set();
+  const unique = groups.filter(g=>!seen.has(g.name)&&(seen.add(g.name),true)).slice(0,12);
+  el.innerHTML = unique.map(g=>`
+    <a class="finder-result" href="${g.url}" target="_blank">
+      <div class="job-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div>
+      <div class="job-body"><div class="job-msg">${esc(g.name)}</div><div class="cat">${esc(g.category)}</div></div>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+    </a>`).join('');
+}
+
+/* ============================================================
+   SCHEDULES
+   ============================================================ */
+async function addSchedule(){
+  const message = document.getElementById('schedMessage').value.trim();
+  if (!message) { toast('Write a message','error'); return; }
+  const groups = groupsCache.map(g=>({url:g.group_url,name:g.group_name}));
+  if (!groups.length) { toast('Add groups first in the Groups tab','error'); return; }
+  const { error } = await sb.from('jsw_schedules').insert({
+    user_id:user.id, message, groups,
+    frequency: document.getElementById('schedFreq').value,
+    post_time: document.getElementById('schedTime').value || '09:00',
+    day_of_week: parseInt(document.getElementById('schedDay').value),
+    ai_enabled: document.getElementById('schedAi').checked
+  });
+  if (error) { toast('Error: '+error.message,'error'); return; }
+  document.getElementById('schedMessage').value='';
+  await renderSchedules();
+  toast('Schedule created','success');
+}
+
+async function renderSchedules(){
+  const { data, error } = await sb.from('jsw_schedules').select('*').eq('user_id',user.id).order('created_at',{ascending:false});
+  const el = document.getElementById('schedulesList');
+  if (error || !data || !data.length) {
+    el.innerHTML = emptyState('No schedules','Create a recurring post schedule.');
+    return;
+  }
+  const dayLabel=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const freqLabel={once:'Once',hourly:'Hourly',daily:'Daily',weekly:'Weekly'};
+  el.innerHTML = data.map(s=>`
+    <div class="job">
+      <div class="job-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
+      <div class="job-body"><div class="job-msg">${esc((s.message||'').substring(0,50))}...</div>
+      <div class="job-meta">${freqLabel[s.frequency]} · ${s.frequency==='weekly'?(dayLabel[s.day_of_week]+' '):''}${s.post_time}</div></div>
+      <button class="btn btn-ghost" style="padding:6px 10px;" onclick="removeSchedule('${s.id}')">Delete</button>
+    </div>`).join('');
+}
+
+async function removeSchedule(id){
+  const { error } = await sb.from('jsw_schedules').delete().eq('id',id);
+  if (error) { toast('Error: '+error.message,'error'); return; }
+  await renderSchedules();
+  toast('Schedule deleted','info');
+}
+
+/* ============================================================
+   ANALYTICS
+   ============================================================ */
+async function loadAnalytics(){
+  const { data } = await sb.from('jsw_posts').select('*').eq('user_id',user.id).order('posted_at',{ascending:false});
+  const posts = data||[];
+  const ok = posts.filter(p=>p.status==='success').length;
+  const failed = posts.filter(p=>p.status==='failed').length;
+  document.getElementById('anSuccess').innerHTML = posts.length ? Math.round((ok/posts.length)*100)+'%' : '—';
+  document.getElementById('anFailed').innerHTML = failed;
+
+  // 7-day chart
+  const days=[];
+  for(let i=6;i>=0;i--){
+    const d=new Date(); d.setDate(d.getDate()-i);
+    const key=d.toISOString().slice(0,10);
+    const count=posts.filter(p=>(p.posted_at||p.created_at||'').slice(0,10)===key).length;
+    days.push({label:['S','M','T','W','T','F','S'][d.getDay()], count});
+  }
+  const max=Math.max(...days.map(d=>d.count),1);
+  document.getElementById('chartBars').innerHTML = days.map(d=>`
+    <div class="bar-col">
+      <div class="bar" style="height:${(d.count/max)*100}%;" title="${d.count} posts"></div>
+      <div class="bar-day">${d.label}</div>
+    </div>`).join('');
+
+  // Status breakdown
+  const sb_el=document.getElementById('statusBreakdown');
+  const { data: jobs } = await sb.from('jsw_post_jobs').select('status').eq('user_id',user.id);
+  const j=jobs||[];
+  const counts={pending:0,processing:0,done:0,failed:0};
+  j.forEach(x=>{ if(counts[x.status]!==undefined) counts[x.status]++; });
+  sb_el.innerHTML = ['pending','processing','done','failed'].map(s=>`
+    <div class="kv"><span class="badge ${s}"><span class="dot"></span>${s}</span><span>${counts[s]}</span></div>
+  `).join('');
+}
+
+/* ============================================================
+   SETTINGS
+   ============================================================ */
+async function loadSettings(){
+  const { data } = await sb.from('jsw_settings').select('*').eq('user_id',user.id).maybeSingle();
+  settingsCache = data || {};
+}
+
+async function saveSettings(){
+  const payload = {
+    user_id:user.id,
+    ai_provider: document.getElementById('setProvider').value,
+    api_key: document.getElementById('setApiKey').value || null,
+    ai_model: document.getElementById('setModel').value || 'gpt-4o-mini',
+    default_delay: parseInt(document.getElementById('setDelay').value)||30,
+    ai_enabled: settingsCache.ai_enabled||false
+  };
+  const { error } = await sb.from('jsw_settings').upsert(payload);
+  if (error) { toast('Error: '+error.message,'error'); return; }
+  await loadSettings();
+  toast('Settings saved','success');
+}
+
+function renderSettingsPage(){
+  document.getElementById('setProvider').value = settingsCache.ai_provider || 'openai';
+  document.getElementById('setApiKey').value = settingsCache.api_key || '';
+  document.getElementById('setModel').value = settingsCache.ai_model || 'gpt-4o-mini';
+  document.getElementById('setDelay').value = settingsCache.default_delay || 30;
+  renderPairingArea();
+}
+
+function renderPairingArea(){
+  const el=document.getElementById('pairingArea');
+  if (!settingsCache.pairing_code) {
+    el.innerHTML = `
+      <div style="text-align:center;padding:20px 0;">
+        <button class="btn btn-primary" onclick="generatePairingCode()">Generate Pairing Code</button>
+        <p style="font-size:11px;color:var(--text-3);margin-top:10px;">Then enter the 6-character code in your extension.</p>
+      </div>`;
+  } else {
+    el.innerHTML = `
+      <div class="pairing-display">
+        <div class="pairing-code">${settingsCache.pairing_code}</div>
+        <div>
+          <div style="font-size:12px;font-weight:600;margin-bottom:4px;">Connected</div>
+          <div class="pairing-steps">Enter this code in your Chrome extension → Dashboard tab.</div>
+        </div>
+      </div>
+      <button class="btn btn-ghost" onclick="generatePairingCode()">Regenerate Code</button>`;
+  }
+}
+
+async function generatePairingCode(){
+  const code = Math.random().toString(36).substring(2,8).toUpperCase();
+  const { error } = await sb.from('jsw_settings').upsert({
+    user_id:user.id, pairing_code:code,
+    ai_provider:settingsCache.ai_provider||'openai',
+    ai_model:settingsCache.ai_model||'gpt-4o-mini',
+    default_delay:settingsCache.default_delay||30,
+    ai_enabled:settingsCache.ai_enabled||false
+  });
+  if (error) { toast('Error: '+error.message,'error'); return; }
+  settingsCache.pairing_code = code;
+  renderPairingArea();
+  renderExtPairingInfo();
+  toast('Pairing code generated','success');
+}
+
+async function checkExtensionStatus(){
+  // Check for any recent processing job to detect extension activity
+  if (!user) return;
+  const { data } = await sb.from('jsw_post_jobs').select('status,updated_at')
+    .eq('user_id',user.id).order('updated_at',{ascending:false}).limit(1);
+  if (data && data[0]) {
+    const age = Date.now() - new Date(data[0].updated_at||0).getTime();
+    if (data[0].status==='processing') setExtensionStatus('processing','Posting in progress','Extension active');
+    else if (age < 60000) setExtensionStatus('connected','Extension recently active','Last activity just now');
+    else setExtensionStatus('idle','Extension idle','No active jobs');
+  }
+}
+
+/* ============================================================
+   HELPERS
+   ============================================================ */
+function esc(s){ return (s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+function emptyState(title, sub){
+  return `<div class="empty-state">
+    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    <h4>${esc(title)}</h4><p style="font-size:12px;">${esc(sub)}</p>
+  </div>`;
+}
+
+function toast(msg, type='info'){
+  const el=document.createElement('div');
+  el.className='toast '+type;
+  const icons = {
+    success:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>',
+    error:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
+    info:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>'
+  };
+  el.innerHTML = (icons[type]||icons.info)+'<span>'+esc(msg)+'</span>';
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(()=>{ el.style.transition='all .3s'; el.style.opacity='0'; el.style.transform='translateX(120%)'; setTimeout(()=>el.remove(),300); }, 3200);
+}
+
+/* ============================================================
+   INIT — check existing session
+   ============================================================ */
+(async ()=>{
+  if (!sb) return;
+  const { data } = await sb.auth.getSession();
+  if (data.session && data.user) {
+    await onAuthSuccess(data);
+  }
+})();
+</script>
+</body>
+</html>

@@ -341,3 +341,124 @@ async function callOpenRouter(key, model, messages, temp) {
   const data = await res.json();
   return data.choices[0].message.content.trim();
 }
+
+// ============ DASHBOARD PAIRING (v2.1) ============
+const SUPABASE_URL = 'https://xacehhtgvubcqdoltazg.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_1TNu5hqotJ7GGQXfjliivQ_ttK51EAA';
+
+function showDashStatus(text, type = '') {
+  const s = $('dashStatus');
+  s.textContent = text;
+  s.className = 'status' + (type ? ' ' + type : '');
+}
+
+// ---- Load pairing state on popup open ----
+chrome.storage.local.get(['jsw_pairing'], (data) => {
+  const pairing = data.jsw_pairing;
+  if (pairing && pairing.connected && pairing.userId) {
+    showConnectedState(pairing);
+  } else {
+    showDisconnectedState();
+  }
+});
+
+function showDisconnectedState() {
+  $('dashDisconnected').style.display = 'block';
+  $('dashConnected').style.display = 'none';
+}
+
+function showConnectedState(pairing) {
+  $('dashDisconnected').style.display = 'none';
+  $('dashConnected').style.display = 'block';
+  $('dashEmail').textContent = pairing.email || 'Unknown email';
+  $('dashUser').textContent = 'User: ' + (pairing.userId || '').substring(0, 8) + '...';
+  $('dashJobStatus').textContent = 'Idle — watching for jobs';
+}
+
+// ---- Connect: validate pairing code against Supabase ----
+$('pairConnectBtn').addEventListener('click', async () => {
+  const code = $('pairingCodeInput').value.trim().toUpperCase();
+  if (code.length !== 6) {
+    showDashStatus('Enter the 6-character code', 'error');
+    return;
+  }
+
+  showDashStatus('Validating code...', '');
+  $('pairConnectBtn').disabled = true;
+
+  try {
+    // Look up the pairing code in jsw_settings to find the user_id + email
+    const res = await fetch(
+      `${SUPABASE_URL}/rest/v1/jsw_settings?pairing_code=eq.${encodeURIComponent(code)}&select=user_id,api_key,ai_model,ai_provider,default_delay`,
+      {
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+        }
+      }
+    );
+
+    if (!res.ok) {
+      throw new Error(`Lookup failed (${res.status}). Run schema.sql first.`);
+    }
+
+    const rows = await res.json();
+    if (!rows.length) {
+      showDashStatus('Invalid or expired code', 'error');
+      $('pairConnectBtn').disabled = false;
+      return;
+    }
+
+    const row = rows[0];
+    // Fetch the user's email from auth.users via the user_id (RLS-permitting)
+    // Since auth.users isn't directly queryable, store the userId and let
+    // the dashboard-driven session do the work. We store what we have.
+    const pairing = {
+      connected: true,
+      userId: row.user_id,
+      email: 'Dashboard account',  // email resolved lazily; user sees this in popup
+      code: code,
+      connectedAt: Date.now(),
+      // Carry over AI settings so background worker can use them
+      ai_provider: row.ai_provider,
+      ai_model: row.ai_model,
+      api_key: row.api_key,
+      default_delay: row.default_delay
+    };
+
+    await new Promise(resolve => {
+      chrome.storage.local.set({ jsw_pairing: pairing }, resolve);
+    });
+
+    showConnectedState(pairing);
+    showDashStatus('Connected — polling for jobs', 'active');
+
+    // Tell background to start polling
+    chrome.runtime.sendMessage({ type: 'PAIRING_CONNECTED', pairing });
+  } catch (e) {
+    showDashStatus('Error: ' + e.message, 'error');
+  } finally {
+    $('pairConnectBtn').disabled = false;
+  }
+});
+
+// ---- Disconnect ----
+$('pairDisconnectBtn').addEventListener('click', async () => {
+  await new Promise(resolve => {
+    chrome.storage.local.remove(['jsw_pairing'], resolve);
+  });
+  chrome.runtime.sendMessage({ type: 'PAIRING_DISCONNECTED' });
+  showDisconnectedState();
+  showDashStatus('Disconnected', '');
+});
+
+// ---- Listen for job status updates from background ----
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg.type === 'DASH_JOB_STATUS') {
+    const el = $('dashJobStatus');
+    if (el) {
+      el.textContent = msg.text;
+      el.style.color = msg.color || '#6a6a8a';
+    }
+  }
+});

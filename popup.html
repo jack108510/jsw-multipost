@@ -213,6 +213,7 @@
   <div class="tab" data-tab="ai">AI Prompt</div>
   <div class="tab" data-tab="schedule">Schedule</div>
   <div class="tab" data-tab="settings">Settings</div>
+  <div class="tab" data-tab="dashboard">Dashboard</div>
 </div>
 
 <!-- ============ POST TAB ============ -->
@@ -379,8 +380,43 @@
   </div>
 </div>
 
+<!-- ============ DASHBOARD TAB ============ -->
+<div class="tab-content" id="tab-dashboard">
+  <div class="content">
+    <div class="section">
+      <label>Dashboard Pairing</label>
+      <div class="hint" style="margin-bottom:12px;">Connect this extension to your JSW Multi-Post web dashboard. The dashboard sends post jobs that this extension executes automatically.</div>
+    </div>
+
+    <!-- Disconnected state -->
+    <div id="dashDisconnected">
+      <div class="section">
+        <label>Pairing Code</label>
+        <input type="text" id="pairingCodeInput" placeholder="6-CHAR CODE" maxlength="6" style="text-transform:uppercase;letter-spacing:4px;text-align:center;font-weight:600;">
+        <div class="hint">Get this code from the dashboard → Settings → Extension Pairing.</div>
+      </div>
+      <button class="btn btn-primary" id="pairConnectBtn">Connect Extension</button>
+    </div>
+
+    <!-- Connected state -->
+    <div id="dashConnected" style="display:none;">
+      <div class="section">
+        <div style="background:#0f3460;border-radius:6px;padding:12px;margin-bottom:10px;">
+          <div style="font-size:10px;color:#4ecca3;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;">Connected</div>
+          <div id="dashEmail" style="font-size:13px;color:#e0e0e0;word-break:break-all;"></div>
+          <div id="dashUser" style="font-size:10px;color:#6a6a8a;margin-top:4px;"></div>
+        </div>
+        <div id="dashJobStatus" style="font-size:11px;color:#6a6a8a;text-align:center;padding:4px;">Idle</div>
+      </div>
+      <button class="btn btn-secondary" id="pairDisconnectBtn">Disconnect</button>
+    </div>
+
+    <div class="status" id="dashStatus"></div>
+  </div>
+</div>
+
 <div class="footer">
-  JSW Multi-Post v2.0 · Local only · No external servers
+  JSW Multi-Post v2.1 · Dashboard enabled
 </div>
 
 <script src="popup.js"></script>
