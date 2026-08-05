@@ -359,6 +359,8 @@ chrome.runtime.onMessage.addListener((msg) => {
 // On startup, resume polling if already paired
 chrome.runtime.onStartup.addListener(loadPairingAndResume);
 chrome.runtime.onInstalled.addListener(loadPairingAndResume);
+// MV3 service workers restart without firing onStartup/onInstalled — call on load too
+loadPairingAndResume();
 
 async function loadPairingAndResume() {
   const data = await chrome.storage.local.get(['jsw_pairing']);
