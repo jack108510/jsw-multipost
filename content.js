@@ -1,4 +1,4 @@
-// ============ JSW Multi-Post Content Script v4 ============
+// ============ Amplr Content Script v4 ============
 // Based on verified FB DOM research.
 // Key insight: clicking the composer opens a [role="dialog"] modal.
 // All textbox + Post button searches are scoped INSIDE that dialog.

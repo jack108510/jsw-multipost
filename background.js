@@ -1,4 +1,4 @@
-// ============ JSW Multi-Post Background Worker v2.0 ============
+// ============ Amplr Background Worker v2.1 ============
 // Orchestrates posting queue, AI refinement, and scheduled posts via chrome.alarms.
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -114,7 +114,7 @@ function notify(message) {
   chrome.notifications.create({
     type: 'basic',
     iconUrl: 'icons/icon128.png',
-    title: 'JSW Multi-Post',
+    title: 'Amplr',
     message
   });
 }

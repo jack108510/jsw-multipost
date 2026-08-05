@@ -1,5 +1,5 @@
 -- ============================================================
--- JSW Multi-Post Dashboard Schema
+-- Amplr Dashboard Schema
 -- Run this in the Supabase SQL Editor for project:
 -- https://xacehhtgvubcqdoltazg.supabase.co
 -- ============================================================

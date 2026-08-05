@@ -1,4 +1,4 @@
-// ============ JSW Multi-Post Popup Logic v2.0 ============
+// ============ Amplr Popup Logic v2.0 ============
 
 const $ = (id) => document.getElementById(id);
 let groups = [];

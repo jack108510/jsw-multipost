@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "JSW Multi-Post",
-  "short_name": "JSW MP",
+  "name": "Amplr",
+  "short_name": "Amplr",
   "version": "2.1.0",
   "description": "Post to multiple Facebook groups at once. AI-powered prompts, scheduled posts, dashboard pairing.",
   "author": "JSW Enterprises",
@@ -12,7 +12,7 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "JSW Multi-Post",
+    "default_title": "Amplr",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",
