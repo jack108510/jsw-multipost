@@ -826,6 +826,192 @@ section { position: relative; z-index: 1; }
 .compare-x { color: var(--text3); display: inline-flex; }
 .compare-feature { color: var(--text); font-weight: 500; padding-left: 24px; }
 
+/* ---- GROUP FINDER ---- */
+.finder {
+  background: var(--bg2);
+}
+
+.finder-box {
+  max-width: 680px;
+  margin: 48px auto 0;
+  background: var(--bg3);
+  border: 1px solid var(--border-strong);
+  border-radius: 20px;
+  padding: 28px;
+}
+
+.finder-input-wrap {
+  position: relative;
+  margin-bottom: 16px;
+}
+
+.finder-input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+  padding: 16px 60px 16px 18px;
+  font-size: 15px;
+  font-family: var(--sans);
+  resize: none;
+  min-height: 80px;
+  transition: border-color 0.2s;
+  line-height: 1.5;
+}
+.finder-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+.finder-input::placeholder { color: var(--text3); }
+
+.finder-go {
+  position: absolute;
+  bottom: 12px; right: 12px;
+  width: 40px; height: 40px;
+  border-radius: 10px;
+  border: none;
+  background: linear-gradient(135deg, var(--accent), #7c3aed);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+.finder-go:hover { transform: scale(1.05); box-shadow: 0 4px 16px var(--accent-glow); }
+.finder-go:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+.finder-examples {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+}
+
+.finder-chip {
+  padding: 6px 14px;
+  border-radius: 100px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text2);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.finder-chip:hover {
+  border-color: var(--accent);
+  color: var(--text);
+  background: rgba(99,102,241,0.08);
+}
+
+.finder-loading {
+  display: none;
+  text-align: center;
+  padding: 40px 0;
+}
+.finder-loading.active { display: block; }
+
+.finder-spinner {
+  width: 36px; height: 36px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  margin: 0 auto 16px;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.finder-results {
+  display: none;
+  margin-top: 20px;
+}
+.finder-results.active { display: block; }
+
+.finder-results-header {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text2);
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.finder-results-header .count {
+  padding: 2px 10px;
+  border-radius: 100px;
+  background: rgba(99,102,241,0.12);
+  color: var(--accent2);
+  font-size: 12px;
+}
+
+.group-result {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  margin-bottom: 8px;
+  text-decoration: none;
+  color: var(--text);
+  transition: all 0.2s;
+  opacity: 0;
+  animation: fadeUp 0.4s ease forwards;
+}
+
+.group-result:hover {
+  border-color: var(--accent);
+  transform: translateX(4px);
+  background: rgba(99,102,241,0.04);
+}
+
+.group-result-icon {
+  width: 44px; height: 44px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, var(--accent), var(--pink));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: #fff;
+  font-size: 18px;
+}
+
+.group-result-info { flex: 1; min-width: 0; }
+.group-result-name {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+.group-result-meta {
+  font-size: 12px;
+  color: var(--text3);
+}
+.group-result-tag {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 100px;
+  background: rgba(16,185,129,0.1);
+  color: var(--green);
+  margin-right: 6px;
+}
+
+.group-result-arrow {
+  color: var(--text3);
+  flex-shrink: 0;
+  transition: transform 0.2s, color 0.2s;
+}
+.group-result:hover .group-result-arrow {
+  color: var(--accent);
+  transform: translateX(4px);
+}
+
 /* ---- FAQ ---- */
 .faq-list {
   max-width: 680px;
@@ -1327,6 +1513,47 @@ footer {
   </div>
 </section>
 
+<!-- GROUP FINDER -->
+<section id="finder" class="section-pad finder">
+  <div class="container">
+    <div class="reveal" style="text-align:center;">
+      <span class="section-label">Group Finder</span>
+      <h2 class="section-title">Find your <em>audience.</em></h2>
+      <p class="section-desc" style="margin:0 auto;">Describe your brand or product. We'll find Facebook groups where your ideal customers hang out.</p>
+    </div>
+
+    <div class="finder-box reveal">
+      <div class="finder-input-wrap">
+        <textarea class="finder-input" id="finderInput" placeholder="e.g. We sell eco-friendly fitness gear for women aged 25-40 who love yoga and outdoor activities..."></textarea>
+        <button class="finder-go" id="finderGo" onclick="findGroups()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>
+        </button>
+      </div>
+
+      <div class="finder-examples">
+        <span class="finder-chip" onclick="document.getElementById('finderInput').value='We sell eco-friendly fitness gear and yoga accessories for active women'; findGroups()">Eco fitness brand</span>
+        <span class="finder-chip" onclick="document.getElementById('finderInput').value='Digital marketing agency helping small businesses with SEO and social media'; findGroups()">Marketing agency</span>
+        <span class="finder-chip" onclick="document.getElementById('finderInput').value='Online store selling handmade jewelry and accessories'; findGroups()">Handmade jewelry</span>
+        <span class="finder-chip" onclick="document.getElementById('finderInput').value='SaaS tool for project management and team collaboration'; findGroups()">B2B SaaS tool</span>
+        <span class="finder-chip" onclick="document.getElementById('finderInput').value='Meal prep delivery service for busy professionals'; findGroups()">Food delivery</span>
+      </div>
+
+      <div class="finder-loading" id="finderLoading">
+        <div class="finder-spinner"></div>
+        <p style="color:var(--text3);font-size:14px;">Finding the right groups for you...</p>
+      </div>
+
+      <div class="finder-results" id="finderResults">
+        <div class="finder-results-header">
+          <span>Recommended groups</span>
+          <span class="count" id="resultCount">0</span>
+        </div>
+        <div id="groupList"></div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <!-- FAQ -->
 <section id="faq" class="section-pad">
   <div class="container">
@@ -1501,6 +1728,185 @@ footer {
     });
   }, { threshold: 0.5 });
   document.querySelectorAll('.stat-num.fade-stat').forEach(el => fadeObserver.observe(el));
+
+  // ============ GROUP FINDER ============
+  // Curated category → FB group search mapping.
+  // Analyzes the brand description for keywords, matches to categories,
+  // generates clickable FB group search links.
+
+  const CATEGORY_MAP = {
+    // Fitness & Health
+    fitness: { keywords: ['fitness','gym','workout','exercise','yoga','pilates','crossfit','running','marathon','bodybuilding','weightlifting','cardio','zumba','barre','personal trainer','health coach'], searches: ['fitness business','fitness professionals','gym owners','yoga business','personal training business','health and fitness entrepreneurs','fitness marketing'] },
+    yoga: { keywords: ['yoga','meditation','mindfulness','wellness','yogi','asana','chakra','spiritual'], searches: ['yoga teachers','yoga studio owners','yoga business','wellness entrepreneurs','meditation business','holistic health business'] },
+    nutrition: { keywords: ['nutrition','diet','meal prep','healthy eating','dietitian','meal plan','supplements','vitamins','protein','organic food','keto','vegan','plant based'], searches: ['nutrition business','meal prep business','health food business','dietitian entrepreneurs','supplement business','organic food business'] },
+
+    // Marketing & Business
+    marketing: { keywords: ['marketing','seo','advertising','social media','ppc','google ads','facebook ads','content marketing','email marketing','digital marketing','agency','branding','copywriting'], searches: ['digital marketing agency owners','social media marketing business','SEO professionals','marketing agency growth','freelance marketers','digital marketing entrepreneurs','advertising agency owners'] },
+    ecommerce: { keywords: ['ecommerce','e-commerce','shopify','dropshipping','amazon fba','online store','etsy','ebay','product sourcing','inventory','fulfillment'], searches: ['ecommerce business owners','shopify business owners','amazon fba business','dropshipping business','etsy business','ecommerce entrepreneurs','online retail business'] },
+    saas: { keywords: ['saas','software','startup','tech startup','app development','web app','subscription','b2b','enterprise','platform','crm','erp'], searches: ['SaaS founders','software startup business','B2B software business','tech startup entrepreneurs','indie hackers','micro saas business','startup founders'] },
+    consulting: { keywords: ['consulting','coach','mentoring','advisory','freelance','contractor','professional services','b2b services'], searches: ['business coaches','consulting business owners','freelance business owners','coaching business growth','professional services business','b2b consulting'] },
+    realestate: { keywords: ['real estate','realtor','property','housing','rental','airbnb','flipping','mortgage','investment property'], searches: ['real estate business owners','realtor business networking','airbnb business','real estate investors network','property management business'] },
+    finance: { keywords: ['finance','accounting','bookkeeping','tax','financial planning','investing','crypto','forex','trading','fintech'], searches: ['accounting business owners','bookkeeping business','financial advisor business','crypto business','fintech startup business','tax business owners'] },
+
+    // Creative & Retail
+    fashion: { keywords: ['fashion','clothing','apparel','streetwear','boutique','tshirt','accessories','jewelry','handmade','crafts','etsy seller','artisan'], searches: ['fashion business owners','clothing business owners','jewelry business','handmade business owners','etsy business community','boutique business owners','accessories business'] },
+    art: { keywords: ['art','painting','illustration','design','graphic design','creative','photography','photographer','fine art','print'], searches: ['art business owners','creative business owners','photography business owners','etsy artists','selling art online','graphic design business'] },
+    beauty: { keywords: ['beauty','cosmetics','skincare','makeup','salon','spa','hair','nails','barber','beauty products'], searches: ['beauty business owners','salon business owners','skincare business','cosmetics business','spa business owners','beauty entrepreneurs'] },
+
+    // Food & Hospitality
+    food: { keywords: ['food','restaurant','cafe','coffee','bakery','catering','food truck','baking','cooking','recipe','artisan food','craft food'], searches: ['restaurant business owners','food business owners','coffee shop business','food truck business','catering business owners','bakery business owners'] },
+    hospitality: { keywords: ['hotel','hospitality','tourism','travel','event planning','catering','venue','wedding'], searches: ['hotel business owners','event planning business','tourism business owners','wedding business networking','hospitality business owners'] },
+
+    // Home & Lifestyle
+    home: { keywords: ['home','furniture','decor','interior design','garden','landscaping','renovation','construction','contractor','cleaning'], searches: ['interior design business','home renovation business','landscaping business owners','construction business owners','cleaning business owners','furniture business'] },
+    parenting: { keywords: ['baby','kids','children','parenting','mom','toddler','pregnancy','family','childcare','toys','kids clothing'], searches: ['mom business owners','parenting business','kids product business','baby product business','family business networking'] },
+    pets: { keywords: ['pet','dog','cat','animal','veterinary','pet food','pet supplies','grooming'], searches: ['pet business owners','dog business owners','pet supply business','veterinary business','pet grooming business'] },
+
+    // Education
+    education: { keywords: ['education','course','training','teaching','tutoring','online course','ebook','workshop','certification','learning'], searches: ['online course business owners','education business owners','training business owners','tutoring business','ebook publishing business'] },
+
+    // Auto & Outdoors
+    automotive: { keywords: ['car','auto','automotive','vehicle','mechanic','car parts','detailing','dealership'], searches: ['auto repair business owners','car dealership business','auto detailing business','automotive business networking'] },
+    outdoor: { keywords: ['outdoor','camping','hiking','fishing','hunting','skiing','biking','cycling','climbing','adventure'], searches: ['outdoor business owners','camping business','cycling business owners','adventure tourism business'] },
+
+    // Tech
+    tech: { keywords: ['tech','technology','app','software','hardware','gadget','electronics','iot','ai','blockchain','gaming'], searches: ['tech startup founders','app development business','gaming business owners','hardware startup business','AI business networking'] },
+  };
+
+  // Category display metadata
+  const CATEGORY_META = {
+    fitness: { label: 'Fitness & Health', icon: 'M6.5 6.5l11 11M21 21l-1-1M3 3l1 1M12 2a10 10 0 100 20 10 10 0 000-20z' },
+    yoga: { label: 'Yoga & Wellness', icon: 'M12 2a10 10 0 100 20 10 10 0 000-20zM12 6v6l4 2' },
+    nutrition: { label: 'Nutrition & Food', icon: 'M12 2a10 10 0 100 20 10 10 0 000-20zM12 8v8M8 12h8' },
+    marketing: { label: 'Marketing & Agencies', icon: 'M3 11l18-5v12L3 14v-3zM11.6 16.8a3 3 0 11-5.8-1.6' },
+    ecommerce: { label: 'E-commerce', icon: 'M3 3h18l-2 13H5L3 3zM3 3L2 1M5 21h2M17 21h2' },
+    saas: { label: 'SaaS & Startups', icon: 'M20 6L9 17l-5-5' },
+    consulting: { label: 'Consulting & Coaching', icon: 'M21 11.5a8.38 8.38 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.38 8.38 0 01-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.38 8.38 0 013.8-.9h.5a8.48 8.48 0 018 8v.5z' },
+    realestate: { label: 'Real Estate', icon: 'M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z' },
+    finance: { label: 'Finance & Accounting', icon: 'M12 2v20M17 5H9.5a3.5 3.5 0 100 7h5a3.5 3.5 0 110 7H6' },
+    fashion: { label: 'Fashion & Apparel', icon: 'M16 4l-4 4-4-4M8 4h8v4l-4 4-4-4z' },
+    art: { label: 'Art & Creative', icon: 'M12 19l7-7 3 3-7 7-3-3zM18 13l-1.5-7.5L2 2l3.5 14.5L13 18z' },
+    beauty: { label: 'Beauty & Cosmetics', icon: 'M12 2a10 10 0 100 20 10 10 0 000-20z' },
+    food: { label: 'Food & Beverage', icon: 'M3 11h18M5 11a2 2 0 014 0M9 11a2 2 0 014 0M13 11a2 2 0 014 0' },
+    hospitality: { label: 'Hospitality & Events', icon: 'M3 21h18M5 21V7l8-4v18M19 21V11l-6-4' },
+    home: { label: 'Home & Design', icon: 'M3 12l9-9 9 9M5 10v10h14V10' },
+    parenting: { label: 'Parenting & Kids', icon: 'M12 2a5 5 0 100 10 5 5 0 000-10zM5 22v-2a7 7 0 0114 0v2' },
+    pets: { label: 'Pet Business', icon: 'M11 5.5a3.5 3.5 0 11-7 0 3.5 3.5 0 017 0zM20 5.5a3.5 3.5 0 11-7 0 3.5 3.5 0 017 0zM12 18a6 6 0 100-12 6 6 0 000 12z' },
+    education: { label: 'Education & Courses', icon: 'M4 19.5A2.5 2.5 0 016.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 014 19.5v-15A2.5 2.5 0 016.5 2z' },
+    automotive: { label: 'Automotive', icon: 'M5 17h14l-2-7H7l-2 7zM5 17v2M19 17v2' },
+    outdoor: { label: 'Outdoor & Adventure', icon: 'M8 3l4 8 5-5 5 15H2L8 3z' },
+    tech: { label: 'Tech & Gaming', icon: 'M4 5h16v14H4zM8 9h8M8 13h8M8 17h5' },
+  };
+
+  function findGroups() {
+    const input = document.getElementById('finderInput').value.trim().toLowerCase();
+    if (!input || input.length < 5) return;
+
+    // Show loading
+    document.getElementById('finderLoading').classList.add('active');
+    document.getElementById('finderResults').classList.remove('active');
+    document.getElementById('finderGo').disabled = true;
+
+    // Simulate processing delay for UX
+    setTimeout(() => {
+      const matched = matchCategories(input);
+
+      // Build group results
+      const groups = [];
+      matched.forEach(cat => {
+        const meta = CATEGORY_META[cat.name] || { label: cat.name, icon: '' };
+        cat.searches.forEach(search => {
+          groups.push({
+            name: search.replace(/\b\w/g, c => c.toUpperCase()),
+            category: meta.label,
+            searchUrl: 'https://www.facebook.com/search/groups/?q=' + encodeURIComponent(search),
+            tag: cat.score > 5 ? 'Top match' : 'Recommended',
+            relevance: Math.min(cat.score * 10, 95) + Math.floor(Math.random() * 5)
+          });
+        });
+      });
+
+      // Deduplicate + sort by relevance
+      const seen = new Set();
+      const unique = groups.filter(g => {
+        if (seen.has(g.name)) return false;
+        seen.add(g.name);
+        return true;
+      }).sort((a, b) => b.relevance - a.relevance).slice(0, 12);
+
+      renderResults(unique);
+    }, 1200);
+  }
+
+  function matchCategories(text) {
+    const scores = {};
+
+    Object.entries(CATEGORY_MAP).forEach(([name, cat]) => {
+      let score = 0;
+      cat.keywords.forEach(kw => {
+        if (text.includes(kw)) {
+          score += kw.length > 6 ? 3 : 2;
+        }
+      });
+      if (score > 0) scores[name] = score;
+    });
+
+    // Sort by score descending
+    return Object.entries(scores)
+      .map(([name, score]) => ({ name, score, searches: CATEGORY_MAP[name].searches }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 4);
+  }
+
+  function renderResults(groups) {
+    document.getElementById('finderLoading').classList.remove('active');
+    document.getElementById('finderGo').disabled = false;
+
+    if (groups.length === 0) {
+      document.getElementById('groupList').innerHTML =
+        '<div style="text-align:center;padding:30px;color:var(--text3);font-size:14px;">No matches found. Try describing your product, target audience, or industry in more detail.</div>';
+      document.getElementById('finderResults').classList.add('active');
+      return;
+    }
+
+    document.getElementById('resultCount').textContent = groups.length;
+    document.getElementById('finderResults').classList.add('active');
+
+    const list = document.getElementById('groupList');
+    list.innerHTML = '';
+
+    groups.forEach((g, i) => {
+      const el = document.createElement('a');
+      el.href = g.searchUrl;
+      el.target = '_blank';
+      el.className = 'group-result';
+      el.style.animationDelay = (i * 0.05) + 's';
+      el.innerHTML = `
+        <div class="group-result-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+        </div>
+        <div class="group-result-info">
+          <div class="group-result-name">${g.name}</div>
+          <div class="group-result-meta">
+            <span class="group-result-tag">${g.tag}</span>
+            ${g.category}
+          </div>
+        </div>
+        <div class="group-result-arrow">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>
+        </div>
+      `;
+      list.appendChild(el);
+    });
+  }
+
+  // Allow Enter key (without shift) to submit
+  document.getElementById('finderInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      findGroups();
+    }
+  });
 </script>
 
 </body>
