@@ -176,6 +176,31 @@ create policy "jsw_posts_delete_own" on public.jsw_posts
   for delete using (auth.uid() = user_id);
 
 -- ============================================================
+-- TABLE: amplr_data (dashboard JSON store — posts, templates, groups, etc.)
+-- ============================================================
+create table if not exists public.amplr_data (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  key         text not null,
+  value       jsonb,
+  updated_at  timestamptz default now(),
+  unique(user_id, key)
+);
+alter table public.amplr_data enable row level security;
+drop policy if exists "amplr_data_select_own" on public.amplr_data;
+create policy "amplr_data_select_own" on public.amplr_data
+  for select using (auth.uid() = user_id);
+drop policy if exists "amplr_data_insert_own" on public.amplr_data;
+create policy "amplr_data_insert_own" on public.amplr_data
+  for insert with check (auth.uid() = user_id);
+drop policy if exists "amplr_data_update_own" on public.amplr_data;
+create policy "amplr_data_update_own" on public.amplr_data
+  for update using (auth.uid() = user_id);
+drop policy if exists "amplr_data_delete_own" on public.amplr_data;
+create policy "amplr_data_delete_own" on public.amplr_data
+  for delete using (auth.uid() = user_id);
+
+-- ============================================================
 -- NOTE ON EXTENSION ACCESS
 -- The Chrome extension updates jsw_post_jobs using the anon
 -- key. Because RLS requires auth.uid() = user_id, the
