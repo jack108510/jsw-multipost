@@ -3,28 +3,128 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>JSW Multi-Post — Post to Multiple Facebook Groups at Once</title>
-<meta name="description" content="Chrome extension to post to multiple Facebook groups simultaneously. AI-powered prompts, scheduled posts, no external servers.">
+<title>JSW Multi-Post — Post to All Your Facebook Groups at Once</title>
+<meta name="description" content="The cleanest way to post to multiple Facebook groups. AI-powered, scheduled, open source. No external servers.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 :root {
-  --bg: #0d1117;
-  --bg2: #161b22;
-  --border: #30363d;
-  --accent: #e94560;
-  --accent2: #0f3460;
-  --text: #e6edf3;
-  --muted: #8b949e;
-  --green: #3fb950;
+  --bg: #080808;
+  --bg2: #0e0e0e;
+  --bg3: #141414;
+  --surface: rgba(255,255,255,0.03);
+  --border: rgba(255,255,255,0.08);
+  --border-strong: rgba(255,255,255,0.14);
+  --text: #fafafa;
+  --text2: #a1a1aa;
+  --text3: #71717a;
+  --accent: #6366f1;
+  --accent2: #818cf8;
+  --accent-glow: rgba(99,102,241,0.3);
+  --pink: #ec4899;
+  --green: #10b981;
+  --serif: 'Instrument Serif', Georgia, serif;
+  --sans: 'Inter', -apple-system, sans-serif;
 }
 
+html { scroll-behavior: smooth; }
+
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  font-family: var(--sans);
   background: var(--bg);
   color: var(--text);
-  line-height: 1.6;
+  line-height: 1.5;
   overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---- AMBIENT GLOW ---- */
+.ambient {
+  position: fixed;
+  top: -300px; left: 50%;
+  transform: translateX(-50%);
+  width: 1200px; height: 600px;
+  background: radial-gradient(ellipse, var(--accent-glow), transparent 70%);
+  filter: blur(80px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.container {
+  max-width: 1140px;
+  margin: 0 auto;
+  padding: 0 24px;
+  position: relative;
+  z-index: 1;
+}
+
+/* ---- NAV ---- */
+nav {
+  position: fixed; top: 0; left: 0; right: 0;
+  z-index: 100;
+  padding: 16px 0;
+  background: rgba(8,8,8,0.6);
+  backdrop-filter: blur(20px) saturate(180%);
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.3s;
+}
+nav.scrolled { border-bottom-color: var(--border); }
+
+.nav-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  max-width: 1140px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.nav-brand {
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.3px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  color: var(--text);
+}
+
+.nav-brand-icon {
+  width: 28px; height: 28px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--accent), var(--pink));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+}
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+
+.nav-links a {
+  color: var(--text2);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  transition: color 0.2s;
+}
+.nav-links a:hover { color: var(--text); }
+
+.nav-cta {
+  padding: 8px 18px;
+  border-radius: 8px;
+  background: var(--text);
+  color: var(--bg) !important;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 /* ---- HERO ---- */
@@ -35,470 +135,1096 @@ body {
   align-items: center;
   justify-content: center;
   text-align: center;
-  padding: 2rem;
+  padding: 120px 24px 80px;
   position: relative;
-  overflow: hidden;
 }
 
-.hero::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(233,69,96,0.08), transparent);
+.hero-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border-radius: 100px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text2);
+  margin-bottom: 32px;
+  animation: fadeUp 0.8s ease;
 }
 
-.hero-badge {
-  font-size: 0.75rem;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  color: var(--accent);
-  margin-bottom: 1.5rem;
-  padding: 0.4rem 1rem;
-  border: 1px solid rgba(233,69,96,0.3);
-  border-radius: 20px;
+.hero-eyebrow .dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green);
 }
 
 .hero h1 {
-  font-size: clamp(2.5rem, 7vw, 5rem);
-  font-weight: 800;
-  line-height: 1.05;
-  letter-spacing: -2px;
-  margin-bottom: 1.5rem;
+  font-size: clamp(2.8rem, 7vw, 5.5rem);
+  font-weight: 700;
+  letter-spacing: -3.5px;
+  line-height: 1;
+  margin-bottom: 24px;
   max-width: 900px;
+  animation: fadeUp 0.8s 0.1s ease both;
 }
 
-.hero h1 .gradient {
-  background: linear-gradient(135deg, var(--accent), #ff7a8a);
+.hero h1 em {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+  background: linear-gradient(135deg, var(--accent2), var(--pink));
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
-.hero p {
-  font-size: 1.2rem;
-  color: var(--muted);
-  max-width: 600px;
-  margin: 0 auto 2.5rem;
+.hero-sub {
+  font-size: 1.25rem;
+  color: var(--text2);
+  max-width: 540px;
+  margin: 0 auto 40px;
+  line-height: 1.5;
+  animation: fadeUp 0.8s 0.2s ease both;
 }
 
-.hero-buttons {
+.hero-cta {
   display: flex;
-  gap: 1rem;
-  flex-wrap: wrap;
+  gap: 12px;
   justify-content: center;
+  flex-wrap: wrap;
+  animation: fadeUp 0.8s 0.3s ease both;
 }
 
 .btn {
   display: inline-flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 1rem 2rem;
-  border-radius: 10px;
-  font-size: 1rem;
+  gap: 8px;
+  padding: 14px 28px;
+  border-radius: 12px;
+  font-size: 15px;
   font-weight: 600;
   text-decoration: none;
   transition: all 0.2s;
   cursor: pointer;
   border: none;
+  font-family: var(--sans);
 }
 
 .btn-primary {
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent), #7c3aed);
   color: #fff;
+  box-shadow: 0 8px 24px var(--accent-glow);
 }
 .btn-primary:hover {
-  background: #ff5a7a;
   transform: translateY(-2px);
-  box-shadow: 0 10px 30px rgba(233,69,96,0.3);
+  box-shadow: 0 12px 32px var(--accent-glow);
 }
 
-.btn-ghost {
-  background: var(--bg2);
+.btn-secondary {
+  background: var(--surface);
   color: var(--text);
   border: 1px solid var(--border);
 }
-.btn-ghost:hover {
-  border-color: var(--muted);
-  background: #1c2330;
+.btn-secondary:hover {
+  background: rgba(255,255,255,0.06);
+  border-color: var(--border-strong);
 }
 
-/* ---- FEATURES ---- */
-.features {
-  max-width: 1200px;
+/* ---- PRODUCT PREVIEW ---- */
+.preview {
+  max-width: 880px;
   margin: 0 auto;
-  padding: 6rem 2rem;
+  padding: 0 24px 80px;
+  animation: fadeUp 1s 0.4s ease both;
 }
 
-.section-title {
-  text-align: center;
-  margin-bottom: 3rem;
-}
-
-.section-title h2 {
-  font-size: clamp(1.8rem, 4vw, 2.8rem);
-  font-weight: 700;
-  letter-spacing: -1px;
-  margin-bottom: 0.5rem;
-}
-
-.section-title p {
-  color: var(--muted);
-  font-size: 1.1rem;
-}
-
-.feature-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-  gap: 1.5rem;
-}
-
-.feature-card {
-  background: var(--bg2);
-  border: 1px solid var(--border);
+.preview-frame {
   border-radius: 16px;
-  padding: 2rem;
-  transition: all 0.3s;
-}
-
-.feature-card:hover {
-  border-color: var(--accent);
-  transform: translateY(-4px);
-}
-
-.feature-icon {
-  font-size: 2.5rem;
-  margin-bottom: 1rem;
-}
-
-.feature-card h3 {
-  font-size: 1.2rem;
-  font-weight: 600;
-  margin-bottom: 0.5rem;
-}
-
-.feature-card p {
-  color: var(--muted);
-  font-size: 0.95rem;
-}
-
-/* ---- HOW IT WORKS ---- */
-.how-it-works {
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
   background: var(--bg2);
-  padding: 6rem 2rem;
+  box-shadow: 0 40px 80px rgba(0,0,0,0.5);
 }
 
-.steps-container {
-  max-width: 900px;
-  margin: 0 auto;
-}
-
-.step {
-  display: flex;
-  gap: 2rem;
-  align-items: flex-start;
-  margin-bottom: 2.5rem;
-}
-
-.step-num {
-  flex-shrink: 0;
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
-  background: var(--accent);
+.preview-bar {
   display: flex;
   align-items: center;
-  justify-content: center;
-  font-size: 1.3rem;
-  font-weight: 700;
-  color: #fff;
+  gap: 6px;
+  padding: 12px 16px;
+  background: var(--bg3);
+  border-bottom: 1px solid var(--border);
 }
 
-.step-content h3 {
-  font-size: 1.2rem;
-  margin-bottom: 0.3rem;
+.preview-bar .dot {
+  width: 11px; height: 11px;
+  border-radius: 50%;
 }
+.preview-bar .dot:nth-child(1) { background: #ff5f57; }
+.preview-bar .dot:nth-child(2) { background: #febc2e; }
+.preview-bar .dot:nth-child(3) { background: #28c840; }
 
-.step-content p {
-  color: var(--muted);
-}
-
-/* ---- PRIVACY ---- */
-.privacy {
-  max-width: 800px;
-  margin: 0 auto;
-  padding: 6rem 2rem;
-  text-align: center;
-}
-
-.privacy-badge {
-  display: inline-block;
-  font-size: 3rem;
-  margin-bottom: 1rem;
-}
-
-.privacy h2 {
-  font-size: clamp(1.8rem, 4vw, 2.8rem);
-  margin-bottom: 1rem;
-}
-
-.privacy p {
-  color: var(--muted);
-  font-size: 1.1rem;
-  max-width: 500px;
-  margin: 0 auto;
-}
-
-.privacy-list {
-  list-style: none;
-  margin-top: 2rem;
-  text-align: left;
-  display: inline-block;
-}
-
-.privacy-list li {
-  padding: 0.5rem 0;
-  color: var(--muted);
-  font-size: 0.95rem;
-}
-
-.privacy-list li::before {
-  content: '✓ ';
-  color: var(--green);
-  font-weight: bold;
-}
-
-/* ---- AI SECTION ---- */
-.ai-section {
-  background: linear-gradient(180deg, var(--bg) 0%, #0a0f1a 100%);
-  padding: 6rem 2rem;
-  text-align: center;
-}
-
-.ai-section h2 {
-  font-size: clamp(1.8rem, 4vw, 2.8rem);
-  margin-bottom: 1rem;
-}
-
-.ai-section > p {
-  color: var(--muted);
-  max-width: 500px;
-  margin: 0 auto 3rem;
-  font-size: 1.1rem;
-}
-
-.ai-logos {
+.preview-body {
   display: flex;
-  gap: 1.5rem;
+  min-height: 420px;
+}
+
+/* Mock popup */
+.preview-popup {
+  width: 340px;
+  background: #1a1a2e;
+  padding: 20px;
+  font-size: 13px;
+  border-right: 1px solid rgba(255,255,255,0.06);
+}
+
+.popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+}
+
+.popup-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #e94560;
+}
+
+.popup-version {
+  font-size: 10px;
+  color: #4a4a6a;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.popup-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 16px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.popup-tab {
+  flex: 1;
+  padding: 8px;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #4a4a6a;
+}
+
+.popup-tab.active {
+  color: #e94560;
+  border-bottom: 2px solid #e94560;
+}
+
+.popup-field {
+  margin-bottom: 12px;
+}
+
+.popup-label {
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #6a6a8a;
+  margin-bottom: 6px;
+}
+
+.popup-box {
+  background: #0f3460;
+  border: 1px solid #1a1a4e;
+  border-radius: 6px;
+  padding: 10px;
+  color: #a1a1aa;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.popup-box.placeholder {
+  color: #4a4a6a;
+}
+
+.popup-post-btn {
+  width: 100%;
+  background: #e94560;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 12px;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  text-align: center;
+  margin-top: 8px;
+}
+
+/* Mock group list */
+.preview-groups {
+  flex: 1;
+  padding: 20px;
+  background: var(--bg2);
+}
+
+.preview-groups h4 {
+  font-size: 13px;
+  color: var(--text2);
+  margin-bottom: 16px;
+  font-weight: 600;
+}
+
+.mock-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--bg3);
+  margin-bottom: 8px;
+  transition: transform 0.3s;
+}
+
+.mock-group-avatar {
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #6366f1, #ec4899);
+  flex-shrink: 0;
+}
+
+.mock-group-info { flex: 1; }
+
+.mock-group-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.mock-group-meta {
+  font-size: 11px;
+  color: var(--text3);
+}
+
+.mock-badge {
+  font-size: 10px;
+  padding: 3px 8px;
+  border-radius: 100px;
+  background: rgba(16,185,129,0.1);
+  color: var(--green);
+  font-weight: 600;
+}
+
+/* ---- MARQUEE / TRUST ---- */
+.trust {
+  padding: 40px 24px;
+  text-align: center;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.trust-label {
+  font-size: 13px;
+  color: var(--text3);
+  margin-bottom: 24px;
+  font-weight: 500;
+}
+
+.trust-items {
+  display: flex;
+  gap: 48px;
   justify-content: center;
   flex-wrap: wrap;
 }
 
-.ai-logo {
-  padding: 0.8rem 1.5rem;
+.trust-item {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text3);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ---- SECTION GENERIC ---- */
+section { position: relative; z-index: 1; }
+
+.section-pad { padding: 120px 0; }
+
+.section-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--accent2);
+  margin-bottom: 16px;
+  display: inline-block;
+}
+
+.section-title {
+  font-size: clamp(2rem, 4.5vw, 3.5rem);
+  font-weight: 700;
+  letter-spacing: -2px;
+  line-height: 1.1;
+  margin-bottom: 16px;
+}
+
+.section-title em {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+}
+
+.section-desc {
+  font-size: 1.15rem;
+  color: var(--text2);
+  max-width: 560px;
+  line-height: 1.5;
+}
+
+/* ---- BENTO FEATURES ---- */
+.bento {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-top: 56px;
+}
+
+.bento-card {
   background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 28px;
+  transition: all 0.3s;
+  overflow: hidden;
+  position: relative;
+}
+
+.bento-card:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-3px);
+}
+
+.bento-card.large { grid-column: span 2; }
+.bento-card.tall { grid-row: span 2; }
+
+.bento-icon {
+  width: 44px; height: 44px;
+  border-radius: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+  margin-bottom: 20px;
+}
+
+.bento-card h3 {
+  font-size: 17px;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.bento-card p {
+  font-size: 14px;
+  color: var(--text2);
+  line-height: 1.5;
+}
+
+/* AI visual */
+.ai-visual {
+  margin-top: 24px;
+  padding: 16px;
+  background: var(--bg3);
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  font-size: 13px;
+  font-family: 'SF Mono', monospace;
+}
+
+.ai-line {
+  padding: 4px 0;
+  color: var(--text3);
+}
+.ai-line .prompt { color: var(--text2); }
+.ai-line .arrow { color: var(--accent2); }
+.ai-line .output { color: var(--green); }
+
+/* Schedule visual */
+.sched-visual {
+  margin-top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sched-pill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--bg3);
   border: 1px solid var(--border);
   border-radius: 10px;
-  font-size: 0.9rem;
-  color: var(--muted);
+  font-size: 13px;
 }
 
-/* ---- INSTALL ---- */
-.install {
-  max-width: 800px;
-  margin: 0 auto;
-  padding: 6rem 2rem;
+.sched-time {
+  font-weight: 600;
+  color: var(--text);
 }
 
-.install h2 {
-  text-align: center;
-  font-size: clamp(1.8rem, 4vw, 2.8rem);
-  margin-bottom: 3rem;
+.sched-freq {
+  font-size: 11px;
+  color: var(--text3);
 }
 
-.install-steps {
-  background: var(--bg2);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 2rem;
-}
-
-.install-step {
-  display: flex;
-  gap: 1rem;
-  padding: 1rem 0;
+/* ---- STATS ---- */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0;
+  padding: 80px 0;
+  border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
 }
 
-.install-step:last-child { border-bottom: none; }
+.stat {
+  text-align: center;
+  border-right: 1px solid var(--border);
+}
+.stat:last-child { border-right: none; }
 
-.install-step code {
-  background: #0d1117;
-  padding: 0.3rem 0.6rem;
-  border-radius: 4px;
-  font-size: 0.9rem;
-  color: var(--accent);
+.stat-num {
+  font-size: clamp(2.5rem, 5vw, 4rem);
+  font-weight: 800;
+  letter-spacing: -2px;
+  background: linear-gradient(135deg, var(--accent2), var(--pink));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  line-height: 1;
+}
+
+.stat-label {
+  font-size: 14px;
+  color: var(--text3);
+  margin-top: 8px;
+  font-weight: 500;
+}
+
+/* ---- COMPARISON ---- */
+.compare {
+  background: var(--bg2);
+}
+
+.compare-table {
+  max-width: 680px;
+  margin: 48px auto 0;
   border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.compare-row {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border);
+  font-size: 14px;
+  align-items: center;
+}
+
+.compare-row:last-child { border-bottom: none; }
+
+.compare-row.header {
+  background: var(--bg3);
+  font-weight: 600;
+  font-size: 13px;
+  color: var(--text2);
+}
+
+.compare-row.header .col-jsw {
+  color: var(--accent2);
+  text-align: center;
+}
+
+.compare-row .col-jsw, .compare-row .col-other {
+  text-align: center;
+}
+
+.compare-check { color: var(--green); font-size: 16px; }
+.compare-x { color: var(--text3); font-size: 16px; }
+.compare-feature { color: var(--text); font-weight: 500; }
+
+/* ---- FAQ ---- */
+.faq-list {
+  max-width: 680px;
+  margin: 48px auto 0;
+}
+
+.faq-item {
+  border-bottom: 1px solid var(--border);
+  padding: 20px 0;
+}
+
+.faq-q {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  transition: color 0.2s;
+}
+
+.faq-q:hover { color: var(--accent2); }
+
+.faq-q .icon {
+  font-size: 20px;
+  color: var(--text3);
+  transition: transform 0.2s;
+}
+
+.faq-item.open .faq-q .icon { transform: rotate(45deg); }
+
+.faq-a {
+  font-size: 14px;
+  color: var(--text2);
+  line-height: 1.6;
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease, margin-top 0.3s ease;
+}
+
+.faq-item.open .faq-a {
+  max-height: 200px;
+  margin-top: 12px;
+}
+
+/* ---- CTA ---- */
+.cta-final {
+  text-align: center;
+  padding: 120px 24px;
+}
+
+.cta-final h2 {
+  font-size: clamp(2rem, 5vw, 3.5rem);
+  font-weight: 700;
+  letter-spacing: -2px;
+  margin-bottom: 16px;
+}
+
+.cta-final h2 em {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 400;
+  color: var(--accent2);
+}
+
+.cta-final p {
+  color: var(--text2);
+  font-size: 1.15rem;
+  margin-bottom: 32px;
 }
 
 /* ---- FOOTER ---- */
 footer {
   border-top: 1px solid var(--border);
-  padding: 3rem 2rem;
-  text-align: center;
-  color: var(--muted);
-  font-size: 0.9rem;
+  padding: 48px 24px;
 }
 
-footer a {
-  color: var(--accent);
+.footer-inner {
+  max-width: 1140px;
+  margin: 0 auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.footer-brand {
+  font-size: 14px;
+  color: var(--text3);
+}
+
+.footer-brand a {
+  color: var(--text2);
   text-decoration: none;
+  transition: color 0.2s;
+}
+.footer-brand a:hover { color: var(--text); }
+
+.footer-links {
+  display: flex;
+  gap: 24px;
+}
+
+.footer-links a {
+  color: var(--text3);
+  text-decoration: none;
+  font-size: 14px;
+  transition: color 0.2s;
+}
+.footer-links a:hover { color: var(--text); }
+
+/* ---- ANIMATIONS ---- */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.reveal {
+  opacity: 0;
+  transform: translateY(30px);
+  transition: opacity 0.8s ease, transform 0.8s ease;
+}
+.reveal.visible {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 /* ---- RESPONSIVE ---- */
-@media (max-width: 640px) {
-  .step { flex-direction: column; gap: 0.5rem; }
+@media (max-width: 768px) {
+  .nav-links { display: none; }
+  .nav-cta { display: none; }
+  .hero { padding-top: 100px; }
+  .bento { grid-template-columns: 1fr; }
+  .bento-card.large, .bento-card.tall { grid-column: span 1; grid-row: span 1; }
+  .stats { grid-template-columns: 1fr; gap: 32px; }
+  .stat { border-right: none; border-bottom: 1px solid var(--border); padding-bottom: 24px; }
+  .stat:last-child { border-bottom: none; }
+  .preview-body { flex-direction: column; }
+  .preview-popup { width: 100%; border-right: none; border-bottom: 1px solid rgba(255,255,255,0.06); }
+  .compare-row { grid-template-columns: 1.5fr 1fr 1fr; padding: 12px 16px; font-size: 12px; }
 }
 </style>
 </head>
 <body>
 
+<div class="ambient"></div>
+
+<!-- NAV -->
+<nav id="nav">
+  <div class="nav-inner">
+    <a href="#" class="nav-brand">
+      <div class="nav-brand-icon">⚡</div>
+      JSW Multi-Post
+    </a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#how">How it Works</a>
+      <a href="#compare">vs Others</a>
+      <a href="#faq">FAQ</a>
+      <a href="https://github.com/jack108510/jsw-multipost" target="_blank">GitHub</a>
+    </div>
+    <a href="#install" class="nav-cta">Install</a>
+  </div>
+</nav>
+
 <!-- HERO -->
 <section class="hero">
-  <div class="hero-badge">⚡ Chrome Extension</div>
-  <h1>Post to <span class="gradient">multiple Facebook groups</span> at once</h1>
-  <p>Write once, post everywhere. AI-powered prompts, scheduled posts, clean open-source code. No external servers.</p>
-  <div class="hero-buttons">
-    <a href="#install" class="btn btn-primary">↓ Install Now</a>
-    <a href="https://github.com/jack108510/jsw-multipost" class="btn btn-ghost">📄 View Source</a>
+  <div class="hero-eyebrow">
+    <span class="dot"></span>
+    Open source · MIT License
+  </div>
+  <h1>Post to <em>every</em> group<br>at once.</h1>
+  <p class="hero-sub">The cleanest way to broadcast to Facebook groups. AI-powered writing, scheduled posts, zero data collection.</p>
+  <div class="hero-cta">
+    <a href="#install" class="btn btn-primary">
+      <span>↓</span> Get the Extension
+    </a>
+    <a href="https://github.com/jack108510/jsw-multipost" target="_blank" class="btn btn-secondary">
+      View Source
+    </a>
   </div>
 </section>
 
-<!-- FEATURES -->
-<section class="features">
-  <div class="section-title">
-    <h2>Everything you need</h2>
-    <p>Designed for marketers, community managers, and anyone reaching multiple groups.</p>
+<!-- PRODUCT PREVIEW -->
+<div class="preview reveal">
+  <div class="preview-frame">
+    <div class="preview-bar">
+      <div class="dot"></div>
+      <div class="dot"></div>
+      <div class="dot"></div>
+    </div>
+    <div class="preview-body">
+      <!-- Mock popup -->
+      <div class="preview-popup">
+        <div class="popup-header">
+          <span class="popup-title">⚡ JSW Multi-Post</span>
+          <span class="popup-version">v2.0</span>
+        </div>
+        <div class="popup-tabs">
+          <div class="popup-tab active">Post</div>
+          <div class="popup-tab">AI Prompt</div>
+          <div class="popup-tab">Schedule</div>
+          <div class="popup-tab">Settings</div>
+        </div>
+        <div class="popup-field">
+          <div class="popup-label">Your Message</div>
+          <div class="popup-box">🔥 Big sale this weekend! 40% off everything. Don't miss out — link in bio.</div>
+        </div>
+        <div class="popup-field">
+          <div class="popup-label">Delay Between Posts</div>
+          <div class="popup-box">30 seconds</div>
+        </div>
+        <div class="popup-post-btn">Post to All Groups</div>
+      </div>
+      <!-- Mock groups -->
+      <div class="preview-groups">
+        <h4>Target Groups (3)</h4>
+        <div class="mock-group">
+          <div class="mock-group-avatar"></div>
+          <div class="mock-group-info">
+            <div class="mock-group-name">Small Business Network</div>
+            <div class="mock-group-meta">12.4k members</div>
+          </div>
+          <div class="mock-badge">Ready</div>
+        </div>
+        <div class="mock-group">
+          <div class="mock-group-avatar" style="background:linear-gradient(135deg,#10b981,#06b6d4)"></div>
+          <div class="mock-group-info">
+            <div class="mock-group-name">Entrepreneurs Canada</div>
+            <div class="mock-group-meta">8.2k members</div>
+          </div>
+          <div class="mock-badge">Ready</div>
+        </div>
+        <div class="mock-group">
+          <div class="mock-group-avatar" style="background:linear-gradient(135deg,#f59e0b,#ef4444)"></div>
+          <div class="mock-group-info">
+            <div class="mock-group-name">Marketing Pros</div>
+            <div class="mock-group-meta">31.7k members</div>
+          </div>
+          <div class="mock-badge">Ready</div>
+        </div>
+      </div>
+    </div>
   </div>
-  <div class="feature-grid">
-    <div class="feature-card">
-      <div class="feature-icon">📝</div>
-      <h3>Write Once, Post Everywhere</h3>
-      <p>Compose your message once and blast it to every group you're a member of. Automatic delays prevent rate limiting.</p>
+</div>
+
+<!-- TRUST -->
+<section class="trust">
+  <div class="trust-label">Works with your AI provider of choice</div>
+  <div class="trust-items">
+    <div class="trust-item">🔵 OpenAI</div>
+    <div class="trust-item">🟠 Anthropic</div>
+    <div class="trust-item">🟢 Google Gemini</div>
+    <div class="trust-item">🟣 OpenRouter</div>
+  </div>
+</section>
+
+<!-- FEATURES BENTO -->
+<section id="features" class="section-pad">
+  <div class="container">
+    <div class="reveal">
+      <span class="section-label">Features</span>
+      <h2 class="section-title">Built for <em>volume</em>,<br>designed for <em>privacy</em>.</h2>
+      <p class="section-desc">Everything you need to manage multi-group posting. Nothing you don't.</p>
     </div>
-    <div class="feature-card">
-      <div class="feature-icon">🤖</div>
-      <h3>AI-Powered Prompts</h3>
-      <p>Connect your OpenAI, Anthropic, Gemini, or OpenRouter API key. The AI rewrites your message into an engaging post automatically.</p>
+
+    <div class="bento">
+      <!-- Large: AI -->
+      <div class="bento-card large reveal">
+        <div class="bento-icon">🤖</div>
+        <h3>AI-Powered Writing</h3>
+        <p>Connect your API key and the AI rewrites your prompt into an engaging post. Each group gets a unique variation automatically — no duplicate detection.</p>
+        <div class="ai-visual">
+          <div class="ai-line"><span class="prompt">You: "big sale this weekend"</span></div>
+          <div class="ai-line"><span class="arrow">↓ AI refines</span></div>
+          <div class="ai-line"><span class="output">"🔥 This weekend only — 40% off everything. Your favorite picks, now half the price. Don't sleep on this."</span></div>
+        </div>
+      </div>
+
+      <!-- Tall: Schedule -->
+      <div class="bento-card tall reveal">
+        <div class="bento-icon">⏰</div>
+        <h3>Scheduled Posts</h3>
+        <p>Set it and forget it. Daily, hourly, weekly, or one-time.</p>
+        <div class="sched-visual">
+          <div class="sched-pill">
+            <span class="sched-time">9:00 AM</span>
+            <span class="sched-freq">Daily</span>
+          </div>
+          <div class="sched-pill">
+            <span class="sched-time">3:00 PM</span>
+            <span class="sched-freq">Daily</span>
+          </div>
+          <div class="sched-pill">
+            <span class="sched-time">Mon 9 AM</span>
+            <span class="sched-freq">Weekly</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Privacy -->
+      <div class="bento-card reveal">
+        <div class="bento-icon">🔒</div>
+        <h3>Zero Data Collection</h3>
+        <p>No servers. No analytics. No cookies. Your API key and messages never leave your browser.</p>
+      </div>
+
+      <!-- Image -->
+      <div class="bento-card reveal">
+        <div class="bento-icon">🖼️</div>
+        <h3>Image Attachments</h3>
+        <p>Paste an image URL and it uploads automatically with each post.</p>
+      </div>
+
+      <!-- Rate limiting -->
+      <div class="bento-card reveal">
+        <div class="bento-icon">⚡</div>
+        <h3>Smart Rate Limiting</h3>
+        <p>Adjustable delays between posts. Prevents Facebook from flagging your account.</p>
+      </div>
+
+      <!-- Open source -->
+      <div class="bento-card large reveal">
+        <div class="bento-icon">📖</div>
+        <h3>Open Source. Read Every Line.</h3>
+        <p>No obfuscated code. No hidden phone-home calls. No cookie scraping. The entire extension is on GitHub — fork it, audit it, modify it. MIT licensed.</p>
+      </div>
     </div>
-    <div class="feature-card">
-      <div class="feature-icon">🔄</div>
-      <h3>Unique Variations</h3>
-      <p>Generate a different variation of your post for each group. Same message, different wording — prevents duplicate detection.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">⏰</div>
-      <h3>Scheduled Posts</h3>
-      <p>Set daily, hourly, weekly, or one-time schedules. Posts go out automatically even when the popup is closed.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🖼️</div>
-      <h3>Image Attachments</h3>
-      <p>Attach images via URL. The extension fetches and uploads them to each post automatically.</p>
-    </div>
-    <div class="feature-card">
-      <div class="feature-icon">🔒</div>
-      <h3>100% Local & Private</h3>
-      <p>No external servers. No data collection. Your API key and messages stay in your browser. Open source.</p>
+  </div>
+</section>
+
+<!-- STATS -->
+<section>
+  <div class="container">
+    <div class="stats reveal">
+      <div class="stat">
+        <div class="stat-num">0</div>
+        <div class="stat-label">External Servers</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num">4</div>
+        <div class="stat-label">AI Providers Supported</div>
+      </div>
+      <div class="stat">
+        <div class="stat-num">∞</div>
+        <div class="stat-label">Groups Per Post</div>
+      </div>
     </div>
   </div>
 </section>
 
 <!-- HOW IT WORKS -->
-<section class="how-it-works">
-  <div class="section-title">
-    <h2>How it works</h2>
+<section id="how" class="section-pad" style="background:var(--bg2);">
+  <div class="container">
+    <div class="reveal" style="text-align:center;">
+      <span class="section-label">How it works</span>
+      <h2 class="section-title">Three steps. <em>That's it.</em></h2>
+    </div>
+    <div style="max-width:680px;margin:56px auto 0;">
+      <div class="reveal" style="display:flex;gap:24px;margin-bottom:40px;">
+        <div style="flex-shrink:0;width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,var(--accent),#7c3aed);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;">1</div>
+        <div>
+          <h3 style="font-size:18px;margin-bottom:6px;">Add your groups</h3>
+          <p style="color:var(--text2);font-size:15px;">Paste Facebook group URLs. They're saved locally for next time.</p>
+        </div>
+      </div>
+      <div class="reveal" style="display:flex;gap:24px;margin-bottom:40px;">
+        <div style="flex-shrink:0;width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,#ec4899,#f59e0b);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;">2</div>
+        <div>
+          <h3 style="font-size:18px;margin-bottom:6px;">Write or prompt</h3>
+          <p style="color:var(--text2);font-size:15px;">Type your post. Or enable AI and write a prompt — the AI generates unique posts per group.</p>
+        </div>
+      </div>
+      <div class="reveal" style="display:flex;gap:24px;">
+        <div style="flex-shrink:0;width:52px;height:52px;border-radius:14px;background:linear-gradient(135deg,#10b981,#06b6d4);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;">3</div>
+        <div>
+          <h3 style="font-size:18px;margin-bottom:6px;">Click Post</h3>
+          <p style="color:var(--text2);font-size:15px;">The extension opens each group, types, and posts. Desktop notification when done.</p>
+        </div>
+      </div>
+    </div>
   </div>
-  <div class="steps-container">
-    <div class="step">
-      <div class="step-num">1</div>
-      <div class="step-content">
-        <h3>Add your groups</h3>
-        <p>Paste the URLs of the Facebook groups you want to post to. They're saved for next time.</p>
-      </div>
+</section>
+
+<!-- COMPARISON -->
+<section id="compare" class="section-pad compare">
+  <div class="container">
+    <div class="reveal" style="text-align:center;">
+      <span class="section-label">The difference</span>
+      <h2 class="section-title">Why <em>not</em> the others?</h2>
     </div>
-    <div class="step">
-      <div class="step-num">2</div>
-      <div class="step-content">
-        <h3>Write your message</h3>
-        <p>Type your post. If AI is enabled, this becomes a prompt — the AI writes the actual post for each group.</p>
+    <div class="compare-table reveal">
+      <div class="compare-row header">
+        <div>Feature</div>
+        <div class="col-jsw">JSW Multi-Post</div>
+        <div class="col-other">Other Extensions</div>
       </div>
-    </div>
-    <div class="step">
-      <div class="step-num">3</div>
-      <div class="step-content">
-        <h3>Click Post</h3>
-        <p>The extension opens each group, types your message, and clicks Post. Progress bar shows each step in real time.</p>
+      <div class="compare-row">
+        <div class="compare-feature">Open source code</div>
+        <div class="col-jsw"><span class="compare-check">✓</span></div>
+        <div class="col-other"><span class="compare-x">✕</span></div>
+      </div>
+      <div class="compare-row">
+        <div class="compare-feature">No data collection</div>
+        <div class="col-jsw"><span class="compare-check">✓</span></div>
+        <div class="col-other"><span class="compare-x">✕</span></div>
+      </div>
+      <div class="compare-row">
+        <div class="compare-feature">AI-powered writing</div>
+        <div class="col-jsw"><span class="compare-check">✓</span></div>
+        <div class="col-other"><span class="compare-x">✕</span></div>
+      </div>
+      <div class="compare-row">
+        <div class="compare-feature">Scheduled posts</div>
+        <div class="col-jsw"><span class="compare-check">✓</span></div>
+        <div class="col-other"><span class="compare-x">✕</span></div>
+      </div>
+      <div class="compare-row">
+        <div class="compare-feature">No obfuscated code</div>
+        <div class="col-jsw"><span class="compare-check">✓</span></div>
+        <div class="col-other"><span class="compare-x">✕</span></div>
+      </div>
+      <div class="compare-row">
+        <div class="compare-feature">Price</div>
+        <div class="col-jsw" style="color:var(--green);font-weight:600;">Free</div>
+        <div class="col-other" style="color:var(--text3);">$5-20/mo</div>
       </div>
     </div>
   </div>
 </section>
 
-<!-- AI SECTION -->
-<section class="ai-section">
-  <h2>Works with your favorite AI</h2>
-  <p>Bring your own API key. The extension calls the provider directly — no middleman.</p>
-  <div class="ai-logos">
-    <div class="ai-logo">🔵 OpenAI (GPT-4o)</div>
-    <div class="ai-logo">🟠 Anthropic (Claude)</div>
-    <div class="ai-logo">🟢 Google Gemini</div>
-    <div class="ai-logo">🟣 OpenRouter (100+ models)</div>
+<!-- FAQ -->
+<section id="faq" class="section-pad">
+  <div class="container">
+    <div class="reveal" style="text-align:center;">
+      <span class="section-label">FAQ</span>
+      <h2 class="section-title">Questions?</h2>
+    </div>
+    <div class="faq-list reveal">
+      <div class="faq-item">
+        <div class="faq-q" onclick="this.parentElement.classList.toggle('open')">
+          Is this safe for my Facebook account?
+          <span class="icon">+</span>
+        </div>
+        <div class="faq-a">
+          The extension simulates human posting — typing into the composer and clicking Post. Use reasonable delays (30s+) between groups to avoid rate limiting. We recommend starting with 5-10 groups at a time.
+        </div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q" onclick="this.parentElement.classList.toggle('open')">
+          Does it work on mobile?
+          <span class="icon">+</span>
+        </div>
+        <div class="faq-a">
+          It works on desktop Chrome and Edge. Mobile browsers don't support extensions with content scripts.
+        </div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q" onclick="this.parentElement.classList.toggle('open')">
+          Where is my API key stored?
+          <span class="icon">+</span>
+        </div>
+        <div class="faq-a">
+          Locally in Chrome's extension storage. It never touches any server except the AI provider you choose (OpenAI, Anthropic, etc.) — directly from your browser.
+        </div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q" onclick="this.parentElement.classList.toggle('open')">
+          Can I schedule posts to run automatically?
+          <span class="icon">+</span>
+        </div>
+        <div class="faq-a">
+          Yes. Set up daily, hourly, weekly, or one-time schedules in the Schedule tab. Your browser needs to be open for the alarm to fire.
+        </div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q" onclick="this.parentElement.classList.toggle('open')">
+          Will Facebook ban me?
+          <span class="icon">+</span>
+        </div>
+        <div class="faq-a">
+          Use sensible delays, don't post to 50 groups in 30 seconds, and you'll be fine. The AI variation feature helps too — unique posts per group look natural.
+        </div>
+      </div>
+    </div>
   </div>
-</section>
-
-<!-- PRIVACY -->
-<section class="privacy">
-  <div class="privacy-badge">🔐</div>
-  <h2>Privacy first. Always.</h2>
-  <p>This extension doesn't touch your data. Everything runs locally in your browser.</p>
-  <ul class="privacy-list">
-    <li>No external servers — no middleman, no data collection</li>
-    <li>API key stored locally in Chrome storage only</li>
-    <li>No cookie scraping, no user ID extraction</li>
-    <li>Open source — read every line of code</li>
-    <li>API calls go directly to your chosen AI provider</li>
-  </ul>
 </section>
 
 <!-- INSTALL -->
-<section class="install" id="install">
-  <h2>Install in 4 steps</h2>
-  <div class="install-steps">
-    <div class="install-step">
-      <div>1</div>
-      <div>Download or clone the extension from <a href="https://github.com/jack108510/jsw-multipost" style="color:var(--accent)">GitHub</a></div>
+<section id="install" class="section-pad" style="background:var(--bg2);">
+  <div class="container">
+    <div class="reveal" style="text-align:center;">
+      <span class="section-label">Install</span>
+      <h2 class="section-title">Up and running in <em>60 seconds</em>.</h2>
     </div>
-    <div class="install-step">
-      <div>2</div>
-      <div>Open <code>chrome://extensions</code> in Chrome or Edge</div>
-    </div>
-    <div class="install-step">
-      <div>3</div>
-      <div>Enable <strong>Developer mode</strong> (top right toggle)</div>
-    </div>
-    <div class="install-step">
-      <div>4</div>
-      <div>Click <strong>Load unpacked</strong> → select the extension folder</div>
+    <div class="reveal" style="max-width:580px;margin:48px auto 0;background:var(--bg3);border:1px solid var(--border);border-radius:20px;padding:32px;">
+      <div style="display:flex;gap:16px;padding:14px 0;border-bottom:1px solid var(--border);">
+        <span style="flex-shrink:0;width:28px;height:28px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;">1</span>
+        <div style="padding-top:4px;">Clone or download from <a href="https://github.com/jack108510/jsw-multipost" target="_blank" style="color:var(--accent2);">GitHub</a></div>
+      </div>
+      <div style="display:flex;gap:16px;padding:14px 0;border-bottom:1px solid var(--border);">
+        <span style="flex-shrink:0;width:28px;height:28px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;">2</span>
+        <div style="padding-top:4px;">Open <code style="background:var(--bg);padding:3px 8px;border-radius:4px;font-size:13px;color:var(--accent2);border:1px solid var(--border);">chrome://extensions</code></div>
+      </div>
+      <div style="display:flex;gap:16px;padding:14px 0;border-bottom:1px solid var(--border);">
+        <span style="flex-shrink:0;width:28px;height:28px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;">3</span>
+        <div style="padding-top:4px;">Enable <strong>Developer mode</strong> (top right)</div>
+      </div>
+      <div style="display:flex;gap:16px;padding:14px 0;">
+        <span style="flex-shrink:0;width:28px;height:28px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;">4</span>
+        <div style="padding-top:4px;">Click <strong>Load unpacked</strong> → select folder</div>
+      </div>
     </div>
   </div>
-  <p style="text-align:center;margin-top:2rem;color:var(--muted);font-size:0.9rem;">
-    The extension icon appears in your toolbar. Click it to start posting.
-  </p>
+</section>
+
+<!-- FINAL CTA -->
+<section class="cta-final">
+  <div class="container reveal">
+    <h2>Stop posting <em>one at a time.</em></h2>
+    <p>Free. Open source. Yours.</p>
+    <a href="https://github.com/jack108510/jsw-multipost" target="_blank" class="btn btn-primary" style="font-size:16px;padding:16px 36px;">
+      Get JSW Multi-Post →
+    </a>
+  </div>
 </section>
 
 <!-- FOOTER -->
 <footer>
-  <p>JSW Multi-Post · Built by <a href="https://github.com/jack108510">JSW Enterprises</a> · Open Source · MIT License</p>
+  <div class="footer-inner">
+    <div class="footer-brand">
+      JSW Multi-Post · Built by <a href="https://github.com/jack108510">JSW Enterprises</a> · MIT License
+    </div>
+    <div class="footer-links">
+      <a href="https://github.com/jack108510/jsw-multipost">GitHub</a>
+      <a href="#faq">FAQ</a>
+      <a href="#install">Install</a>
+    </div>
+  </div>
 </footer>
+
+<script>
+  // Nav scroll effect
+  window.addEventListener('scroll', () => {
+    document.getElementById('nav').classList.toggle('scrolled', window.scrollY > 20);
+  });
+
+  // Scroll reveals
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        e.target.classList.add('visible');
+      }
+    });
+  }, { threshold: 0.15 });
+
+  document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+  // Animate mock groups on hover
+  document.querySelectorAll('.mock-group').forEach((g, i) => {
+    g.style.animation = `fadeUp 0.5s ${i * 0.1}s ease both`;
+  });
+</script>
 
 </body>
 </html>
