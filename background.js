@@ -376,15 +376,20 @@ function startDashPolling() {
   // Poll immediately, then every 10 seconds
   pollPendingJobs();
   dashPollTimer = setInterval(pollPendingJobs, 10000);
-  // Heartbeat: write to amplr_data so dashboard knows we're alive
+  // Heartbeat via chrome.alarms (survives service worker sleep, unlike setInterval)
   writeHeartbeat();
-  heartbeatTimer = setInterval(writeHeartbeat, 30000);
+  chrome.alarms.create('amplr_heartbeat', { periodInMinutes: 0.5 }); // every 30s
 }
 
 function stopDashPolling() {
   if (dashPollTimer) { clearInterval(dashPollTimer); dashPollTimer = null; }
-  if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+  chrome.alarms.clear('amplr_heartbeat');
 }
+
+// Heartbeat alarm handler
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'amplr_heartbeat') writeHeartbeat();
+});
 
 // Write heartbeat so the dashboard knows the extension is running
 async function writeHeartbeat() {
