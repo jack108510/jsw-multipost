@@ -44,10 +44,5 @@
     "*://generativelanguage.googleapis.com/*",
     "*://openrouter.ai/*",
     "*://*.supabase.co/*"
-  ],
-  "externally_connectable": {
-    "matches": [
-      "https://jack108510.github.io/*"
-    ]
-  }
+  ]
 }
