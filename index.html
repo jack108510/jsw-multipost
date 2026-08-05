@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JSW Multi-Post — Post to Multiple Facebook Groups at Once</title>
+<meta name="description" content="Chrome extension to post to multiple Facebook groups simultaneously. AI-powered prompts, scheduled posts, no external servers.">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg: #0d1117;
+  --bg2: #161b22;
+  --border: #30363d;
+  --accent: #e94560;
+  --accent2: #0f3460;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --green: #3fb950;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  overflow-x: hidden;
+}
+
+/* ---- HERO ---- */
+.hero {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 2rem;
+  position: relative;
+  overflow: hidden;
+}
+
+.hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse 80% 60% at 50% 0%, rgba(233,69,96,0.08), transparent);
+}
+
+.hero-badge {
+  font-size: 0.75rem;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 1.5rem;
+  padding: 0.4rem 1rem;
+  border: 1px solid rgba(233,69,96,0.3);
+  border-radius: 20px;
+}
+
+.hero h1 {
+  font-size: clamp(2.5rem, 7vw, 5rem);
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -2px;
+  margin-bottom: 1.5rem;
+  max-width: 900px;
+}
+
+.hero h1 .gradient {
+  background: linear-gradient(135deg, var(--accent), #ff7a8a);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.hero p {
+  font-size: 1.2rem;
+  color: var(--muted);
+  max-width: 600px;
+  margin: 0 auto 2.5rem;
+}
+
+.hero-buttons {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem 2rem;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all 0.2s;
+  cursor: pointer;
+  border: none;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+.btn-primary:hover {
+  background: #ff5a7a;
+  transform: translateY(-2px);
+  box-shadow: 0 10px 30px rgba(233,69,96,0.3);
+}
+
+.btn-ghost {
+  background: var(--bg2);
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+.btn-ghost:hover {
+  border-color: var(--muted);
+  background: #1c2330;
+}
+
+/* ---- FEATURES ---- */
+.features {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 6rem 2rem;
+}
+
+.section-title {
+  text-align: center;
+  margin-bottom: 3rem;
+}
+
+.section-title h2 {
+  font-size: clamp(1.8rem, 4vw, 2.8rem);
+  font-weight: 700;
+  letter-spacing: -1px;
+  margin-bottom: 0.5rem;
+}
+
+.section-title p {
+  color: var(--muted);
+  font-size: 1.1rem;
+}
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1.5rem;
+}
+
+.feature-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 2rem;
+  transition: all 0.3s;
+}
+
+.feature-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-4px);
+}
+
+.feature-icon {
+  font-size: 2.5rem;
+  margin-bottom: 1rem;
+}
+
+.feature-card h3 {
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+}
+
+.feature-card p {
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+/* ---- HOW IT WORKS ---- */
+.how-it-works {
+  background: var(--bg2);
+  padding: 6rem 2rem;
+}
+
+.steps-container {
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.step {
+  display: flex;
+  gap: 2rem;
+  align-items: flex-start;
+  margin-bottom: 2.5rem;
+}
+
+.step-num {
+  flex-shrink: 0;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: #fff;
+}
+
+.step-content h3 {
+  font-size: 1.2rem;
+  margin-bottom: 0.3rem;
+}
+
+.step-content p {
+  color: var(--muted);
+}
+
+/* ---- PRIVACY ---- */
+.privacy {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 6rem 2rem;
+  text-align: center;
+}
+
+.privacy-badge {
+  display: inline-block;
+  font-size: 3rem;
+  margin-bottom: 1rem;
+}
+
+.privacy h2 {
+  font-size: clamp(1.8rem, 4vw, 2.8rem);
+  margin-bottom: 1rem;
+}
+
+.privacy p {
+  color: var(--muted);
+  font-size: 1.1rem;
+  max-width: 500px;
+  margin: 0 auto;
+}
+
+.privacy-list {
+  list-style: none;
+  margin-top: 2rem;
+  text-align: left;
+  display: inline-block;
+}
+
+.privacy-list li {
+  padding: 0.5rem 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.privacy-list li::before {
+  content: '✓ ';
+  color: var(--green);
+  font-weight: bold;
+}
+
+/* ---- AI SECTION ---- */
+.ai-section {
+  background: linear-gradient(180deg, var(--bg) 0%, #0a0f1a 100%);
+  padding: 6rem 2rem;
+  text-align: center;
+}
+
+.ai-section h2 {
+  font-size: clamp(1.8rem, 4vw, 2.8rem);
+  margin-bottom: 1rem;
+}
+
+.ai-section > p {
+  color: var(--muted);
+  max-width: 500px;
+  margin: 0 auto 3rem;
+  font-size: 1.1rem;
+}
+
+.ai-logos {
+  display: flex;
+  gap: 1.5rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.ai-logo {
+  padding: 0.8rem 1.5rem;
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+/* ---- INSTALL ---- */
+.install {
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 6rem 2rem;
+}
+
+.install h2 {
+  text-align: center;
+  font-size: clamp(1.8rem, 4vw, 2.8rem);
+  margin-bottom: 3rem;
+}
+
+.install-steps {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 2rem;
+}
+
+.install-step {
+  display: flex;
+  gap: 1rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.install-step:last-child { border-bottom: none; }
+
+.install-step code {
+  background: #0d1117;
+  padding: 0.3rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  color: var(--accent);
+  border: 1px solid var(--border);
+}
+
+/* ---- FOOTER ---- */
+footer {
+  border-top: 1px solid var(--border);
+  padding: 3rem 2rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+footer a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+/* ---- RESPONSIVE ---- */
+@media (max-width: 640px) {
+  .step { flex-direction: column; gap: 0.5rem; }
+}
+</style>
+</head>
+<body>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-badge">⚡ Chrome Extension</div>
+  <h1>Post to <span class="gradient">multiple Facebook groups</span> at once</h1>
+  <p>Write once, post everywhere. AI-powered prompts, scheduled posts, clean open-source code. No external servers.</p>
+  <div class="hero-buttons">
+    <a href="#install" class="btn btn-primary">↓ Install Now</a>
+    <a href="https://github.com/jack108510/jsw-multipost" class="btn btn-ghost">📄 View Source</a>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="features">
+  <div class="section-title">
+    <h2>Everything you need</h2>
+    <p>Designed for marketers, community managers, and anyone reaching multiple groups.</p>
+  </div>
+  <div class="feature-grid">
+    <div class="feature-card">
+      <div class="feature-icon">📝</div>
+      <h3>Write Once, Post Everywhere</h3>
+      <p>Compose your message once and blast it to every group you're a member of. Automatic delays prevent rate limiting.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🤖</div>
+      <h3>AI-Powered Prompts</h3>
+      <p>Connect your OpenAI, Anthropic, Gemini, or OpenRouter API key. The AI rewrites your message into an engaging post automatically.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🔄</div>
+      <h3>Unique Variations</h3>
+      <p>Generate a different variation of your post for each group. Same message, different wording — prevents duplicate detection.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">⏰</div>
+      <h3>Scheduled Posts</h3>
+      <p>Set daily, hourly, weekly, or one-time schedules. Posts go out automatically even when the popup is closed.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🖼️</div>
+      <h3>Image Attachments</h3>
+      <p>Attach images via URL. The extension fetches and uploads them to each post automatically.</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">🔒</div>
+      <h3>100% Local & Private</h3>
+      <p>No external servers. No data collection. Your API key and messages stay in your browser. Open source.</p>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="how-it-works">
+  <div class="section-title">
+    <h2>How it works</h2>
+  </div>
+  <div class="steps-container">
+    <div class="step">
+      <div class="step-num">1</div>
+      <div class="step-content">
+        <h3>Add your groups</h3>
+        <p>Paste the URLs of the Facebook groups you want to post to. They're saved for next time.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">2</div>
+      <div class="step-content">
+        <h3>Write your message</h3>
+        <p>Type your post. If AI is enabled, this becomes a prompt — the AI writes the actual post for each group.</p>
+      </div>
+    </div>
+    <div class="step">
+      <div class="step-num">3</div>
+      <div class="step-content">
+        <h3>Click Post</h3>
+        <p>The extension opens each group, types your message, and clicks Post. Progress bar shows each step in real time.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- AI SECTION -->
+<section class="ai-section">
+  <h2>Works with your favorite AI</h2>
+  <p>Bring your own API key. The extension calls the provider directly — no middleman.</p>
+  <div class="ai-logos">
+    <div class="ai-logo">🔵 OpenAI (GPT-4o)</div>
+    <div class="ai-logo">🟠 Anthropic (Claude)</div>
+    <div class="ai-logo">🟢 Google Gemini</div>
+    <div class="ai-logo">🟣 OpenRouter (100+ models)</div>
+  </div>
+</section>
+
+<!-- PRIVACY -->
+<section class="privacy">
+  <div class="privacy-badge">🔐</div>
+  <h2>Privacy first. Always.</h2>
+  <p>This extension doesn't touch your data. Everything runs locally in your browser.</p>
+  <ul class="privacy-list">
+    <li>No external servers — no middleman, no data collection</li>
+    <li>API key stored locally in Chrome storage only</li>
+    <li>No cookie scraping, no user ID extraction</li>
+    <li>Open source — read every line of code</li>
+    <li>API calls go directly to your chosen AI provider</li>
+  </ul>
+</section>
+
+<!-- INSTALL -->
+<section class="install" id="install">
+  <h2>Install in 4 steps</h2>
+  <div class="install-steps">
+    <div class="install-step">
+      <div>1</div>
+      <div>Download or clone the extension from <a href="https://github.com/jack108510/jsw-multipost" style="color:var(--accent)">GitHub</a></div>
+    </div>
+    <div class="install-step">
+      <div>2</div>
+      <div>Open <code>chrome://extensions</code> in Chrome or Edge</div>
+    </div>
+    <div class="install-step">
+      <div>3</div>
+      <div>Enable <strong>Developer mode</strong> (top right toggle)</div>
+    </div>
+    <div class="install-step">
+      <div>4</div>
+      <div>Click <strong>Load unpacked</strong> → select the extension folder</div>
+    </div>
+  </div>
+  <p style="text-align:center;margin-top:2rem;color:var(--muted);font-size:0.9rem;">
+    The extension icon appears in your toolbar. Click it to start posting.
+  </p>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <p>JSW Multi-Post · Built by <a href="https://github.com/jack108510">JSW Enterprises</a> · Open Source · MIT License</p>
+</footer>
+
+</body>
+</html>
