@@ -340,6 +340,7 @@ async function callOpenRouter(key, model, messages, temp) {
 const SB_URL = 'https://xacehhtgvubcqdoltazg.supabase.co';
 const SB_ANON_KEY = 'sb_publishable_1TNu5hqotJ7GGQXfjliivQ_ttK51EAA';
 let dashPollTimer = null;
+let heartbeatTimer = null;
 let dashPairing = null;
 
 // Listen for pairing connect/disconnect from popup
@@ -373,10 +374,33 @@ function startDashPolling() {
   // Poll immediately, then every 10 seconds
   pollPendingJobs();
   dashPollTimer = setInterval(pollPendingJobs, 10000);
+  // Heartbeat: write to amplr_data so dashboard knows we're alive
+  writeHeartbeat();
+  heartbeatTimer = setInterval(writeHeartbeat, 30000);
 }
 
 function stopDashPolling() {
   if (dashPollTimer) { clearInterval(dashPollTimer); dashPollTimer = null; }
+  if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+}
+
+// Write heartbeat so the dashboard knows the extension is running
+async function writeHeartbeat() {
+  if (!dashPairing || !dashPairing.userId) return;
+  try {
+    await fetch(`${SB_URL}/rest/v1/jsw_settings?user_id=eq.${encodeURIComponent(dashPairing.userId)}`, {
+      method: 'PATCH',
+      headers: {
+        'apikey': SB_ANON_KEY,
+        'Authorization': `Bearer ${SB_ANON_KEY}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({ ext_heartbeat: new Date().toISOString() })
+    });
+  } catch (e) {
+    // Silent — heartbeat is best-effort
+  }
 }
 
 function broadcastDashStatus(text, color) {
