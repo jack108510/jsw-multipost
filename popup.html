@@ -3,185 +3,272 @@
 <head>
 <meta charset="UTF-8">
 <title>Amplr</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
   :root {
-    --bg: #0a0a0f;
-    --surface: #12121a;
-    --surface-2: #1a1a25;
-    --border: #252535;
-    --text: #f0f0f5;
-    --text-2: #9999b0;
-    --text-3: #666680;
+    --bg: #0C0C18;
+    --surface: #18181F;
+    --surface-2: #22222C;
+    --border: #2C2C3A;
+    --text: #E8E8F0;
+    --text-2: #9090A8;
+    --text-3: #5C5C74;
+    --blue: #4F46E5;
+    --blue-dark: #4338CA;
     --green: #10b981;
     --red: #ef4444;
-    --gradient: linear-gradient(120deg, #5B6FE8 0%, #9B5DE5 55%, #F368A8 100%);
   }
 
   body {
-    width: 320px;
-    font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', Roboto, sans-serif;
+    width: 340px;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
     background: var(--bg);
     color: var(--text);
     -webkit-font-smoothing: antialiased;
   }
 
   .header {
-    padding: 20px;
-    text-align: center;
+    padding: 20px 20px 16px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
     border-bottom: 1px solid var(--border);
   }
-  .header svg { margin-bottom: 8px; }
-  .header h1 {
-    font-size: 22px;
-    font-weight: 800;
-    background: var(--gradient);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
+  .brand-icon {
+    width: 28px; height: 28px; border-radius: 7px;
+    background: var(--blue);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
   }
-  .header p {
-    font-size: 11px;
-    color: var(--text-3);
-    margin-top: 4px;
-  }
+  .brand-name { font-size: 16px; font-weight: 700; letter-spacing: -.02em; }
+  .brand-sub { font-size: 10px; color: var(--text-3); margin-top: 1px; }
 
-  .body { padding: 24px 20px; }
+  .body { padding: 20px; }
 
-  /* ---- LOGIN ---- */
+  /* ── Login ── */
   .field-group { margin-bottom: 12px; }
-  .field-label {
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--text-2);
-    margin-bottom: 6px;
-    display: block;
-  }
+  .field-label { font-size: 11px; font-weight: 600; color: var(--text-2); margin-bottom: 5px; display: block; letter-spacing: .01em; }
   .field-input {
-    width: 100%;
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    color: var(--text);
-    padding: 12px 14px;
-    font-size: 14px;
-    font-family: inherit;
-    transition: border .15s;
+    width: 100%; background: var(--surface-2); border: 1.5px solid var(--border);
+    border-radius: 8px; color: var(--text); padding: 10px 12px;
+    font-size: 13px; font-family: inherit; transition: border .15s;
   }
-  .field-input:focus { outline: none; border-color: #5B6FE8; }
+  .field-input:focus { outline: none; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(79,70,229,.15); }
   .field-input::placeholder { color: var(--text-3); }
 
-  .hint {
-    font-size: 11px;
-    color: var(--text-3);
-    text-align: center;
-    margin-top: 10px;
-    line-height: 1.5;
-  }
-  .hint a { color: #5B6FE8; text-decoration: none; }
-
   .btn {
-    width: 100%;
-    border: none;
-    border-radius: 10px;
-    padding: 13px;
-    font-size: 14px;
-    font-weight: 700;
-    cursor: pointer;
-    font-family: inherit;
-    margin-top: 16px;
-    transition: all 0.15s;
+    width: 100%; border: none; border-radius: 8px; padding: 11px;
+    font-size: 13px; font-weight: 700; cursor: pointer; font-family: inherit;
+    transition: all .15s; display: flex; align-items: center; justify-content: center; gap: 6px;
   }
-  .btn-primary { background: var(--gradient); color: #fff; }
-  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(91,111,232,.3); }
-  .btn-primary:disabled { opacity: .5; cursor: not-allowed; transform: none; }
-  .btn-ghost { background: transparent; color: var(--text-3); border: 1px solid var(--border); }
+  .btn-primary { background: var(--blue); color: #fff; }
+  .btn-primary:hover { background: var(--blue-dark); }
+  .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-ghost { background: transparent; color: var(--text-3); border: 1px solid var(--border); margin-top: 8px; }
   .btn-ghost:hover { color: var(--text-2); border-color: var(--text-3); }
 
-  /* ---- CONNECTED ---- */
-  .connected-view { display: none; text-align: center; }
-  .status-dot {
-    width: 12px; height: 12px; border-radius: 50%;
-    background: var(--green);
-    margin: 0 auto 12px;
-    box-shadow: 0 0 12px rgba(16,185,129,.4);
-  }
-  .connected-view .title { font-size: 16px; font-weight: 700; margin-bottom: 4px; }
-  .connected-view .sub { font-size: 12px; color: var(--text-3); }
+  .hint { font-size: 11px; color: var(--text-3); text-align: center; margin-top: 12px; line-height: 1.6; }
+  .hint a { color: var(--blue); text-decoration: none; }
 
-  .status {
-    margin-top: 14px; font-size: 12px; text-align: center; min-height: 18px;
-    color: var(--text-3);
+  /* ── Onboarding ── */
+  #onboardingView { display: none; }
+
+  .onboard-header { text-align: center; padding: 8px 0 20px; }
+  .onboard-title { font-size: 17px; font-weight: 700; letter-spacing: -.02em; margin-bottom: 4px; }
+  .onboard-sub { font-size: 12px; color: var(--text-3); }
+
+  .step {
+    display: flex; align-items: flex-start; gap: 12px;
+    padding: 14px; border-radius: 10px; margin-bottom: 8px;
+    border: 1.5px solid var(--border); background: var(--surface);
+    transition: border .15s;
   }
-  .status.error { color: var(--red); }
+  .step.done { border-color: var(--green); }
+  .step.active { border-color: var(--blue); background: rgba(79,70,229,.06); }
+
+  .step-num {
+    width: 26px; height: 26px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700;
+    background: var(--surface-2); color: var(--text-3); border: 1.5px solid var(--border);
+  }
+  .step.done .step-num { background: var(--green); color: white; border-color: var(--green); }
+  .step.active .step-num { background: var(--blue); color: white; border-color: var(--blue); }
+
+  .step-body { flex: 1; min-width: 0; }
+  .step-title { font-size: 13px; font-weight: 600; margin-bottom: 2px; }
+  .step.done .step-title { color: var(--text-2); }
+  .step-desc { font-size: 11px; color: var(--text-3); line-height: 1.5; margin-bottom: 8px; }
+  .step-action {
+    font-size: 11px; font-weight: 600; color: var(--blue);
+    background: rgba(79,70,229,.12); border: none; border-radius: 6px;
+    padding: 5px 10px; cursor: pointer; font-family: inherit; transition: background .15s;
+  }
+  .step-action:hover { background: rgba(79,70,229,.2); }
+  .step-done-badge { font-size: 11px; color: var(--green); font-weight: 600; }
+
+  .onboard-finish {
+    margin-top: 14px; width: 100%; border: none; border-radius: 8px;
+    padding: 12px; font-size: 13px; font-weight: 700; cursor: pointer;
+    font-family: inherit; background: var(--blue); color: white; transition: background .15s;
+  }
+  .onboard-finish:hover { background: var(--blue-dark); }
+  .onboard-finish:disabled { opacity: .4; cursor: not-allowed; }
+
+  /* ── Connected ── */
+  #connectedView { display: none; }
+
+  .conn-status {
+    display: flex; align-items: center; gap: 8px;
+    padding: 12px 14px; background: var(--surface); border-radius: 10px;
+    border: 1px solid var(--border); margin-bottom: 14px;
+  }
+  .conn-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .conn-dot.on { background: var(--green); box-shadow: 0 0 8px rgba(16,185,129,.4); }
+  .conn-dot.off { background: var(--red); }
+  .conn-label { font-size: 13px; font-weight: 600; }
+  .conn-sub { font-size: 11px; color: var(--text-3); margin-top: 1px; }
+
+  .action-btn {
+    width: 100%; border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 14px; font-size: 12px; font-weight: 600; cursor: pointer;
+    font-family: inherit; background: var(--surface); color: var(--text-2);
+    display: flex; align-items: center; gap: 8px; margin-bottom: 8px; transition: all .15s;
+    text-align: left;
+  }
+  .action-btn:hover { background: var(--surface-2); color: var(--text); border-color: var(--text-3); }
+  .action-btn svg { flex-shrink: 0; opacity: .6; }
+
+  #importStatus { font-size: 11px; color: var(--text-3); margin: 4px 0 8px; min-height: 14px; text-align: center; }
 
   .footer {
-    padding: 10px 20px;
+    padding: 10px 20px 12px;
     border-top: 1px solid var(--border);
-    text-align: center;
+    display: flex; align-items: center; justify-content: space-between;
   }
-  .footer a {
-    font-size: 11px;
-    color: var(--text-3);
-    text-decoration: none;
-    transition: color .15s;
-  }
+  .footer a { font-size: 11px; color: var(--text-3); text-decoration: none; transition: color .15s; }
   .footer a:hover { color: var(--text-2); }
+  .status-msg { font-size: 11px; color: var(--text-3); min-height: 14px; }
+  .status-msg.error { color: var(--red); }
 </style>
 </head>
 <body>
 
 <div class="header">
-  <svg width="28" height="28" viewBox="0 0 40 40" fill="none">
-    <defs><linearGradient id="pG" x1="0%" y1="100%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#5B6FE8"/><stop offset="55%" stop-color="#9B5DE5"/><stop offset="100%" stop-color="#F368A8"/>
-    </linearGradient></defs>
-    <path d="M8 20 a8 8 0 1 1 8 8 L16 12 L16 28" stroke="url(#pG)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-    <line x1="16" y1="20" x2="28" y2="20" stroke="url(#pG)" stroke-width="3" stroke-linecap="round"/>
-    <circle cx="28" cy="12" r="3" fill="#F368A8"/>
-    <circle cx="32" cy="20" r="3" fill="#F368A8"/>
-    <circle cx="28" cy="28" r="3" fill="#F368A8"/>
-  </svg>
-  <h1>amplr</h1>
-  <p>Facebook Groups Autoposter</p>
+  <div class="brand-icon">
+    <svg width="16" height="16" viewBox="0 0 40 40" fill="none">
+      <path d="M8 20 a8 8 0 1 1 8 8 L16 12 L16 28" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+      <line x1="16" y1="20" x2="28" y2="20" stroke="white" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="28" cy="12" r="3" fill="white"/>
+      <circle cx="32" cy="20" r="3" fill="white"/>
+      <circle cx="28" cy="28" r="3" fill="white"/>
+    </svg>
+  </div>
+  <div>
+    <div class="brand-name">amplr</div>
+    <div class="brand-sub">Facebook Groups Autoposter</div>
+  </div>
 </div>
 
 <div class="body">
 
-  <!-- Login -->
-  <div id="dashDisconnected">
+  <!-- ── LOGIN ── -->
+  <div id="loginView">
     <div class="field-group">
       <label class="field-label" for="loginEmail">Email</label>
       <input type="email" id="loginEmail" class="field-input" placeholder="you@example.com" autocomplete="email">
     </div>
-    <div class="field-group">
+    <div class="field-group" style="margin-bottom:16px;">
       <label class="field-label" for="loginPassword">Password</label>
       <input type="password" id="loginPassword" class="field-input" placeholder="Min 6 characters" autocomplete="current-password">
     </div>
     <button class="btn btn-primary" id="loginBtn">Sign In</button>
-    <div class="hint" style="margin-top:14px;">
-      Use the same account as the<br>
-      <a href="https://jack108510.github.io/fb-autoposter/dashboard.html" target="_blank">Amplr Dashboard &rarr;</a>
+    <div class="hint">
+      Use the same account as your<br>
+      <a href="https://jack108510.github.io/fb-autoposter/dashboard.html" target="_blank">Amplr Dashboard →</a>
     </div>
+    <div class="status-msg error" id="loginError" style="text-align:center;margin-top:10px;"></div>
   </div>
 
-  <!-- Connected -->
-  <div id="dashConnected" class="connected-view">
-    <div class="status-dot"></div>
-    <div class="title">Connected</div>
-    <div class="sub" id="dashJobStatus">Watching for posts from your dashboard</div>
-    <div class="sub" id="dashEmail" style="margin-top:6px; opacity:0.7; font-size:11px;"></div>
-    <button class="btn btn-primary" id="importGroupsBtn" style="margin-top:20px;">Import My Groups</button>
-    <div id="importStatus" style="margin-top:10px; font-size:12px; color:var(--text-3); min-height:16px;"></div>
-    <button class="btn btn-ghost" id="pairDisconnectBtn" style="margin-top:12px;">Sign Out</button>
+  <!-- ── ONBOARDING (shown once after first login) ── -->
+  <div id="onboardingView">
+    <div class="onboard-header">
+      <div class="onboard-title">Almost ready</div>
+      <div class="onboard-sub">Complete setup to get the most out of Amplr</div>
+    </div>
+
+    <!-- Step 1: Background apps -->
+    <div class="step" id="step1" data-done="false">
+      <div class="step-num" id="step1num">1</div>
+      <div class="step-body">
+        <div class="step-title">Keep scheduling alive</div>
+        <div class="step-desc">Amplr can post on schedule even when Chrome is closed — just enable one Chrome setting.</div>
+        <button class="step-action" id="step1btn" onclick="openBackgroundSetting()">Open Chrome Setting →</button>
+        <span class="step-done-badge" id="step1done" style="display:none;">✓ Enabled</span>
+      </div>
+    </div>
+
+    <!-- Step 2: Log into Facebook -->
+    <div class="step" id="step2" data-done="false">
+      <div class="step-num" id="step2num">2</div>
+      <div class="step-body">
+        <div class="step-title">Sign into Facebook</div>
+        <div class="step-desc">Amplr needs you logged into Facebook in this browser to post on your behalf.</div>
+        <button class="step-action" id="step2btn" onclick="openFacebook()">Open Facebook →</button>
+        <span class="step-done-badge" id="step2done" style="display:none;">✓ Logged in</span>
+      </div>
+    </div>
+
+    <!-- Step 3: Import groups -->
+    <div class="step" id="step3" data-done="false">
+      <div class="step-num" id="step3num">3</div>
+      <div class="step-body">
+        <div class="step-title">Import your groups</div>
+        <div class="step-desc">Amplr will scan your Facebook groups and save them to your dashboard.</div>
+        <button class="step-action" id="step3btn" onclick="runImportGroups()">Import Groups →</button>
+        <span class="step-done-badge" id="step3done" style="display:none;"></span>
+      </div>
+    </div>
+
+    <div id="onboardStatus" style="font-size:11px;color:var(--text-3);text-align:center;margin-top:10px;min-height:14px;"></div>
+    <button class="onboard-finish" id="finishBtn" onclick="finishOnboarding()" disabled>Go to Dashboard →</button>
   </div>
 
-  <div class="status" id="dashStatus"></div>
+  <!-- ── CONNECTED ── -->
+  <div id="connectedView">
+    <div class="conn-status">
+      <div class="conn-dot on"></div>
+      <div>
+        <div class="conn-label">Connected</div>
+        <div class="conn-sub" id="dashEmail"></div>
+      </div>
+    </div>
+
+    <button class="action-btn" id="importGroupsBtn" onclick="runImportGroups()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9"/></svg>
+      Sync Groups from Facebook
+    </button>
+    <div id="importStatus"></div>
+
+    <button class="action-btn" onclick="chrome.tabs.create({url:'https://jack108510.github.io/fb-autoposter/dashboard.html'})">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+      Open Dashboard
+    </button>
+
+    <button class="action-btn" onclick="signOut()" style="color:var(--red);border-color:transparent;">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
+      Sign Out
+    </button>
+  </div>
+
 </div>
 
 <div class="footer">
-  <a href="https://jack108510.github.io/fb-autoposter/dashboard.html" target="_blank">Open Dashboard &rarr;</a>
+  <div class="status-msg" id="dashStatus"></div>
+  <a href="https://jack108510.github.io/fb-autoposter/dashboard.html" target="_blank">Dashboard →</a>
 </div>
 
 <script src="popup.js"></script>
