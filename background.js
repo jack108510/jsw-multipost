@@ -707,8 +707,8 @@ async function executeDashJob(job) {
 
     // ── Cooldown check ──
     try {
-      const groupRes = await fetch(`${SB_URL}/rest/v1/jsw_groups?user_id=eq.${session.userId}&group_url=eq.${encodeURIComponent(groupUrl)}&select=last_posted_at,ban_risk`, {
-        headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}` }
+      const groupRes = await fetch(`${SB_URL}/rest/v1/jsw_groups?user_id=eq.${dashSession.userId}&group_url=eq.${encodeURIComponent(groupUrl)}&select=last_posted_at,ban_risk`, {
+        headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${dashSession.accessToken}` }
       });
       const groupData = await groupRes.json();
       const lastPosted = groupData?.[0]?.last_posted_at;
@@ -749,19 +749,19 @@ async function executeDashJob(job) {
         successCount++;
         extLog('info', `Posted ${i + 1}/${groupUrls.length} → ${groupUrl}`);
         broadcastDashStatus(`Posted ${i + 1}/${groupUrls.length}`, '#4ecca3');
-
         // Update last_posted_at for cooldown tracking
-        fetch(`${SB_URL}/rest/v1/jsw_groups?user_id=eq.${session.userId}&group_url=eq.${encodeURIComponent(groupUrl)}`, {
+        fetch(`${SB_URL}/rest/v1/jsw_groups?user_id=eq.${dashSession.userId}&group_url=eq.${encodeURIComponent(groupUrl)}`, {
           method: 'PATCH',
-          headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+          headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${dashSession.accessToken}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
           body: JSON.stringify({ last_posted_at: new Date().toISOString() })
         }).catch(e => extLog('warn', 'last_posted_at update error: ' + e.message));
+
         // Record post result for ban detection
         const postUrl = response?.postUrl || null;
         fetch(`${SB_URL}/rest/v1/jsw_post_results`, {
           method: 'POST',
-          headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-          body: JSON.stringify({ user_id: session.userId, group_url: groupUrl, post_url: postUrl, job_id: job.id, posted_at: new Date().toISOString() })
+          headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${dashSession.accessToken}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+          body: JSON.stringify({ user_id: dashSession.userId, group_url: groupUrl, post_url: postUrl, job_id: job.id, posted_at: new Date().toISOString() })
         }).catch(e => extLog('warn', 'jsw_post_results insert error: ' + e.message));
 
         // First comment automation
@@ -1152,5 +1152,65 @@ async function importFacebookGroups() {
     if (tab) {
       try { await chrome.tabs.remove(tab.id); } catch (_) {}
     }
+  }
+}
+
+// ============================================================
+// BAN/REMOVAL DETECTION — checks if posted URLs are still live
+// Runs every 6 hours via the 'check-post-results' alarm
+// ============================================================
+async function checkPostResults() {
+  const data = await chrome.storage.local.get(['jsw_session']);
+  const session = data.jsw_session;
+  if (!session) return;
+
+  // Get posts from last 48h that haven't been checked yet and have a post_url
+  const since = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString();
+  try {
+    const res = await fetch(`${SB_URL}/rest/v1/jsw_post_results?user_id=eq.${session.userId}&checked_at=is.null&posted_at=gte.${since}&post_url=not.is.null&select=*`, {
+      headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}` }
+    });
+    const results = await res.json();
+    if (!results?.length) return;
+
+    extLog('info', `checkPostResults: checking ${Math.min(results.length, 10)} of ${results.length} results`);
+
+    for (const r of results.slice(0, 10)) { // max 10 per check cycle
+      try {
+        // Try to fetch the post URL to see if it still exists
+        const checkRes = await fetch(r.post_url, { method: 'HEAD' });
+        const stillLive = checkRes.ok && checkRes.status < 400;
+
+        // Update result row with check outcome
+        await fetch(`${SB_URL}/rest/v1/jsw_post_results?id=eq.${r.id}`, {
+          method: 'PATCH',
+          headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+          body: JSON.stringify({ checked_at: new Date().toISOString(), still_live: stillLive })
+        });
+
+        // If removed, increment removal_count and escalate ban_risk
+        if (!stillLive) {
+          extLog('warn', `Post removed detected for group: ${r.group_url}`);
+          const groupRes = await fetch(`${SB_URL}/rest/v1/jsw_groups?user_id=eq.${session.userId}&group_url=eq.${encodeURIComponent(r.group_url)}&select=removal_count`, {
+            headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}` }
+          });
+          const groups = await groupRes.json();
+          const newCount = (groups?.[0]?.removal_count || 0) + 1;
+          const banRisk = newCount >= 3 ? 'high' : newCount >= 1 ? 'medium' : 'low';
+          await fetch(`${SB_URL}/rest/v1/jsw_groups?user_id=eq.${session.userId}&group_url=eq.${encodeURIComponent(r.group_url)}`, {
+            method: 'PATCH',
+            headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+            body: JSON.stringify({ removal_count: newCount, ban_risk: banRisk })
+          });
+          extLog('warn', `Group ${r.group_url} ban_risk updated to ${banRisk} (removal_count: ${newCount})`);
+        }
+
+        await sleep(2000); // don't hammer FB
+      } catch(e) {
+        extLog('warn', 'checkPostResults error: ' + e.message);
+      }
+    }
+  } catch (e) {
+    extLog('error', 'checkPostResults fetch error: ' + e.message);
   }
 }
