@@ -38,7 +38,7 @@ function showConnectedView(session) {
 }
 
 // ── Sign In ──
-$('loginBtn').addEventListener('click', async () => {
+async function handleLogin() {
   const email = $('loginEmail').value.trim();
   const password = $('loginPassword').value;
   const errEl = $('loginError');
@@ -85,6 +85,12 @@ $('loginBtn').addEventListener('click', async () => {
       }
     } catch(e) { /* non-fatal */ }
 
+    // Fix 2: Clear onboarding flag if a different user is logging in
+    const prev = await new Promise(r => chrome.storage.local.get('jsw_session', r));
+    if (prev.jsw_session?.userId && prev.jsw_session.userId !== session.userId) {
+      await chrome.storage.local.remove(['amplr_onboarding_done']);
+    }
+
     await chrome.storage.local.set({ jsw_session: session });
     chrome.runtime.sendMessage({ type: 'PAIRING_CONNECTED', pairing: session });
 
@@ -101,10 +107,7 @@ $('loginBtn').addEventListener('click', async () => {
     $('loginBtn').disabled = false;
     $('loginBtn').textContent = 'Sign In';
   }
-});
-
-$('loginEmail').addEventListener('keydown', e => { if (e.key === 'Enter') $('loginPassword').focus(); });
-$('loginPassword').addEventListener('keydown', e => { if (e.key === 'Enter') $('loginBtn').click(); });
+}
 
 // ── Sign Out ──
 function signOut() {
@@ -162,12 +165,18 @@ function markStep(step, label) {
 // Step 1: Background apps setting
 function openBackgroundSetting() {
   chrome.tabs.create({ url: 'chrome://settings/system' });
-  // Mark done after a short delay — user opened the page, assume they'll enable it
-  setTimeout(() => {
-    markStep('step1', '✓ Opened — enable "Continue running background apps"');
-    $('onboardStatus').textContent = 'Flip the toggle in Chrome settings, then come back here.';
-    setTimeout(() => { $('onboardStatus').textContent = ''; }, 4000);
-  }, 1000);
+  // Don't auto-mark done — show a confirmation button instead
+  const btn = document.getElementById('step1btn');
+  if (btn) {
+    btn.textContent = "I've enabled it ✓";
+    btn.style.background = 'rgba(16,185,129,.15)';
+    btn.style.color = '#10b981';
+    // Re-wire click to mark done
+    btn.replaceWith(btn.cloneNode(true)); // clear old listeners
+    const newBtn = document.getElementById('step1btn');
+    if (newBtn) newBtn.addEventListener('click', () => markStep('step1', '✓ Background apps enabled'));
+  }
+  document.getElementById('onboardStatus').textContent = 'Flip the toggle in Chrome settings, then tap the button above.';
 }
 
 // Step 2: Facebook login check
@@ -217,6 +226,25 @@ function finishOnboarding() {
     chrome.storage.local.get('jsw_session', (d) => showConnectedView(d.jsw_session || onboardSession));
   });
 }
+
+// ── Wire up all event listeners (MV3 CSP requires addEventListener, not onclick=) ──
+document.addEventListener('DOMContentLoaded', () => {
+  const on = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); };
+  on('step1btn', openBackgroundSetting);
+  on('step2btn', openFacebook);
+  on('step3btn', runImportGroups);
+  on('finishBtn', finishOnboarding);
+  on('importGroupsBtn', runImportGroups);
+  on('openDashBtn', () => chrome.tabs.create({ url: 'https://jack108510.github.io/fb-autoposter/dashboard.html' }));
+  on('signOutBtn', signOut);
+  on('loginBtn', handleLogin);
+
+  const loginEmail = document.getElementById('loginEmail');
+  const loginPassword = document.getElementById('loginPassword');
+  const loginBtn = document.getElementById('loginBtn');
+  if (loginEmail) loginEmail.addEventListener('keydown', e => { if (e.key === 'Enter') loginPassword && loginPassword.focus(); });
+  if (loginPassword) loginPassword.addEventListener('keydown', e => { if (e.key === 'Enter') loginBtn && loginBtn.click(); });
+});
 
 // ── Message listener ──
 chrome.runtime.onMessage.addListener((msg) => {

@@ -206,7 +206,7 @@
       <div class="step-body">
         <div class="step-title">Keep scheduling alive</div>
         <div class="step-desc">Amplr can post on schedule even when Chrome is closed — just enable one Chrome setting.</div>
-        <button class="step-action" id="step1btn" onclick="openBackgroundSetting()">Open Chrome Setting →</button>
+        <button class="step-action" id="step1btn">Open Chrome Setting →</button>
         <span class="step-done-badge" id="step1done" style="display:none;">✓ Enabled</span>
       </div>
     </div>
@@ -217,7 +217,7 @@
       <div class="step-body">
         <div class="step-title">Sign into Facebook</div>
         <div class="step-desc">Amplr needs you logged into Facebook in this browser to post on your behalf.</div>
-        <button class="step-action" id="step2btn" onclick="openFacebook()">Open Facebook →</button>
+        <button class="step-action" id="step2btn">Open Facebook →</button>
         <span class="step-done-badge" id="step2done" style="display:none;">✓ Logged in</span>
       </div>
     </div>
@@ -228,13 +228,13 @@
       <div class="step-body">
         <div class="step-title">Import your groups</div>
         <div class="step-desc">Amplr will scan your Facebook groups and save them to your dashboard.</div>
-        <button class="step-action" id="step3btn" onclick="runImportGroups()">Import Groups →</button>
+        <button class="step-action" id="step3btn">Import Groups →</button>
         <span class="step-done-badge" id="step3done" style="display:none;"></span>
       </div>
     </div>
 
     <div id="onboardStatus" style="font-size:11px;color:var(--text-3);text-align:center;margin-top:10px;min-height:14px;"></div>
-    <button class="onboard-finish" id="finishBtn" onclick="finishOnboarding()" disabled>Go to Dashboard →</button>
+    <button class="onboard-finish" id="finishBtn" disabled>Go to Dashboard →</button>
   </div>
 
   <!-- ── CONNECTED ── -->
@@ -247,18 +247,18 @@
       </div>
     </div>
 
-    <button class="action-btn" id="importGroupsBtn" onclick="runImportGroups()">
+    <button class="action-btn" id="importGroupsBtn">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9"/></svg>
       Sync Groups from Facebook
     </button>
     <div id="importStatus"></div>
 
-    <button class="action-btn" onclick="chrome.tabs.create({url:'https://jack108510.github.io/fb-autoposter/dashboard.html'})">
+    <button class="action-btn" id="openDashBtn">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
       Open Dashboard
     </button>
 
-    <button class="action-btn" onclick="signOut()" style="color:var(--red);border-color:transparent;">
+    <button class="action-btn" id="signOutBtn" style="color:var(--red);border-color:transparent;">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4M16 17l5-5-5-5M21 12H9"/></svg>
       Sign Out
     </button>

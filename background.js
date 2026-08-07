@@ -7,10 +7,6 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'START_POSTING') {
     runPostingQueue(msg, sender);
-  } else if (msg.type === 'ADD_SCHEDULE') {
-    registerAlarm(msg.schedule);
-  } else if (msg.type === 'REMOVE_SCHEDULE') {
-    chrome.alarms.clear(msg.id);
   } else if (msg.type === 'IMPORT_GROUPS') {
     importFacebookGroups();
   }
@@ -121,132 +117,8 @@ function notify(message) {
   });
 }
 
-// ============ SCHEDULES (chrome.alarms) ============
-
-function registerAlarm(schedule) {
-  const now = new Date();
-  const [hours, minutes] = schedule.time.split(':').map(Number);
-  let next = new Date(now);
-  next.setHours(hours, minutes, 0, 0);
-
-  if (next <= now) {
-    next.setDate(next.getDate() + 1);
-  }
-
-  // For weekly, advance to correct day
-  if (schedule.freq === 'weekly') {
-    while (next.getDay() !== schedule.day) {
-      next.setDate(next.getDate() + 1);
-    }
-  }
-
-  let periodInMinutes = undefined;
-
-  if (schedule.freq === 'hourly') {
-    periodInMinutes = 60;
-  } else if (schedule.freq === 'daily') {
-    periodInMinutes = 1440; // 24h
-  } else if (schedule.freq === 'weekly') {
-    periodInMinutes = 10080; // 7 days
-  }
-
-  const alarmInfo = {};
-  if (schedule.freq === 'once') {
-    alarmInfo.when = next.getTime();
-  } else {
-    alarmInfo.when = next.getTime();
-    alarmInfo.periodInMinutes = periodInMinutes;
-  }
-
-  chrome.alarms.create(schedule.id, alarmInfo);
-  console.log(`[JSW] Alarm set: ${schedule.id} for ${schedule.freq} at ${schedule.time}`);
-}
-
 // ============ ALARM FIRES ============
-chrome.alarms.onAlarm.addListener(async (alarm) => {
-  // Check if this is a scheduled post alarm
-  const data = await chrome.storage.local.get(['jsw_schedules', 'jsw_settings']);
-  const schedules = data.jsw_schedules || [];
-  const schedule = schedules.find(s => s.id === alarm.name);
 
-  if (!schedule) return;
-
-  console.log(`[JSW] Alarm fired: ${schedule.id}`);
-  const settings = data.jsw_settings || {};
-
-  // Run posting queue for this schedule
-  await runPostingQueueScheduled(schedule, settings);
-});
-
-async function runPostingQueueScheduled(schedule, settings) {
-  const { message, groups } = schedule;
-  let successCount = 0;
-
-  for (let i = 0; i < groups.length; i++) {
-    const groupUrl = groups[i];
-    let finalText = message;
-
-    if (settings.aiEnabled && settings.apiKey) {
-      try {
-        finalText = await callAI(message, settings, settings.aiVariations ? i : 0);
-      } catch (e) {
-        console.warn('[JSW] AI failed:', e.message);
-      }
-    }
-
-    try {
-      const tab = await chrome.tabs.create({ url: groupUrl, active: true });
-      await sleep(5000);
-
-      const response = await chrome.tabs.sendMessage(tab.id, {
-        type: 'POST_TO_PAGE',
-        message: finalText,
-        imageUrl: schedule.imageUrl || ''
-      });
-
-      if (response?.success) successCount++;
-
-      await sleep(1000);
-      await chrome.tabs.remove(tab.id);
-    } catch (e) {
-      console.warn(`[JSW] Failed for ${groupUrl}:`, e.message);
-    }
-
-    if (i < groups.length - 1) await sleep((schedule.delay || 30) * 1000);
-  }
-
-  notify(`Scheduled post complete — ${successCount}/${groups.length} groups.`);
-
-  // If it was a one-time schedule, remove it
-  if (schedule.freq === 'once') {
-    const fresh = await chrome.storage.local.get(['jsw_schedules']);
-    const updatedSchedules = (fresh.jsw_schedules || []).filter(s => s.id !== schedule.id);
-    await chrome.storage.local.set({ jsw_schedules: updatedSchedules });
-  }
-}
-
-// ============ RESTORE ALARMS ON BROWSER RESTART ============
-chrome.runtime.onStartup.addListener(async () => {
-  console.log('[JSW] Browser started — restoring alarms');
-  const data = await chrome.storage.local.get(['jsw_schedules']);
-  const schedules = data.jsw_schedules || [];
-  schedules.forEach(s => {
-    if (s.freq !== 'once') registerAlarm(s);
-  });
-});
-
-// Also restore on extension install/update
-chrome.runtime.onInstalled.addListener(async () => {
-  console.log('[JSW] Extension installed/updated — restoring alarms');
-  const data = await chrome.storage.local.get(['jsw_schedules']);
-  const schedules = data.jsw_schedules || [];
-  schedules.forEach(s => {
-    if (s.freq !== 'once') registerAlarm(s);
-  });
-});
-
-// ============ AI API (duplicated from popup for background use) ============
-async function callAI(userMessage, settings, variationIndex = 0) {
   const { aiProvider, apiKey, aiModel, aiPrompt, aiTemp } = settings;
 
   // Ollama (local, free) — default provider
