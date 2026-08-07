@@ -756,7 +756,6 @@ async function executeDashJob(job) {
           headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
           body: JSON.stringify({ last_posted_at: new Date().toISOString() })
         }).catch(e => extLog('warn', 'last_posted_at update error: ' + e.message));
-
         // Record post result for ban detection
         const postUrl = response?.postUrl || null;
         fetch(`${SB_URL}/rest/v1/jsw_post_results`, {
@@ -775,6 +774,7 @@ async function executeDashJob(job) {
             extLog('warn', 'First comment failed: ' + e.message);
           }
         }
+
       } else {
         lastError = response?.error || 'Unknown error';
         extLog('error', `Failed ${i + 1}/${groupUrls.length} → ${groupUrl}: ${lastError}`);
