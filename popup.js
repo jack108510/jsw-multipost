@@ -89,7 +89,7 @@ $('loginBtn').addEventListener('click', async () => {
     // Fetch AI settings for this user
     try {
       const setRes = await fetch(
-        `${SUPABASE_URL}/rest/v1/jsw_settings?user_id=eq.${sessionData.userId}&select=api_key,ai_model,ai_provider,default_delay`,
+        `${SUPABASE_URL}/rest/v1/jsw_settings?user_id=eq.${sessionData.userId}&select=api_key,ai_key,ai_model,ai_provider,ai_prompt,default_delay`,
         {
           headers: {
             'apikey': SUPABASE_ANON_KEY,
@@ -100,9 +100,11 @@ $('loginBtn').addEventListener('click', async () => {
       if (setRes.ok) {
         const rows = await setRes.json();
         if (rows.length > 0) {
-          sessionData.api_key = rows[0].api_key || '';
+          // ai_key is the new column; fall back to legacy api_key
+          sessionData.ai_key = rows[0].ai_key || rows[0].api_key || '';
           sessionData.ai_model = rows[0].ai_model || '';
           sessionData.ai_provider = rows[0].ai_provider || 'openai';
+          sessionData.ai_prompt = rows[0].ai_prompt || '';
           sessionData.default_delay = rows[0].default_delay || 30;
         }
       }

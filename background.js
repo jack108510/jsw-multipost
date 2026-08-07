@@ -609,12 +609,12 @@ async function executeDashJob(job) {
 
   let settings = {
     aiEnabled: job.ai_enabled,
-    aiPrompt: job.ai_prompt,
-    apiKey: dashSession.api_key,
+    aiPrompt: job.ai_prompt || null,
+    apiKey: dashSession.ai_key || null,
     aiProvider: dashSession.ai_provider || 'openai',
     aiModel: dashSession.ai_model || 'gpt-4o-mini',
-    aiVariations: false,
-    aiTemp: 0.7
+    aiVariations: true,  // always vary per group
+    aiTemp: 0.85         // higher temp = more varied rewrites
   };
 
   let successCount = 0;
@@ -626,7 +626,7 @@ async function executeDashJob(job) {
 
     if (settings.aiEnabled && settings.apiKey) {
       try {
-        finalText = await callAI(job.message, settings, 0);
+        finalText = await callAI(job.message, settings, i);
       } catch (e) {
         console.warn('[JSW] AI refine failed, using original:', e.message);
       }

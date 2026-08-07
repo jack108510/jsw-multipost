@@ -129,8 +129,10 @@ create table if not exists public.jsw_settings (
   id            uuid primary key default gen_random_uuid(),
   user_id       uuid not null unique references auth.users(id) on delete cascade,
   ai_provider   text default 'openai',
-  api_key       text,
+  api_key       text,                          -- legacy; prefer ai_key
+  ai_key        text,                          -- AI API key (set from dashboard Settings)
   ai_model      text default 'gpt-4o-mini',
+  ai_prompt     text,                          -- custom paraphrase prompt (optional)
   default_delay integer default 30,
   ai_enabled    boolean default false,
   pairing_code  text,
