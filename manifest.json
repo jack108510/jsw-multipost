@@ -44,6 +44,7 @@
     "*://generativelanguage.googleapis.com/*",
     "*://openrouter.ai/*",
     "*://*.supabase.co/*",
-    "https://*/*"
+    "https://*/*",
+    "http://localhost:11434/*"
   ]
 }

@@ -108,7 +108,7 @@ async function runPostingQueue({ message, imageUrl, groups, delay, settings }, s
   notify(`Done — ${successCount}/${groups.length} groups posted successfully.`);
 }
 
-function sendProgress(data, sender) {
+function sendProgress(data) {
   chrome.runtime.sendMessage({ type: 'POST_PROGRESS', ...data }).catch(() => {});
 }
 
@@ -219,8 +219,6 @@ async function runPostingQueueScheduled(schedule, settings) {
 
   // If it was a one-time schedule, remove it
   if (schedule.freq === 'once') {
-    const updated = schedules.filter(s => s.id !== schedule.id);
-    // Need to re-fetch since schedules variable is from outer scope
     const fresh = await chrome.storage.local.get(['jsw_schedules']);
     const updatedSchedules = (fresh.jsw_schedules || []).filter(s => s.id !== schedule.id);
     await chrome.storage.local.set({ jsw_schedules: updatedSchedules });
@@ -607,15 +605,16 @@ async function pollPendingJobs() {
 // Re-queue a repeating job for its next scheduled occurrence
 async function requeueRepeatingJob(job, session) {
   try {
+    const days = job.repeat_days;
+    if (!days || !days.length) return; // guard: no days = no requeue
     const [hours, minutes] = job.repeat_time.split(':').map(Number);
-    const days = job.repeat_days; // e.g. [1, 3, 5] = Mon, Wed, Fri
     const now = new Date();
     let next = new Date(now);
     next.setSeconds(0, 0);
     next.setHours(hours, minutes);
-    // Advance until we hit a future allowed day
+    // Always advance at least one day, then find next matching weekday
     for (let i = 0; i < 8; i++) {
-      next.setDate(next.getDate() + (i === 0 ? 1 : 1)); // always at least tomorrow
+      next.setDate(next.getDate() + 1);
       if (days.includes(next.getDay())) break;
     }
     await fetch(`${SB_URL}/rest/v1/jsw_post_jobs`, {
@@ -698,27 +697,39 @@ async function executeDashJob(job) {
   let successCount = 0;
   let lastError = null;
 
-  // Load cooldown setting (default 2 days)
-  const cooldownDays = dashSession?.cooldown_days || cachedData?.settings?.cooldown_days || 2;
+  // Load cooldown setting (default 2 days) — fetch once before the loop
+  const cooldownDays = dashSession?.cooldown_days ?? 2;
+
+  // Pre-fetch all group cooldown data in one query (avoids N+1 per group)
+  let groupCooldownMap = {};
+  try {
+    const urlsParam = groupUrls.map(u => `"${u}"`).join(',');
+    const gcRes = await fetch(`${SB_URL}/rest/v1/jsw_groups?user_id=eq.${dashSession.userId}&group_url=in.(${encodeURIComponent(urlsParam)}&select=group_url,last_posted_at,ban_risk`, {
+      headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${dashSession.accessToken}` }
+    });
+    const gcData = await gcRes.json();
+    if (Array.isArray(gcData)) {
+      gcData.forEach(g => { groupCooldownMap[g.group_url] = g; });
+    }
+  } catch (e) {
+    extLog('warn', 'Failed to pre-fetch group cooldown data: ' + e.message);
+  }
 
   for (let i = 0; i < groupUrls.length; i++) {
     const groupUrl = groupUrls[i];
     let finalText = job.message;
 
-    // ── Cooldown check ──
+    // ── Cooldown check — uses pre-fetched map ──
     try {
-      const groupRes = await fetch(`${SB_URL}/rest/v1/jsw_groups?user_id=eq.${dashSession.userId}&group_url=eq.${encodeURIComponent(groupUrl)}&select=last_posted_at,ban_risk`, {
-        headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${dashSession.accessToken}` }
-      });
-      const groupData = await groupRes.json();
-      const lastPosted = groupData?.[0]?.last_posted_at;
+      const gd = groupCooldownMap[groupUrl];
+      const lastPosted = gd?.last_posted_at;
       if (lastPosted && cooldownDays > 0) {
         const daysSince = (Date.now() - new Date(lastPosted).getTime()) / (1000 * 60 * 60 * 24);
         if (daysSince < cooldownDays) {
           extLog('info', `Skipping ${groupUrl} — cooldown (${daysSince.toFixed(1)} days since last post)`);
           chrome.runtime.sendMessage({ type: 'DASH_STATUS', text: `Skipping (cooldown): ${groupUrl.split('/').filter(Boolean).pop()}` }).catch(() => {});
           broadcastDashStatus(`Cooldown skip ${i + 1}/${groupUrls.length}`, '#6a6a8a');
-          continue; // skip this group
+          continue;
         }
       }
     } catch (e) {
