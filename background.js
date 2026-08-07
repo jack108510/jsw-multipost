@@ -117,8 +117,8 @@ function notify(message) {
   });
 }
 
-// ============ ALARM FIRES ============
-
+// ============ AI API (duplicated from popup for background use) ============
+async function callAI(userMessage, settings, variationIndex = 0) {
   const { aiProvider, apiKey, aiModel, aiPrompt, aiTemp } = settings;
 
   // Ollama (local, free) — default provider
@@ -575,8 +575,8 @@ async function executeDashJob(job) {
   // Pre-fetch all group cooldown data in one query (avoids N+1 per group)
   let groupCooldownMap = {};
   try {
-    const urlsParam = groupUrls.map(u => `"${u}"`).join(',');
-    const gcRes = await fetch(`${SB_URL}/rest/v1/jsw_groups?user_id=eq.${dashSession.userId}&group_url=in.(${encodeURIComponent(urlsParam)}&select=group_url,last_posted_at,ban_risk`, {
+    const inList = groupUrls.map(u => encodeURIComponent(u)).join(',');
+    const gcRes = await fetch(`${SB_URL}/rest/v1/jsw_groups?user_id=eq.${dashSession.userId}&group_url=in.(${inList})&select=group_url,last_posted_at,ban_risk`, {
       headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${dashSession.accessToken}` }
     });
     const gcData = await gcRes.json();
