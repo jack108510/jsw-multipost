@@ -171,4 +171,31 @@ chrome.runtime.onMessage.addListener((msg) => {
     const el = $('dashJobStatus');
     if (el) el.textContent = msg.text;
   }
+  if (msg.type === 'IMPORT_GROUPS_PROGRESS') {
+    const el = $('importStatus');
+    if (el) el.textContent = msg.text;
+  }
+  if (msg.type === 'IMPORT_GROUPS_DONE') {
+    const el = $('importStatus');
+    if (el) el.textContent = `✓ ${msg.count} groups imported`;
+    const btn = $('importGroupsBtn');
+    if (btn) { btn.disabled = false; btn.textContent = 'Import My Groups'; }
+  }
+  if (msg.type === 'IMPORT_GROUPS_ERROR') {
+    const el = $('importStatus');
+    if (el) { el.textContent = `Failed: ${msg.error}`; el.style.color = 'var(--red)'; }
+    const btn = $('importGroupsBtn');
+    if (btn) { btn.disabled = false; btn.textContent = 'Import My Groups'; }
+  }
+});
+
+// ---- Import Groups ----
+$('importGroupsBtn').addEventListener('click', () => {
+  const btn = $('importGroupsBtn');
+  const statusEl = $('importStatus');
+  btn.disabled = true;
+  btn.textContent = 'Importing...';
+  statusEl.textContent = 'Opening Facebook groups page...';
+  statusEl.style.color = 'var(--text-3)';
+  chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS' });
 });

@@ -11,6 +11,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     registerAlarm(msg.schedule);
   } else if (msg.type === 'REMOVE_SCHEDULE') {
     chrome.alarms.clear(msg.id);
+  } else if (msg.type === 'IMPORT_GROUPS') {
+    importFacebookGroups();
   }
 });
 
@@ -732,5 +734,147 @@ async function sbUpdateJob(jobId, patch) {
   } catch (e) {
     console.warn('[JSW] sbUpdateJob error:', e.message);
     return false;
+  }
+}
+
+// ============================================================
+// IMPORT FACEBOOK GROUPS
+// Opens facebook.com/groups/joins, scrolls to load all,
+// scrapes name + URL, saves to jsw_groups via Supabase REST.
+// ============================================================
+async function importFacebookGroups() {
+  const data = await chrome.storage.local.get(['jsw_session']);
+  const session = data.jsw_session;
+  if (!session || !session.userId) {
+    chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_ERROR', error: 'Not signed in' });
+    return;
+  }
+
+  let tab;
+  try {
+    chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_PROGRESS', text: 'Opening your Facebook groups...' });
+
+    tab = await chrome.tabs.create({ url: 'https://www.facebook.com/groups/joins/', active: false });
+    await sleep(5000);
+
+    // Scroll and collect — runs multiple passes until no new groups appear
+    let groups = [];
+    let prevCount = -1;
+    let passes = 0;
+    const MAX_PASSES = 30;
+
+    while (passes < MAX_PASSES && groups.length !== prevCount) {
+      prevCount = groups.length;
+      passes++;
+
+      // Scrape current DOM
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          const found = new Map();
+
+          // Primary: anchors linking to /groups/<id>/
+          document.querySelectorAll('a[href*="/groups/"]').forEach(a => {
+            const href = a.href || '';
+            const match = href.match(/facebook\.com\/groups\/([^/?#]+)/);
+            if (!match) return;
+            const slug = match[1];
+            // Skip Facebook's own nav links and numeric-only group pages that are just "discover"
+            if (['discover', 'feed', 'joins', 'create', 'search', 'membership'].includes(slug)) return;
+            if (found.has(slug)) return;
+
+            // Try to find the group name from nearby text
+            let name = '';
+            // Walk up to find a block with a meaningful text label
+            let el = a;
+            for (let i = 0; i < 6; i++) {
+              el = el.parentElement;
+              if (!el) break;
+              const spans = el.querySelectorAll('span');
+              for (const span of spans) {
+                const t = span.textContent.trim();
+                if (t.length > 2 && t.length < 120 && !t.match(/^\d+$/) && !t.includes('Join') && !t.includes('See more')) {
+                  name = t;
+                  break;
+                }
+              }
+              if (name) break;
+            }
+            if (!name) {
+              // Fallback: use the link's own text
+              name = a.textContent.trim();
+            }
+
+            const cleanUrl = `https://www.facebook.com/groups/${slug}/`;
+            found.set(slug, { name: name || slug, url: cleanUrl });
+          });
+
+          return [...found.values()];
+        }
+      });
+
+      if (result?.result) {
+        const fresh = result.result;
+        const existingSlugs = new Set(groups.map(g => g.url));
+        const newOnes = fresh.filter(g => !existingSlugs.has(g.url));
+        groups = [...groups, ...newOnes];
+      }
+
+      chrome.runtime.sendMessage({
+        type: 'IMPORT_GROUPS_PROGRESS',
+        text: `Found ${groups.length} groups, scrolling...`
+      });
+
+      // Scroll down to trigger lazy load
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => window.scrollBy(0, window.innerHeight * 3)
+      });
+
+      await sleep(2500);
+    }
+
+    await chrome.tabs.remove(tab.id);
+    tab = null;
+
+    if (groups.length === 0) {
+      chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_ERROR', error: 'No groups found — make sure you\'re logged in to Facebook' });
+      return;
+    }
+
+    // Save to Supabase — upsert by (user_id, group_url)
+    chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_PROGRESS', text: `Saving ${groups.length} groups...` });
+
+    const rows = groups.map(g => ({
+      user_id:    session.userId,
+      group_url:  g.url,
+      group_name: g.name || null
+    }));
+
+    // Batch in chunks of 50
+    const CHUNK = 50;
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      const chunk = rows.slice(i, i + CHUNK);
+      await fetch(`${SB_URL}/rest/v1/jsw_groups`, {
+        method: 'POST',
+        headers: {
+          'apikey': SB_ANON_KEY,
+          'Authorization': `Bearer ${session.accessToken}`,
+          'Content-Type': 'application/json',
+          'Prefer': 'resolution=merge-duplicates,return=minimal'
+        },
+        body: JSON.stringify(chunk)
+      });
+    }
+
+    extLog('info', `Imported ${groups.length} groups for user ${session.userId}`);
+    chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_DONE', count: groups.length, groups });
+
+  } catch (e) {
+    extLog('error', 'importFacebookGroups error: ' + e.message);
+    chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_ERROR', error: e.message });
+    if (tab) {
+      try { await chrome.tabs.remove(tab.id); } catch (_) {}
+    }
   }
 }
