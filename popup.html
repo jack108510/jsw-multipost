@@ -39,8 +39,8 @@
   }
   .brand-icon {
     width: 28px; height: 28px; border-radius: 7px;
-    background: var(--blue);
-    display: flex; align-items: center; justify-content: center;
+    background: #000;
+    overflow: hidden;
     flex-shrink: 0;
   }
   .brand-name { font-size: 16px; font-weight: 700; letter-spacing: -.02em; }
@@ -159,13 +159,7 @@
 
 <div class="header">
   <div class="brand-icon">
-    <svg width="16" height="16" viewBox="0 0 40 40" fill="none">
-      <path d="M8 20 a8 8 0 1 1 8 8 L16 12 L16 28" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-      <line x1="16" y1="20" x2="28" y2="20" stroke="white" stroke-width="3" stroke-linecap="round"/>
-      <circle cx="28" cy="12" r="3" fill="white"/>
-      <circle cx="32" cy="20" r="3" fill="white"/>
-      <circle cx="28" cy="28" r="3" fill="white"/>
-    </svg>
+    <img src="logo.jpg" style="width:100%;height:100%;object-fit:cover;border-radius:5px;" alt="Amplr">
   </div>
   <div>
     <div class="brand-name">amplr</div>
