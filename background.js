@@ -566,6 +566,26 @@ async function pollPendingJobs() {
 
 // Claim a job (set status=processing) then run it
 async function executeDashJob(job) {
+  // Special job: import groups from Facebook
+  if (job.message === '__import_groups__') {
+    const claimed = await sbUpdateJob(job.id, {
+      status: 'processing',
+      started_at: new Date().toISOString()
+    });
+    if (!claimed) return;
+    extLog('info', 'Running import_groups job ' + job.id);
+    try {
+      await importFacebookGroupsForJob(job.id);
+    } catch (e) {
+      await sbUpdateJob(job.id, {
+        status: 'failed',
+        result: { error: e.message },
+        completed_at: new Date().toISOString()
+      });
+    }
+    return;
+  }
+
   // Try to claim it via PATCH
   const claimed = await sbUpdateJob(job.id, {
     status: 'processing',
@@ -742,6 +762,108 @@ async function sbUpdateJob(jobId, patch) {
 // Opens facebook.com/groups/joins, scrolls to load all,
 // scrapes name + URL, saves to jsw_groups via Supabase REST.
 // ============================================================
+// Job-aware version: updates job progress and result in jsw_post_jobs
+async function importFacebookGroupsForJob(jobId) {
+  const data = await chrome.storage.local.get(['jsw_session']);
+  const session = data.jsw_session;
+  if (!session || !session.userId) {
+    await sbUpdateJob(jobId, { status: 'failed', result: { error: 'Not signed in' }, completed_at: new Date().toISOString() });
+    return;
+  }
+
+  const updateProgress = async (text) => {
+    await sbUpdateJob(jobId, { result: { text } });
+    chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_PROGRESS', text }).catch(() => {});
+  };
+
+  let tab;
+  try {
+    await updateProgress('Opening your Facebook groups...');
+    tab = await chrome.tabs.create({ url: 'https://www.facebook.com/groups/joins/', active: false });
+    await sleep(5000);
+
+    let groups = [];
+    let prevCount = -1;
+    let passes = 0;
+    const MAX_PASSES = 30;
+
+    while (passes < MAX_PASSES && groups.length !== prevCount) {
+      prevCount = groups.length;
+      passes++;
+
+      const [result] = await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: () => {
+          const found = new Map();
+          document.querySelectorAll('a[href*="/groups/"]').forEach(a => {
+            const href = a.href || '';
+            const match = href.match(/facebook\.com\/groups\/([^/?#]+)/);
+            if (!match) return;
+            const slug = match[1];
+            if (['discover', 'feed', 'joins', 'create', 'search', 'membership'].includes(slug)) return;
+            if (found.has(slug)) return;
+            let name = '';
+            let el = a;
+            for (let i = 0; i < 6; i++) {
+              el = el.parentElement;
+              if (!el) break;
+              const spans = el.querySelectorAll('span');
+              for (const span of spans) {
+                const t = span.textContent.trim();
+                if (t.length > 2 && t.length < 120 && !t.match(/^\d+$/) && !t.includes('Join') && !t.includes('See more')) {
+                  name = t; break;
+                }
+              }
+              if (name) break;
+            }
+            if (!name) name = a.textContent.trim();
+            found.set(slug, { name: name || slug, url: `https://www.facebook.com/groups/${slug}/` });
+          });
+          return [...found.values()];
+        }
+      });
+
+      if (result?.result) {
+        const existingSlugs = new Set(groups.map(g => g.url));
+        groups = [...groups, ...result.result.filter(g => !existingSlugs.has(g.url))];
+      }
+
+      await updateProgress(`Found ${groups.length} groups, scrolling...`);
+      await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => window.scrollBy(0, window.innerHeight * 3) });
+      await sleep(2500);
+    }
+
+    await chrome.tabs.remove(tab.id);
+    tab = null;
+
+    if (groups.length === 0) {
+      await sbUpdateJob(jobId, { status: 'failed', result: { error: 'No groups found — make sure you\'re logged into Facebook' }, completed_at: new Date().toISOString() });
+      return;
+    }
+
+    await updateProgress(`Saving ${groups.length} groups...`);
+
+    const rows = groups.map(g => ({ user_id: session.userId, group_url: g.url, group_name: g.name || null }));
+    const CHUNK = 50;
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      await fetch(`${SB_URL}/rest/v1/jsw_groups`, {
+        method: 'POST',
+        headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}`, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify(rows.slice(i, i + CHUNK))
+      });
+    }
+
+    extLog('info', `Imported ${groups.length} groups via job ${jobId}`);
+    await sbUpdateJob(jobId, { status: 'done', result: { count: groups.length, text: `Imported ${groups.length} groups` }, completed_at: new Date().toISOString() });
+    chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_DONE', count: groups.length, groups }).catch(() => {});
+
+  } catch (e) {
+    extLog('error', 'importFacebookGroupsForJob error: ' + e.message);
+    if (tab) { try { await chrome.tabs.remove(tab.id); } catch (_) {} }
+    await sbUpdateJob(jobId, { status: 'failed', result: { error: e.message }, completed_at: new Date().toISOString() });
+  }
+}
+
 async function importFacebookGroups() {
   const data = await chrome.storage.local.get(['jsw_session']);
   const session = data.jsw_session;

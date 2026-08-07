@@ -47,6 +47,7 @@ create table if not exists public.jsw_post_jobs (
   ai_prompt    text,
   status       text not null default 'pending',
   error        text,
+  result       jsonb,
   started_at   timestamptz,
   completed_at timestamptz,
   created_at   timestamptz not null default now()
