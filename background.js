@@ -251,9 +251,20 @@ chrome.runtime.onInstalled.addListener(async () => {
 async function callAI(userMessage, settings, variationIndex = 0) {
   const { aiProvider, apiKey, aiModel, aiPrompt, aiTemp } = settings;
 
-  let systemContent = aiPrompt || 'Rewrite this into an engaging Facebook group post.';
-  if (settings.aiVariations && variationIndex > 0) {
-    systemContent += ` This is variation #${variationIndex + 1}. Write it differently — vary the hook, structure, and word choice while keeping the same message.`;
+  // Ollama (local, free) — default provider
+  if (aiProvider === 'ollama' || (!aiProvider && !apiKey)) {
+    return callOllama(
+      aiModel || 'qwen3:8b',
+      aiPrompt || null,
+      userMessage,
+      variationIndex,
+      aiTemp || 0.85
+    );
+  }
+
+  let systemContent = aiPrompt || 'Rewrite this into an engaging Facebook group post. Keep the same message but vary the hook, structure, and wording. Sound natural and human. Output ONLY the rewritten post, nothing else.';
+  if (variationIndex > 0) {
+    systemContent += ` This is variation #${variationIndex + 1}. Make it noticeably different from previous versions.`;
   }
 
   const messages = [
@@ -270,6 +281,31 @@ async function callAI(userMessage, settings, variationIndex = 0) {
   } else {
     return callOpenAI(apiKey, aiModel || 'gpt-4o-mini', messages, aiTemp || 0.7);
   }
+}
+
+async function callOllama(model, customPrompt, userMessage, variationIndex, temp) {
+  const system = customPrompt ||
+    'You rewrite Facebook group posts to make them unique and avoid spam detection. Keep the exact same message, offer, and call to action — vary the hook, sentence structure, and word choice. Sound natural and human. Output ONLY the rewritten post text, nothing else. No explanations, no preamble.';
+  const user = `Rewrite this Facebook post (variation #${variationIndex + 1}). Change the opening, vary sentence length, use different synonyms. Keep the same core message and any links intact.\n\nOriginal:\n${userMessage}`;
+
+  const res = await fetch('http://localhost:11434/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      stream: false,
+      options: { temperature: temp },
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: user }
+      ]
+    })
+  });
+  if (!res.ok) throw new Error(`Ollama ${res.status}`);
+  const data = await res.json();
+  const raw = data.message?.content || '';
+  // Strip <think>...</think> blocks that qwen3 sometimes outputs
+  return raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 }
 
 async function callOpenAI(key, model, messages, temp) {
@@ -610,11 +646,11 @@ async function executeDashJob(job) {
   let settings = {
     aiEnabled: job.ai_enabled,
     aiPrompt: job.ai_prompt || null,
-    apiKey: dashSession.ai_key || null,
-    aiProvider: dashSession.ai_provider || 'openai',
-    aiModel: dashSession.ai_model || 'gpt-4o-mini',
-    aiVariations: true,  // always vary per group
-    aiTemp: 0.85         // higher temp = more varied rewrites
+    apiKey: dashSession?.ai_key || null,
+    aiProvider: dashSession?.ai_provider || 'ollama',
+    aiModel: dashSession?.ai_model || 'qwen3:8b',
+    aiVariations: true,
+    aiTemp: 0.85
   };
 
   let successCount = 0;
@@ -624,7 +660,9 @@ async function executeDashJob(job) {
     const groupUrl = groupUrls[i];
     let finalText = job.message;
 
-    if (settings.aiEnabled && settings.apiKey) {
+    // Ollama doesn't need an API key — always attempt if ai_enabled
+    const canUseAI = settings.aiEnabled && (settings.aiProvider === 'ollama' || settings.apiKey);
+    if (canUseAI) {
       try {
         finalText = await callAI(job.message, settings, i);
       } catch (e) {
