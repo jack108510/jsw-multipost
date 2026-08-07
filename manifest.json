@@ -43,6 +43,7 @@
     "*://api.anthropic.com/*",
     "*://generativelanguage.googleapis.com/*",
     "*://openrouter.ai/*",
-    "*://*.supabase.co/*"
+    "*://*.supabase.co/*",
+    "https://*/*"
   ]
 }

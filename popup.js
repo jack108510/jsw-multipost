@@ -1,4 +1,4 @@
-// ============ Amplr — Pairing Only ============
+// ============ Amplr — Direct Login (REST, no Supabase lib) ============
 
 const $ = (id) => document.getElementById(id);
 
@@ -14,11 +14,11 @@ if (!chrome.runtime) {
 const SUPABASE_URL = 'https://xacehhtgvubcqdoltazg.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_1TNu5hqotJ7GGQXfjliivQ_ttK51EAA';
 
-// ---- Load pairing state on popup open ----
-chrome.storage.local.get(['jsw_pairing'], (data) => {
-  const pairing = data.jsw_pairing;
-  if (pairing && pairing.connected && pairing.userId) {
-    showConnectedState(pairing);
+// ---- Load session on popup open ----
+chrome.storage.local.get(['jsw_session'], (data) => {
+  const stored = data.jsw_session;
+  if (stored && stored.userId) {
+    showConnectedState(stored);
   } else {
     showDisconnectedState();
   }
@@ -29,9 +29,12 @@ function showDisconnectedState() {
   $('dashConnected').style.display = 'none';
 }
 
-function showConnectedState(pairing) {
+function showConnectedState(sessionData) {
   $('dashDisconnected').style.display = 'none';
   $('dashConnected').style.display = 'block';
+  if (sessionData.email && $('dashEmail')) {
+    $('dashEmail').textContent = sessionData.email;
+  }
 }
 
 function showDashStatus(text, type = '') {
@@ -41,73 +44,125 @@ function showDashStatus(text, type = '') {
   s.className = 'status' + (type ? ' ' + type : '');
 }
 
-// ---- Connect: validate pairing code against Supabase ----
-$('pairConnectBtn').addEventListener('click', async () => {
-  const code = $('pairingCodeInput').value.trim().toUpperCase();
-  if (code.length !== 6) {
-    showDashStatus('Enter the 6-character code', 'error');
+// ---- Sign In via Supabase REST (no library needed) ----
+$('loginBtn').addEventListener('click', async () => {
+  const email = $('loginEmail').value.trim();
+  const password = $('loginPassword').value;
+
+  if (!email || !password) {
+    showDashStatus('Enter email and password', 'error');
+    return;
+  }
+  if (password.length < 6) {
+    showDashStatus('Password must be 6+ characters', 'error');
     return;
   }
 
-  showDashStatus('Validating...');
-  $('pairConnectBtn').disabled = true;
+  showDashStatus('Signing in...');
+  $('loginBtn').disabled = true;
 
   try {
-    const res = await fetch(
-      `${SUPABASE_URL}/rest/v1/jsw_settings?pairing_code=eq.${encodeURIComponent(code)}&select=user_id,api_key,ai_model,ai_provider,default_delay`,
-      {
-        headers: {
-          'apikey': SUPABASE_ANON_KEY,
-          'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-        }
-      }
-    );
-
-    if (!res.ok) throw new Error(`Lookup failed (${res.status})`);
-
-    const rows = await res.json();
-    if (!rows.length) {
-      showDashStatus('Invalid or expired code', 'error');
-      $('pairConnectBtn').disabled = false;
-      return;
-    }
-
-    const row = rows[0];
-    const pairing = {
-      connected: true,
-      userId: row.user_id,
-      email: 'Dashboard account',
-      code: code,
-      connectedAt: Date.now(),
-      ai_provider: row.ai_provider,
-      ai_model: row.ai_model,
-      api_key: row.api_key,
-      default_delay: row.default_delay
-    };
-
-    await new Promise(resolve => {
-      chrome.storage.local.set({ jsw_pairing: pairing }, resolve);
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+      method: 'POST',
+      headers: {
+        'apikey': SUPABASE_ANON_KEY,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ email, password })
     });
 
-    showConnectedState(pairing);
+    const data = await res.json();
+
+    if (!res.ok || !data.access_token || !data.user) {
+      throw new Error(data.error_description || data.message || `Login failed (${res.status})`);
+    }
+
+    const sessionData = {
+      userId: data.user.id,
+      email: data.user.email,
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token,
+      expiresAt: data.expires_at,
+      connectedAt: Date.now()
+    };
+
+    // Fetch AI settings for this user
+    try {
+      const setRes = await fetch(
+        `${SUPABASE_URL}/rest/v1/jsw_settings?user_id=eq.${sessionData.userId}&select=api_key,ai_model,ai_provider,default_delay`,
+        {
+          headers: {
+            'apikey': SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${sessionData.accessToken}`
+          }
+        }
+      );
+      if (setRes.ok) {
+        const rows = await setRes.json();
+        if (rows.length > 0) {
+          sessionData.api_key = rows[0].api_key || '';
+          sessionData.ai_model = rows[0].ai_model || '';
+          sessionData.ai_provider = rows[0].ai_provider || 'openai';
+          sessionData.default_delay = rows[0].default_delay || 30;
+        }
+      }
+    } catch (e) {
+      console.warn('[JSW] Could not fetch AI settings:', e.message);
+    }
+
+    await new Promise(resolve => {
+      chrome.storage.local.set({ jsw_session: sessionData }, resolve);
+    });
+
+    showConnectedState(sessionData);
     showDashStatus('');
 
     // Tell background to start polling
-    chrome.runtime.sendMessage({ type: 'PAIRING_CONNECTED', pairing });
+    chrome.runtime.sendMessage({ type: 'PAIRING_CONNECTED', pairing: sessionData });
   } catch (e) {
-    showDashStatus('Error: ' + e.message, 'error');
-    $('pairConnectBtn').disabled = false;
+    showDashStatus(e.message || 'Login failed', 'error');
+    $('loginBtn').disabled = false;
   }
 });
 
-// ---- Disconnect ----
+// ---- Enter key submits ----
+$('loginEmail').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') $('loginPassword').focus();
+});
+$('loginPassword').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') $('loginBtn').click();
+});
+
+// ---- Sign Out ----
 $('pairDisconnectBtn').addEventListener('click', async () => {
+  // Try to revoke the token server-side (best-effort)
+  try {
+    const data = await new Promise(resolve => {
+      chrome.storage.local.get(['jsw_session'], resolve);
+    });
+    const token = data.jsw_session?.accessToken;
+    if (token) {
+      await fetch(`${SUPABASE_URL}/auth/v1/logout`, {
+        method: 'POST',
+        headers: {
+          'apikey': SUPABASE_ANON_KEY,
+          'Authorization': `Bearer ${token}`
+        }
+      });
+    }
+  } catch (e) { /* ignore */ }
+
   await new Promise(resolve => {
-    chrome.storage.local.remove(['jsw_pairing'], resolve);
+    chrome.storage.local.remove(['jsw_session'], resolve);
   });
   chrome.runtime.sendMessage({ type: 'PAIRING_DISCONNECTED' });
   showDisconnectedState();
   showDashStatus('');
+
+  // Clear fields
+  $('loginEmail').value = '';
+  $('loginPassword').value = '';
+  $('loginBtn').disabled = false;
 });
 
 // ---- Listen for job status updates from background ----

@@ -209,3 +209,34 @@ create policy "amplr_data_delete_own" on public.amplr_data
 -- The dashboard creates the session via Supabase email/password
 -- auth and the code is exchanged for the user_id during pairing.
 -- ============================================================
+
+-- ============================================================
+-- TABLE: jsw_group_lookups (auto-name resolution)
+-- Dashboard creates a lookup row, extension opens the group
+-- page, scrapes the name, writes it back.
+-- ============================================================
+create table if not exists public.jsw_group_lookups (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  group_url   text not null,
+  group_name  text,
+  status      text not null default 'pending',
+  created_at  timestamptz not null default now(),
+  resolved_at timestamptz
+);
+alter table public.jsw_group_lookups enable row level security;
+drop policy if exists "jsw_group_lookups_select_own" on public.jsw_group_lookups;
+create policy "jsw_group_lookups_select_own" on public.jsw_group_lookups
+  for select using (auth.uid() = user_id);
+drop policy if exists "jsw_group_lookups_insert_own" on public.jsw_group_lookups;
+create policy "jsw_group_lookups_insert_own" on public.jsw_group_lookups
+  for insert with check (auth.uid() = user_id);
+drop policy if exists "jsw_group_lookups_update_own" on public.jsw_group_lookups;
+create policy "jsw_group_lookups_update_own" on public.jsw_group_lookups
+  for update using (auth.uid() = user_id);
+drop policy if exists "jsw_group_lookups_delete_own" on public.jsw_group_lookups;
+create policy "jsw_group_lookups_delete_own" on public.jsw_group_lookups
+  for delete using (auth.uid() = user_id);
+
+create index if not exists jsw_group_lookups_user_status_idx
+  on public.jsw_group_lookups (user_id, status, created_at);

@@ -339,67 +339,181 @@ async function callOpenRouter(key, model, messages, temp) {
 // ============================================================
 const SB_URL = 'https://xacehhtgvubcqdoltazg.supabase.co';
 const SB_ANON_KEY = 'sb_publishable_1TNu5hqotJ7GGQXfjliivQ_ttK51EAA';
-let dashPollTimer = null;
-let heartbeatTimer = null;
-let dashPairing = null;
+let dashSession = null;
 
-// Listen for pairing connect/disconnect from popup
+// ─── Remote logging ───
+async function extLog(level, message) {
+  const text = typeof message === 'string' ? message : JSON.stringify(message);
+  const prefix = `[${level.toUpperCase()}] ${text}`;
+  if (level === 'error') console.error('[JSW]', prefix);
+  else console.log('[JSW]', prefix);
+
+  if (!dashSession || !dashSession.userId || !dashSession.accessToken) return;
+  try {
+    await fetch(`${SB_URL}/rest/v1/jsw_ext_logs`, {
+      method: 'POST',
+      headers: {
+        'apikey': SB_ANON_KEY,
+        'Authorization': `Bearer ${dashSession.accessToken}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify({ user_id: dashSession.userId, level, message: text })
+    });
+  } catch (e) { /* silent — don't recurse */ }
+}
+
+// Listen for login/logout from popup
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === 'PAIRING_CONNECTED') {
-    dashPairing = msg.pairing;
+    dashSession = msg.pairing;
     startDashPolling();
-    console.log('[JSW] Dashboard pairing connected, polling started');
+    extLog('info', 'Session connected, polling started for ' + dashSession.userId);
   } else if (msg.type === 'PAIRING_DISCONNECTED') {
     stopDashPolling();
-    dashPairing = null;
-    console.log('[JSW] Dashboard pairing disconnected');
+    dashSession = null;
+    extLog('info', 'Session disconnected');
   }
 });
 
-// On startup, resume polling if already paired
-chrome.runtime.onStartup.addListener(loadPairingAndResume);
-chrome.runtime.onInstalled.addListener(loadPairingAndResume);
+// On startup, resume polling if already logged in
+chrome.runtime.onStartup.addListener(loadSessionAndResume);
+chrome.runtime.onInstalled.addListener(loadSessionAndResume);
 // MV3 service workers restart without firing onStartup/onInstalled — call on load too
-loadPairingAndResume();
+loadSessionAndResume();
 
-async function loadPairingAndResume() {
-  const data = await chrome.storage.local.get(['jsw_pairing']);
-  if (data.jsw_pairing && data.jsw_pairing.connected) {
-    dashPairing = data.jsw_pairing;
+async function loadSessionAndResume() {
+  const data = await chrome.storage.local.get(['jsw_session']);
+  if (data.jsw_session && data.jsw_session.userId) {
+    dashSession = data.jsw_session;
     startDashPolling();
-    console.log('[JSW] Resumed dashboard polling for user', dashPairing.userId);
+    extLog('info', 'Resumed polling for user ' + dashSession.userId);
   }
 }
 
 function startDashPolling() {
-  if (dashPollTimer) clearInterval(dashPollTimer);
-  // Poll immediately, then every 10 seconds
+  // Poll immediately, then via alarm (survives MV3 service worker sleep)
   pollPendingJobs();
-  dashPollTimer = setInterval(pollPendingJobs, 10000);
-  // Heartbeat via chrome.alarms (survives service worker sleep, unlike setInterval)
+  pollGroupLookups();
+  chrome.alarms.create('poll-jobs', { periodInMinutes: 1 });
   writeHeartbeat();
   chrome.alarms.create('amplr_heartbeat', { periodInMinutes: 0.5 }); // every 30s
 }
 
 function stopDashPolling() {
-  if (dashPollTimer) { clearInterval(dashPollTimer); dashPollTimer = null; }
+  chrome.alarms.clear('poll-jobs');
   chrome.alarms.clear('amplr_heartbeat');
 }
 
-// Heartbeat alarm handler
+// Heartbeat and poll-jobs alarm handler
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'amplr_heartbeat') writeHeartbeat();
+  else if (alarm.name === 'poll-jobs') { pollPendingJobs(); pollGroupLookups(); }
 });
 
-// Write heartbeat so the dashboard knows the extension is running
-async function writeHeartbeat() {
-  if (!dashPairing || !dashPairing.userId) return;
+// ─── Group name lookup ───
+async function pollGroupLookups() {
+  const data = await chrome.storage.local.get(['jsw_session']);
+  const session = data.jsw_session;
+  if (!session || !session.userId) return;
+  if (!dashSession) dashSession = session;
+
   try {
-    await fetch(`${SB_URL}/rest/v1/jsw_settings?user_id=eq.${encodeURIComponent(dashPairing.userId)}`, {
+    const url = `${SB_URL}/rest/v1/jsw_group_lookups?user_id=eq.${encodeURIComponent(session.userId)}&status=eq.pending&order=created_at.asc&limit=1`;
+    const res = await fetch(url, {
+      headers: {
+        'apikey': SB_ANON_KEY,
+        'Authorization': `Bearer ${session.accessToken}`
+      }
+    });
+
+    if (!res.ok) return;
+    const lookups = await res.json();
+    if (!lookups || !lookups.length) return;
+
+    const lookup = lookups[0];
+    extLog('info', 'Processing group name lookup: ' + lookup.group_url);
+
+    // Claim it
+    const claimed = await sbUpdateLookup(lookup.id, { status: 'processing' });
+    if (!claimed) {
+      extLog('warn', 'Could not claim lookup (already claimed?)');
+      return;
+    }
+
+    // Open the group page and grab the title
+    const groupName = await fetchGroupNameFromFB(lookup.group_url);
+
+    await sbUpdateLookup(lookup.id, {
+      status: 'done',
+      group_name: groupName || null,
+      resolved_at: new Date().toISOString()
+    });
+    extLog('info', 'Group name resolved: ' + lookup.group_url + ' → ' + (groupName || 'FAILED'));
+  } catch (e) {
+    extLog('error', 'Group lookup error: ' + e.message);
+  }
+}
+
+async function fetchGroupNameFromFB(groupUrl) {
+  try {
+    extLog('info', 'Opening FB group page: ' + groupUrl);
+    const tab = await chrome.tabs.create({ url: groupUrl, active: false });
+    await new Promise(r => setTimeout(r, 5000)); // wait for page load
+
+    const [{ result: title }] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => {
+        // FB group pages have the name in the title or h1
+        const og = document.querySelector('meta[property="og:title"]')?.content;
+        if (og) return og.replace(/\s*\|\s*Facebook\s*$/i, '').trim();
+        const h1 = document.querySelector('h1')?.textContent;
+        if (h1) return h1.trim();
+        return document.title.replace(/\s*\|\s*Facebook\s*$/i, '').trim();
+      }
+    });
+
+    await chrome.tabs.remove(tab.id);
+    extLog('info', 'Scraped group name: ' + (title || 'NONE'));
+    return title || null;
+  } catch (e) {
+    extLog('error', 'Failed to fetch group name: ' + e.message);
+    return null;
+  }
+}
+
+async function sbUpdateLookup(lookupId, patch) {
+  try {
+    const res = await fetch(`${SB_URL}/rest/v1/jsw_group_lookups?id=eq.${lookupId}`, {
       method: 'PATCH',
       headers: {
         'apikey': SB_ANON_KEY,
-        'Authorization': `Bearer ${SB_ANON_KEY}`,
+        'Authorization': `Bearer ${dashSession.accessToken}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=minimal'
+      },
+      body: JSON.stringify(patch)
+    });
+    return res.ok;
+  } catch (e) {
+    console.warn('[JSW] sbUpdateLookup error:', e.message);
+    return false;
+  }
+}
+
+// Write heartbeat so the dashboard knows the extension is running
+async function writeHeartbeat() {
+  try {
+    // Read from storage every time — survives service worker restarts
+    const data = await chrome.storage.local.get(['jsw_session']);
+    const session = data.jsw_session;
+    if (!session || !session.userId) return;
+
+    await fetch(`${SB_URL}/rest/v1/jsw_settings?user_id=eq.${encodeURIComponent(session.userId)}`, {
+      method: 'PATCH',
+      headers: {
+        'apikey': SB_ANON_KEY,
+        'Authorization': `Bearer ${session.accessToken}`,
         'Content-Type': 'application/json',
         'Prefer': 'return=minimal'
       },
@@ -416,30 +530,35 @@ function broadcastDashStatus(text, color) {
 
 // Fetch pending jobs for this paired user via REST API
 async function pollPendingJobs() {
-  if (!dashPairing || !dashPairing.userId) return;
+  // Read from storage — survives service worker restarts
+  const data = await chrome.storage.local.get(['jsw_session']);
+  const session = data.jsw_session;
+  if (!session || !session.userId) return;
 
   try {
-    const url = `${SB_URL}/rest/v1/jsw_post_jobs?user_id=eq.${encodeURIComponent(dashPairing.userId)}&status=eq.pending&order=created_at.asc&limit=1`;
+    const url = `${SB_URL}/rest/v1/jsw_post_jobs?user_id=eq.${encodeURIComponent(session.userId)}&status=eq.pending&order=created_at.asc&limit=1&select=*`;
     const res = await fetch(url, {
       headers: {
         'apikey': SB_ANON_KEY,
-        'Authorization': `Bearer ${SB_ANON_KEY}`
+        'Authorization': `Bearer ${session.accessToken}`
       }
     });
 
     if (!res.ok) {
-      console.warn('[JSW] Dash poll failed:', res.status);
+      extLog('warn', 'Job poll failed: ' + res.status);
       return;
     }
 
     const jobs = await res.json();
     if (jobs && jobs.length > 0) {
       const job = jobs[0];
-      console.log('[JSW] Found pending dashboard job:', job.id);
+      extLog('info', 'Found pending job: ' + job.id);
+      // Ensure dashSession is loaded for executeDashJob
+      if (!dashSession) dashSession = session;
       await executeDashJob(job);
     }
   } catch (e) {
-    console.warn('[JSW] Dash poll error:', e.message);
+    extLog('error', 'Dash poll error: ' + e.message);
   }
 }
 
@@ -451,24 +570,27 @@ async function executeDashJob(job) {
     started_at: new Date().toISOString()
   });
   if (!claimed) {
-    console.log('[JSW] Job already claimed by another worker, skipping');
+    extLog('warn', 'Job already claimed, skipping: ' + job.id);
     return;
   }
 
+  extLog('info', 'Executing job ' + job.id);
   broadcastDashStatus('Processing job...', '#eab308');
 
-  const groups = job.groups || [];
+  let groups = job.groups || [];
   if (!Array.isArray(groups)) {
     try { groups = JSON.parse(groups); } catch (e) { groups = []; }
   }
   const groupUrls = groups.map(g => typeof g === 'string' ? g : g.url).filter(Boolean);
 
+  extLog('info', 'Job ' + job.id + ' — ' + groupUrls.length + ' groups');
+
   let settings = {
     aiEnabled: job.ai_enabled,
     aiPrompt: job.ai_prompt,
-    apiKey: dashPairing.api_key,
-    aiProvider: dashPairing.ai_provider || 'openai',
-    aiModel: dashPairing.ai_model || 'gpt-4o-mini',
+    apiKey: dashSession.api_key,
+    aiProvider: dashSession.ai_provider || 'openai',
+    aiModel: dashSession.ai_model || 'gpt-4o-mini',
     aiVariations: false,
     aiTemp: 0.7
   };
@@ -500,9 +622,11 @@ async function executeDashJob(job) {
 
       if (response?.success) {
         successCount++;
+        extLog('info', `Posted ${i + 1}/${groupUrls.length} → ${groupUrl}`);
         broadcastDashStatus(`Posted ${i + 1}/${groupUrls.length}`, '#4ecca3');
       } else {
         lastError = response?.error || 'Unknown error';
+        extLog('error', `Failed ${i + 1}/${groupUrls.length} → ${groupUrl}: ${lastError}`);
         broadcastDashStatus(`Failed ${i + 1}/${groupUrls.length}`, '#e94560');
       }
 
@@ -510,6 +634,7 @@ async function executeDashJob(job) {
       await chrome.tabs.remove(tab.id);
     } catch (e) {
       lastError = e.message;
+      extLog('error', `Error on group ${i + 1} (${groupUrl}): ${e.message}`);
       broadcastDashStatus(`Error on group ${i + 1}`, '#e94560');
     }
 
@@ -527,6 +652,8 @@ async function executeDashJob(job) {
     completed_at: new Date().toISOString()
   });
 
+  extLog(success ? 'info' : 'error', `Job ${job.id} ${success ? 'DONE' : 'FAILED'} — ${successCount}/${groupUrls.length} posted`);
+
   broadcastDashStatus(
     success ? `Done — ${successCount}/${groupUrls.length} posted` : 'Job failed',
     success ? '#4ecca3' : '#e94560'
@@ -536,6 +663,56 @@ async function executeDashJob(job) {
     ? `Dashboard job complete — ${successCount}/${groupUrls.length} groups posted.`
     : `Dashboard job failed: ${lastError}`
   );
+
+  // ── Webhook delivery (fire-and-forget, best-effort) ──
+  if (job.webhook_url) {
+    fireWebhook(job, success, successCount, groupUrls.length, lastError);
+  }
+}
+
+// Fire a webhook to the caller's endpoint with job completion details
+async function fireWebhook(job, success, successCount, totalGroups, lastError) {
+  const payload = {
+    event:       success ? 'job.completed' : 'job.failed',
+    job_id:      job.id,
+    status:      success ? 'done' : 'failed',
+    success_count: successCount,
+    total_groups:  totalGroups,
+    error:       lastError || null,
+    completed_at: new Date().toISOString(),
+  };
+
+  // Retry up to 3 times with exponential backoff
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const res = await fetch(job.webhook_url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'User-Agent': 'Amplr-Webhook/1.0',
+          'X-Amplr-Event': payload.event,
+          'X-Amplr-Job-Id': job.id,
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(10000), // 10s timeout
+      });
+
+      if (res.ok) {
+        extLog('info', `Webhook delivered for job ${job.id} (attempt ${attempt})`);
+        return;
+      }
+
+      extLog('warn', `Webhook attempt ${attempt} failed with HTTP ${res.status} for job ${job.id}`);
+    } catch (e) {
+      extLog('warn', `Webhook attempt ${attempt} error for job ${job.id}: ${e.message}`);
+    }
+
+    if (attempt < 3) {
+      await new Promise(r => setTimeout(r, 2000 * attempt)); // 2s, 4s
+    }
+  }
+
+  extLog('error', `Webhook delivery failed after 3 attempts for job ${job.id}`);
 }
 
 // Update a job row via Supabase REST PATCH
@@ -545,7 +722,7 @@ async function sbUpdateJob(jobId, patch) {
       method: 'PATCH',
       headers: {
         'apikey': SB_ANON_KEY,
-        'Authorization': `Bearer ${SB_ANON_KEY}`,
+        'Authorization': `Bearer ${dashSession.accessToken}`,
         'Content-Type': 'application/json',
         'Prefer': 'return=minimal'
       },

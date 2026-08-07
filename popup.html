@@ -49,31 +49,28 @@
 
   .body { padding: 24px 20px; }
 
-  /* ---- DISCONNECTED ---- */
-  .label {
+  /* ---- LOGIN ---- */
+  .field-group { margin-bottom: 12px; }
+  .field-label {
     font-size: 11px;
     font-weight: 600;
     color: var(--text-2);
-    margin-bottom: 8px;
-    text-align: center;
+    margin-bottom: 6px;
+    display: block;
   }
-  .code-input {
+  .field-input {
     width: 100%;
     background: var(--surface-2);
     border: 1px solid var(--border);
     border-radius: 10px;
     color: var(--text);
-    padding: 14px;
-    font-size: 18px;
-    font-weight: 700;
-    text-align: center;
-    letter-spacing: 6px;
-    text-transform: uppercase;
-    font-family: 'SF Mono', 'Monaco', monospace;
+    padding: 12px 14px;
+    font-size: 14px;
+    font-family: inherit;
     transition: border .15s;
   }
-  .code-input:focus { outline: none; border-color: #5B6FE8; }
-  .code-input::placeholder { color: var(--text-3); letter-spacing: 2px; font-weight: 400; }
+  .field-input:focus { outline: none; border-color: #5B6FE8; }
+  .field-input::placeholder { color: var(--text-3); }
 
   .hint {
     font-size: 11px;
@@ -152,15 +149,21 @@
 
 <div class="body">
 
-  <!-- Disconnected -->
+  <!-- Login -->
   <div id="dashDisconnected">
-    <div class="label">Enter Pairing Code</div>
-    <input type="text" id="pairingCodeInput" class="code-input" placeholder="XXXXXX" maxlength="6">
-    <div class="hint">
-      Get your code from the<br>
+    <div class="field-group">
+      <label class="field-label" for="loginEmail">Email</label>
+      <input type="email" id="loginEmail" class="field-input" placeholder="you@example.com" autocomplete="email">
+    </div>
+    <div class="field-group">
+      <label class="field-label" for="loginPassword">Password</label>
+      <input type="password" id="loginPassword" class="field-input" placeholder="Min 6 characters" autocomplete="current-password">
+    </div>
+    <button class="btn btn-primary" id="loginBtn">Sign In</button>
+    <div class="hint" style="margin-top:14px;">
+      Use the same account as the<br>
       <a href="https://jack108510.github.io/fb-autoposter/dashboard.html" target="_blank">Amplr Dashboard &rarr;</a>
     </div>
-    <button class="btn btn-primary" id="pairConnectBtn">Connect</button>
   </div>
 
   <!-- Connected -->
@@ -168,7 +171,8 @@
     <div class="status-dot"></div>
     <div class="title">Connected</div>
     <div class="sub" id="dashJobStatus">Watching for posts from your dashboard</div>
-    <button class="btn btn-ghost" id="pairDisconnectBtn" style="margin-top:20px;">Disconnect</button>
+    <div class="sub" id="dashEmail" style="margin-top:6px; opacity:0.7; font-size:11px;"></div>
+    <button class="btn btn-ghost" id="pairDisconnectBtn" style="margin-top:20px;">Sign Out</button>
   </div>
 
   <div class="status" id="dashStatus"></div>
