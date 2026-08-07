@@ -436,17 +436,20 @@ function startDashPolling() {
   chrome.alarms.create('poll-jobs', { periodInMinutes: 1 });
   writeHeartbeat();
   chrome.alarms.create('amplr_heartbeat', { periodInMinutes: 0.5 }); // every 30s
+  chrome.alarms.create('check-post-results', { periodInMinutes: 360 }); // every 6h
 }
 
 function stopDashPolling() {
   chrome.alarms.clear('poll-jobs');
   chrome.alarms.clear('amplr_heartbeat');
+  chrome.alarms.clear('check-post-results');
 }
 
 // Heartbeat and poll-jobs alarm handler
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'amplr_heartbeat') writeHeartbeat();
   else if (alarm.name === 'poll-jobs') { pollPendingJobs(); pollGroupLookups(); }
+  else if (alarm.name === 'check-post-results') { checkPostResults(); }
 });
 
 // ─── Group name lookup ───
@@ -568,35 +571,74 @@ function broadcastDashStatus(text, color) {
 
 // Fetch pending jobs for this paired user via REST API
 async function pollPendingJobs() {
-  // Read from storage — survives service worker restarts
   const data = await chrome.storage.local.get(['jsw_session']);
   const session = data.jsw_session;
   if (!session || !session.userId) return;
 
   try {
-    const url = `${SB_URL}/rest/v1/jsw_post_jobs?user_id=eq.${encodeURIComponent(session.userId)}&status=eq.pending&order=created_at.asc&limit=1&select=*`;
+    const now = new Date().toISOString();
+    // Pick up: (a) immediate pending jobs with no scheduled_for, OR
+    //          (b) scheduled jobs whose time has arrived
+    const url = `${SB_URL}/rest/v1/jsw_post_jobs?user_id=eq.${encodeURIComponent(session.userId)}&status=eq.pending&order=created_at.asc&limit=1&select=*` +
+      `&or=(scheduled_for.is.null,scheduled_for.lte.${encodeURIComponent(now)})`;
     const res = await fetch(url, {
-      headers: {
-        'apikey': SB_ANON_KEY,
-        'Authorization': `Bearer ${session.accessToken}`
-      }
+      headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}` }
     });
 
-    if (!res.ok) {
-      extLog('warn', 'Job poll failed: ' + res.status);
-      return;
-    }
+    if (!res.ok) { extLog('warn', 'Job poll failed: ' + res.status); return; }
 
     const jobs = await res.json();
     if (jobs && jobs.length > 0) {
       const job = jobs[0];
       extLog('info', 'Found pending job: ' + job.id);
-      // Ensure dashSession is loaded for executeDashJob
       if (!dashSession) dashSession = session;
       await executeDashJob(job);
+
+      // If this is a repeating job, re-queue it for next occurrence
+      if (job.repeat_days?.length && job.repeat_time) {
+        await requeueRepeatingJob(job, session);
+      }
     }
   } catch (e) {
     extLog('error', 'Dash poll error: ' + e.message);
+  }
+}
+
+// Re-queue a repeating job for its next scheduled occurrence
+async function requeueRepeatingJob(job, session) {
+  try {
+    const [hours, minutes] = job.repeat_time.split(':').map(Number);
+    const days = job.repeat_days; // e.g. [1, 3, 5] = Mon, Wed, Fri
+    const now = new Date();
+    let next = new Date(now);
+    next.setSeconds(0, 0);
+    next.setHours(hours, minutes);
+    // Advance until we hit a future allowed day
+    for (let i = 0; i < 8; i++) {
+      next.setDate(next.getDate() + (i === 0 ? 1 : 1)); // always at least tomorrow
+      if (days.includes(next.getDay())) break;
+    }
+    await fetch(`${SB_URL}/rest/v1/jsw_post_jobs`, {
+      method: 'POST',
+      headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+      body: JSON.stringify({
+        user_id: session.userId,
+        message: job.message,
+        image_url: job.image_url || null,
+        groups: job.groups,
+        delay: job.delay || 30,
+        ai_enabled: job.ai_enabled,
+        ai_prompt: job.ai_prompt || null,
+        first_comment: job.first_comment || null,
+        status: 'pending',
+        scheduled_for: next.toISOString(),
+        repeat_days: job.repeat_days,
+        repeat_time: job.repeat_time,
+      })
+    });
+    extLog('info', `Re-queued repeating job for ${next.toISOString()}`);
+  } catch (e) {
+    extLog('warn', 'requeueRepeatingJob error: ' + e.message);
   }
 }
 
@@ -656,9 +698,32 @@ async function executeDashJob(job) {
   let successCount = 0;
   let lastError = null;
 
+  // Load cooldown setting (default 2 days)
+  const cooldownDays = dashSession?.cooldown_days || cachedData?.settings?.cooldown_days || 2;
+
   for (let i = 0; i < groupUrls.length; i++) {
     const groupUrl = groupUrls[i];
     let finalText = job.message;
+
+    // ── Cooldown check ──
+    try {
+      const groupRes = await fetch(`${SB_URL}/rest/v1/jsw_groups?user_id=eq.${session.userId}&group_url=eq.${encodeURIComponent(groupUrl)}&select=last_posted_at,ban_risk`, {
+        headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}` }
+      });
+      const groupData = await groupRes.json();
+      const lastPosted = groupData?.[0]?.last_posted_at;
+      if (lastPosted && cooldownDays > 0) {
+        const daysSince = (Date.now() - new Date(lastPosted).getTime()) / (1000 * 60 * 60 * 24);
+        if (daysSince < cooldownDays) {
+          extLog('info', `Skipping ${groupUrl} — cooldown (${daysSince.toFixed(1)} days since last post)`);
+          chrome.runtime.sendMessage({ type: 'DASH_STATUS', text: `Skipping (cooldown): ${groupUrl.split('/').filter(Boolean).pop()}` }).catch(() => {});
+          broadcastDashStatus(`Cooldown skip ${i + 1}/${groupUrls.length}`, '#6a6a8a');
+          continue; // skip this group
+        }
+      }
+    } catch (e) {
+      extLog('warn', 'Cooldown check error: ' + e.message);
+    }
 
     // Ollama doesn't need an API key — always attempt if ai_enabled
     const canUseAI = settings.aiEnabled && (settings.aiProvider === 'ollama' || settings.apiKey);
@@ -684,6 +749,32 @@ async function executeDashJob(job) {
         successCount++;
         extLog('info', `Posted ${i + 1}/${groupUrls.length} → ${groupUrl}`);
         broadcastDashStatus(`Posted ${i + 1}/${groupUrls.length}`, '#4ecca3');
+
+        // Update last_posted_at for cooldown tracking
+        fetch(`${SB_URL}/rest/v1/jsw_groups?user_id=eq.${session.userId}&group_url=eq.${encodeURIComponent(groupUrl)}`, {
+          method: 'PATCH',
+          headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+          body: JSON.stringify({ last_posted_at: new Date().toISOString() })
+        }).catch(e => extLog('warn', 'last_posted_at update error: ' + e.message));
+
+        // Record post result for ban detection
+        const postUrl = response?.postUrl || null;
+        fetch(`${SB_URL}/rest/v1/jsw_post_results`, {
+          method: 'POST',
+          headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
+          body: JSON.stringify({ user_id: session.userId, group_url: groupUrl, post_url: postUrl, job_id: job.id, posted_at: new Date().toISOString() })
+        }).catch(e => extLog('warn', 'jsw_post_results insert error: ' + e.message));
+
+        // First comment automation
+        if (job.first_comment) {
+          await sleep(4000); // let FB process the post
+          try {
+            await postFirstComment(tab.id, job.first_comment);
+            extLog('info', 'First comment posted on ' + groupUrl);
+          } catch(e) {
+            extLog('warn', 'First comment failed: ' + e.message);
+          }
+        }
       } else {
         lastError = response?.error || 'Unknown error';
         extLog('error', `Failed ${i + 1}/${groupUrls.length} → ${groupUrl}: ${lastError}`);
@@ -773,6 +864,31 @@ async function fireWebhook(job, success, successCount, totalGroups, lastError) {
   }
 
   extLog('error', `Webhook delivery failed after 3 attempts for job ${job.id}`);
+}
+
+// ── First comment: post a follow-up comment on the newly-created post ──
+async function postFirstComment(tabId, commentText) {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (text) => {
+      // Find an active comment box in the page
+      const commentBoxes = document.querySelectorAll(
+        '[aria-label="Write a comment\u2026"], [aria-label="Write a comment"], [data-lexical-editor="true"]'
+      );
+      const box = [...commentBoxes].find(el => el.isContentEditable || el.tagName === 'DIV');
+      if (!box) throw new Error('Comment box not found');
+      box.focus();
+      // Insert text into the contenteditable div
+      document.execCommand('insertText', false, text);
+      // Click the submit / Comment button after a short pause
+      setTimeout(() => {
+        const submitBtns = document.querySelectorAll('[aria-label="Comment"], button[type="submit"]');
+        if (submitBtns.length > 0) submitBtns[submitBtns.length - 1].click();
+      }, 800);
+    },
+    args: [commentText]
+  });
+  await sleep(2000); // wait for comment to post
 }
 
 // Update a job row via Supabase REST PATCH
