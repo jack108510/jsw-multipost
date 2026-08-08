@@ -249,6 +249,45 @@ const SB_URL = 'https://xacehhtgvubcqdoltazg.supabase.co';
 const SB_ANON_KEY = 'sb_publishable_1TNu5hqotJ7GGQXfjliivQ_ttK51EAA';
 let dashSession = null;
 
+async function getStoredSession() {
+  const data = await chrome.storage.local.get(['jsw_session']);
+  let session = data.jsw_session;
+  if (!session || !session.userId) return null;
+
+  // Supabase access tokens expire. If we keep using the old token, the
+  // dashboard heartbeat silently stops and Amplr looks "unpaired" again.
+  const expiresMs = session.expiresAt ? Number(session.expiresAt) * 1000 : 0;
+  const shouldRefresh = session.refreshToken && (!expiresMs || expiresMs - Date.now() < 120000);
+  if (!shouldRefresh) {
+    dashSession = session;
+    return session;
+  }
+
+  try {
+    const res = await fetch(`${SB_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: 'POST',
+      headers: { 'apikey': SB_ANON_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: session.refreshToken })
+    });
+    const refreshed = await res.json();
+    if (!res.ok || !refreshed.access_token) throw new Error(refreshed.error_description || refreshed.msg || 'Refresh failed');
+
+    session = {
+      ...session,
+      accessToken: refreshed.access_token,
+      refreshToken: refreshed.refresh_token || session.refreshToken,
+      expiresAt: refreshed.expires_at || Math.floor(Date.now() / 1000) + (refreshed.expires_in || 3600),
+    };
+    await chrome.storage.local.set({ jsw_session: session });
+    dashSession = session;
+    return session;
+  } catch (e) {
+    console.warn('[JSW] Supabase session refresh failed:', e.message);
+    dashSession = session;
+    return session;
+  }
+}
+
 // ─── Remote logging ───
 async function extLog(level, message) {
   const text = typeof message === 'string' ? message : JSON.stringify(message);
@@ -291,9 +330,9 @@ chrome.runtime.onInstalled.addListener(loadSessionAndResume);
 loadSessionAndResume();
 
 async function loadSessionAndResume() {
-  const data = await chrome.storage.local.get(['jsw_session']);
-  if (data.jsw_session && data.jsw_session.userId) {
-    dashSession = data.jsw_session;
+  const session = await getStoredSession();
+  if (session && session.userId) {
+    dashSession = session;
     startDashPolling();
     extLog('info', 'Resumed polling for user ' + dashSession.userId);
   }
@@ -324,8 +363,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 // ─── Group name lookup ───
 async function pollGroupLookups() {
-  const data = await chrome.storage.local.get(['jsw_session']);
-  const session = data.jsw_session;
+  const session = await getStoredSession();
   if (!session || !session.userId) return;
   if (!dashSession) dashSession = session;
 
@@ -395,11 +433,13 @@ async function fetchGroupNameFromFB(groupUrl) {
 
 async function sbUpdateLookup(lookupId, patch) {
   try {
+    const session = await getStoredSession();
+    if (!session) return false;
     const res = await fetch(`${SB_URL}/rest/v1/jsw_group_lookups?id=eq.${lookupId}`, {
       method: 'PATCH',
       headers: {
         'apikey': SB_ANON_KEY,
-        'Authorization': `Bearer ${dashSession.accessToken}`,
+        'Authorization': `Bearer ${session.accessToken}`,
         'Content-Type': 'application/json',
         'Prefer': 'return=minimal'
       },
@@ -415,23 +455,23 @@ async function sbUpdateLookup(lookupId, patch) {
 // Write heartbeat so the dashboard knows the extension is running
 async function writeHeartbeat() {
   try {
-    // Read from storage every time — survives service worker restarts
-    const data = await chrome.storage.local.get(['jsw_session']);
-    const session = data.jsw_session;
+    // Read/refresh from storage every time — survives service worker restarts
+    const session = await getStoredSession();
     if (!session || !session.userId) return;
 
-    await fetch(`${SB_URL}/rest/v1/jsw_settings?user_id=eq.${encodeURIComponent(session.userId)}`, {
-      method: 'PATCH',
+    const res = await fetch(`${SB_URL}/rest/v1/jsw_settings`, {
+      method: 'POST',
       headers: {
         'apikey': SB_ANON_KEY,
         'Authorization': `Bearer ${session.accessToken}`,
         'Content-Type': 'application/json',
-        'Prefer': 'return=minimal'
+        'Prefer': 'resolution=merge-duplicates,return=minimal'
       },
-      body: JSON.stringify({ ext_heartbeat: new Date().toISOString() })
+      body: JSON.stringify({ user_id: session.userId, ext_heartbeat: new Date().toISOString() })
     });
+    if (!res.ok) console.warn('[JSW] heartbeat failed:', res.status, await res.text());
   } catch (e) {
-    // Silent — heartbeat is best-effort
+    console.warn('[JSW] heartbeat error:', e.message);
   }
 }
 
@@ -441,8 +481,7 @@ function broadcastDashStatus(text, color) {
 
 // Fetch pending jobs for this paired user via REST API
 async function pollPendingJobs() {
-  const data = await chrome.storage.local.get(['jsw_session']);
-  const session = data.jsw_session;
+  const session = await getStoredSession();
   if (!session || !session.userId) return;
 
   try {
@@ -515,6 +554,8 @@ async function requeueRepeatingJob(job, session) {
 
 // Claim a job (set status=processing) then run it
 async function executeDashJob(job) {
+  dashSession = await getStoredSession();
+  if (!dashSession) return;
   // Special job: import groups from Facebook
   if (job.message === '__import_groups__') {
     const claimed = await sbUpdateJob(job.id, {
@@ -777,11 +818,13 @@ async function postFirstComment(tabId, commentText) {
 // Update a job row via Supabase REST PATCH
 async function sbUpdateJob(jobId, patch) {
   try {
+    const session = await getStoredSession();
+    if (!session) return false;
     const res = await fetch(`${SB_URL}/rest/v1/jsw_post_jobs?id=eq.${jobId}`, {
       method: 'PATCH',
       headers: {
         'apikey': SB_ANON_KEY,
-        'Authorization': `Bearer ${dashSession.accessToken}`,
+        'Authorization': `Bearer ${session.accessToken}`,
         'Content-Type': 'application/json',
         'Prefer': 'return=minimal'
       },
@@ -801,8 +844,7 @@ async function sbUpdateJob(jobId, patch) {
 // ============================================================
 // Job-aware version: updates job progress and result in jsw_post_jobs
 async function importFacebookGroupsForJob(jobId) {
-  const data = await chrome.storage.local.get(['jsw_session']);
-  const session = data.jsw_session;
+  const session = await getStoredSession();
   if (!session || !session.userId) {
     await sbUpdateJob(jobId, { status: 'failed', result: { error: 'Not signed in' }, completed_at: new Date().toISOString() });
     return;
@@ -902,8 +944,7 @@ async function importFacebookGroupsForJob(jobId) {
 }
 
 async function importFacebookGroups() {
-  const data = await chrome.storage.local.get(['jsw_session']);
-  const session = data.jsw_session;
+  const session = await getStoredSession();
   if (!session || !session.userId) {
     chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_ERROR', error: 'Not signed in' });
     return;
@@ -1043,8 +1084,7 @@ async function importFacebookGroups() {
 // Runs every 6 hours via the 'check-post-results' alarm
 // ============================================================
 async function checkPostResults() {
-  const data = await chrome.storage.local.get(['jsw_session']);
-  const session = data.jsw_session;
+  const session = await getStoredSession();
   if (!session) return;
 
   // Get posts from last 48h that haven't been checked yet and have a post_url
