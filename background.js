@@ -459,7 +459,7 @@ async function writeHeartbeat() {
     const session = await getStoredSession();
     if (!session || !session.userId) return;
 
-    const res = await fetch(`${SB_URL}/rest/v1/jsw_settings`, {
+    const res = await fetch(`${SB_URL}/rest/v1/jsw_settings?on_conflict=user_id`, {
       method: 'POST',
       headers: {
         'apikey': SB_ANON_KEY,
