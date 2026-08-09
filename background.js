@@ -874,29 +874,52 @@ async function importFacebookGroupsForJob(jobId) {
         target: { tabId: tab.id },
         func: () => {
           const found = new Map();
+          const skipSlugs = new Set(['discover', 'feed', 'joins', 'create', 'search', 'membership', 'notifications']);
+          const cleanName = (text) => {
+            const t = (text || '')
+              .replace(/\u00a0/g, ' ')
+              .replace(/\s+/g, ' ')
+              .replace(/^(Group:|Facebook group:)\s*/i, '')
+              .trim();
+            const notificationMatch = t.match(/\bin\s+(.+?):\s*["“]/i);
+            return notificationMatch ? notificationMatch[1].trim() : t;
+          };
+          const badName = (text) => {
+            const t = cleanName(text);
+            if (t.length < 3 || t.length > 90) return true;
+            if (/^\d+$/.test(t)) return true;
+            if (/^(new|see all|join|joined|member|members|post|posts|comment|comments|notification|notifications)$/i.test(t)) return true;
+            if (/\b(left a comment|commented|reacted|shared a post|posted in|new post|see all|sponsored)\b/i.test(t)) return true;
+            return false;
+          };
+          const slugToName = (slug) => decodeURIComponent(slug)
+            .replace(/[-_.]+/g, ' ')
+            .replace(/\b\w/g, c => c.toUpperCase())
+            .trim();
+          const candidateTexts = (a) => {
+            const out = [];
+            const push = (v) => { v = cleanName(v); if (v && !out.includes(v)) out.push(v); };
+            push(a.getAttribute('aria-label'));
+            push(a.textContent);
+            const container = a.closest('[role=article], [role=listitem], div');
+            const img = a.querySelector('img[alt]') || container?.querySelector('img[alt]');
+            if (img) push(img.getAttribute('alt'));
+            let el = a;
+            for (let i = 0; i < 5 && el; i++, el = el.parentElement) {
+              el.querySelectorAll('strong, h1, h2, h3, span[dir=auto], a[role=link] span').forEach(n => push(n.textContent));
+            }
+            return out;
+          };
+
           document.querySelectorAll('a[href*="/groups/"]').forEach(a => {
             const href = a.href || '';
             const match = href.match(/facebook\.com\/groups\/([^/?#]+)/);
             if (!match) return;
-            const slug = match[1];
-            if (['discover', 'feed', 'joins', 'create', 'search', 'membership'].includes(slug)) return;
+            const slug = decodeURIComponent(match[1]);
+            if (skipSlugs.has(slug)) return;
             if (found.has(slug)) return;
-            let name = '';
-            let el = a;
-            for (let i = 0; i < 6; i++) {
-              el = el.parentElement;
-              if (!el) break;
-              const spans = el.querySelectorAll('span');
-              for (const span of spans) {
-                const t = span.textContent.trim();
-                if (t.length > 2 && t.length < 120 && !t.match(/^\d+$/) && !t.includes('Join') && !t.includes('See more')) {
-                  name = t; break;
-                }
-              }
-              if (name) break;
-            }
-            if (!name) name = a.textContent.trim();
-            found.set(slug, { name: name || slug, url: `https://www.facebook.com/groups/${slug}/` });
+            const name = candidateTexts(a).find(t => !badName(t)) || slugToName(slug) || slug;
+            found.set(slug, { name, url: `https://www.facebook.com/groups/${encodeURIComponent(slug)}/` });
           });
           return [...found.values()];
         }
@@ -925,11 +948,12 @@ async function importFacebookGroupsForJob(jobId) {
     const rows = groups.map(g => ({ user_id: session.userId, group_url: g.url, group_name: g.name || null }));
     const CHUNK = 50;
     for (let i = 0; i < rows.length; i += CHUNK) {
-      await fetch(`${SB_URL}/rest/v1/jsw_groups`, {
+      const saveRes = await fetch(`${SB_URL}/rest/v1/jsw_groups?on_conflict=user_id,group_url`, {
         method: 'POST',
         headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}`, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' },
         body: JSON.stringify(rows.slice(i, i + CHUNK))
       });
+      if (!saveRes.ok) throw new Error('Group save failed: ' + await saveRes.text());
     }
 
     extLog('info', `Imported ${groups.length} groups via job ${jobId}`);
@@ -972,41 +996,53 @@ async function importFacebookGroups() {
         target: { tabId: tab.id },
         func: () => {
           const found = new Map();
+          const skipSlugs = new Set(['discover', 'feed', 'joins', 'create', 'search', 'membership', 'notifications']);
+          const cleanName = (text) => {
+            const t = (text || '')
+              .replace(/\u00a0/g, ' ')
+              .replace(/\s+/g, ' ')
+              .replace(/^(Group:|Facebook group:)\s*/i, '')
+              .trim();
+            const notificationMatch = t.match(/\bin\s+(.+?):\s*["“]/i);
+            return notificationMatch ? notificationMatch[1].trim() : t;
+          };
+          const badName = (text) => {
+            const t = cleanName(text);
+            if (t.length < 3 || t.length > 90) return true;
+            if (/^\d+$/.test(t)) return true;
+            if (/^(new|see all|join|joined|member|members|post|posts|comment|comments|notification|notifications)$/i.test(t)) return true;
+            if (/\b(left a comment|commented|reacted|shared a post|posted in|new post|see all|sponsored)\b/i.test(t)) return true;
+            return false;
+          };
+          const slugToName = (slug) => decodeURIComponent(slug)
+            .replace(/[-_.]+/g, ' ')
+            .replace(/\b\w/g, c => c.toUpperCase())
+            .trim();
+          const candidateTexts = (a) => {
+            const out = [];
+            const push = (v) => { v = cleanName(v); if (v && !out.includes(v)) out.push(v); };
+            push(a.getAttribute('aria-label'));
+            push(a.textContent);
+            const container = a.closest('[role=article], [role=listitem], div');
+            const img = a.querySelector('img[alt]') || container?.querySelector('img[alt]');
+            if (img) push(img.getAttribute('alt'));
+            let el = a;
+            for (let i = 0; i < 5 && el; i++, el = el.parentElement) {
+              el.querySelectorAll('strong, h1, h2, h3, span[dir=auto], a[role=link] span').forEach(n => push(n.textContent));
+            }
+            return out;
+          };
 
-          // Primary: anchors linking to /groups/<id>/
           document.querySelectorAll('a[href*="/groups/"]').forEach(a => {
             const href = a.href || '';
             const match = href.match(/facebook\.com\/groups\/([^/?#]+)/);
             if (!match) return;
-            const slug = match[1];
-            // Skip Facebook's own nav links and numeric-only group pages that are just "discover"
-            if (['discover', 'feed', 'joins', 'create', 'search', 'membership'].includes(slug)) return;
+            const slug = decodeURIComponent(match[1]);
+            if (skipSlugs.has(slug)) return;
             if (found.has(slug)) return;
-
-            // Try to find the group name from nearby text
-            let name = '';
-            // Walk up to find a block with a meaningful text label
-            let el = a;
-            for (let i = 0; i < 6; i++) {
-              el = el.parentElement;
-              if (!el) break;
-              const spans = el.querySelectorAll('span');
-              for (const span of spans) {
-                const t = span.textContent.trim();
-                if (t.length > 2 && t.length < 120 && !t.match(/^\d+$/) && !t.includes('Join') && !t.includes('See more')) {
-                  name = t;
-                  break;
-                }
-              }
-              if (name) break;
-            }
-            if (!name) {
-              // Fallback: use the link's own text
-              name = a.textContent.trim();
-            }
-
-            const cleanUrl = `https://www.facebook.com/groups/${slug}/`;
-            found.set(slug, { name: name || slug, url: cleanUrl });
+            const name = candidateTexts(a).find(t => !badName(t)) || slugToName(slug) || slug;
+            const cleanUrl = `https://www.facebook.com/groups/${encodeURIComponent(slug)}/`;
+            found.set(slug, { name, url: cleanUrl });
           });
 
           return [...found.values()];
@@ -1055,7 +1091,7 @@ async function importFacebookGroups() {
     const CHUNK = 50;
     for (let i = 0; i < rows.length; i += CHUNK) {
       const chunk = rows.slice(i, i + CHUNK);
-      await fetch(`${SB_URL}/rest/v1/jsw_groups`, {
+      const saveRes = await fetch(`${SB_URL}/rest/v1/jsw_groups?on_conflict=user_id,group_url`, {
         method: 'POST',
         headers: {
           'apikey': SB_ANON_KEY,
@@ -1065,6 +1101,7 @@ async function importFacebookGroups() {
         },
         body: JSON.stringify(chunk)
       });
+      if (!saveRes.ok) throw new Error('Group save failed: ' + await saveRes.text());
     }
 
     extLog('info', `Imported ${groups.length} groups for user ${session.userId}`);
