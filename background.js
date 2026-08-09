@@ -2,6 +2,8 @@
 // Orchestrates posting queue, AI refinement, and scheduled posts via chrome.alarms.
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+const EXT_VERSION = chrome.runtime.getManifest?.().version || 'unknown';
+const CONNECTION_STATUS_KEY = 'extension_status';
 
 // ============ HANDLE MESSAGES FROM POPUP ============
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -287,6 +289,7 @@ async function getStoredSession() {
     // stale access token only makes heartbeat/job calls fail silently. Clear the
     // paired session so the popup shows login instead of a fake connected state.
     if (expiresMs && expiresMs <= Date.now()) {
+      await writeExtensionStatus(session, 'offline', { error: 'Supabase session expired and refresh failed' });
       await chrome.storage.local.remove(['jsw_session']);
       dashSession = null;
       return null;
@@ -323,10 +326,13 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === 'PAIRING_CONNECTED') {
     dashSession = msg.pairing;
     startDashPolling();
+    writeHeartbeat();
     extLog('info', 'Session connected, polling started for ' + dashSession.userId);
   } else if (msg.type === 'PAIRING_DISCONNECTED') {
+    const previousSession = dashSession;
     stopDashPolling();
     dashSession = null;
+    if (previousSession?.userId) writeExtensionStatus(previousSession, 'offline', { disconnected_at: new Date().toISOString() });
     extLog('info', 'Session disconnected');
   }
 });
@@ -347,10 +353,15 @@ async function loadSessionAndResume() {
 }
 
 function startDashPolling() {
-  // Poll immediately, then via alarm (survives MV3 service worker sleep)
+  // Reset alarms before creating them so repeated popup opens do not leave stale schedules.
+  chrome.alarms.clear('poll-jobs');
+  chrome.alarms.clear('amplr_heartbeat');
+  chrome.alarms.clear('check-post-results');
+
+  // Poll immediately, then via alarms (MV3 service workers can sleep between events).
   pollPendingJobs();
   pollGroupLookups();
-  chrome.alarms.create('poll-jobs', { periodInMinutes: 1 });
+  chrome.alarms.create('poll-jobs', { periodInMinutes: 0.5 }); // every 30s
   writeHeartbeat();
   chrome.alarms.create('amplr_heartbeat', { periodInMinutes: 0.5 }); // every 30s
   chrome.alarms.create('check-post-results', { periodInMinutes: 360 }); // every 6h
@@ -467,6 +478,7 @@ async function writeHeartbeat() {
     const session = await getStoredSession();
     if (!session || !session.userId) return;
 
+    const heartbeatAt = new Date().toISOString();
     const res = await fetch(`${SB_URL}/rest/v1/jsw_settings?on_conflict=user_id`, {
       method: 'POST',
       headers: {
@@ -475,11 +487,35 @@ async function writeHeartbeat() {
         'Content-Type': 'application/json',
         'Prefer': 'resolution=merge-duplicates,return=minimal'
       },
-      body: JSON.stringify({ user_id: session.userId, ext_heartbeat: new Date().toISOString() })
+      body: JSON.stringify({ user_id: session.userId, ext_heartbeat: heartbeatAt })
     });
     if (!res.ok) console.warn('[JSW] heartbeat failed:', res.status, await res.text());
+    await writeExtensionStatus(session, 'online', { last_seen: heartbeatAt });
   } catch (e) {
     console.warn('[JSW] heartbeat error:', e.message);
+    if (dashSession?.userId) {
+      writeExtensionStatus(dashSession, 'degraded', { error: e.message }).catch(() => {});
+    }
+  }
+}
+
+async function writeExtensionStatus(session, status = 'online', extra = {}) {
+  if (!session?.userId || !session?.accessToken) return false;
+  try {
+    await upsertAmplrData(session, CONNECTION_STATUS_KEY, {
+      status,
+      version: EXT_VERSION,
+      user_id: session.userId,
+      email: session.email || null,
+      last_seen: new Date().toISOString(),
+      poll_interval_seconds: 30,
+      service_worker: 'active',
+      ...extra
+    });
+    return true;
+  } catch (e) {
+    console.warn('[JSW] extension status write failed:', e.message);
+    return false;
   }
 }
 
