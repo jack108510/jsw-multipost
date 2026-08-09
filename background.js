@@ -283,6 +283,14 @@ async function getStoredSession() {
     return session;
   } catch (e) {
     console.warn('[JSW] Supabase session refresh failed:', e.message);
+    // If the token is already expired and refresh failed, continuing with the
+    // stale access token only makes heartbeat/job calls fail silently. Clear the
+    // paired session so the popup shows login instead of a fake connected state.
+    if (expiresMs && expiresMs <= Date.now()) {
+      await chrome.storage.local.remove(['jsw_session']);
+      dashSession = null;
+      return null;
+    }
     dashSession = session;
     return session;
   }

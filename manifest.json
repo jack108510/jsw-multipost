@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Amplr",
   "short_name": "Amplr",
-  "version": "2.1.4",
+  "version": "2.1.5",
   "description": "Post to multiple Facebook groups at once. AI-powered prompts, scheduled posts, dashboard pairing.",
   "author": "JSW Enterprises",
   "icons": {

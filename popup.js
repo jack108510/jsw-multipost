@@ -18,6 +18,10 @@ chrome.storage.local.get(['jsw_session', 'amplr_onboarding_done'], (data) => {
   const session = data.jsw_session;
   const onboardDone = data.amplr_onboarding_done;
   if (session?.userId) {
+    // MV3 background workers can be suspended or lose alarms. If the user opens
+    // the popup while already connected, explicitly re-kick the background
+    // heartbeat/polling path instead of waiting for a fresh login.
+    chrome.runtime.sendMessage({ type: 'PAIRING_CONNECTED', pairing: session }).catch(() => {});
     if (!onboardDone) {
       showView('onboardingView');
       initOnboarding(session);
