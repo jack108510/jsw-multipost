@@ -77,7 +77,7 @@
               }
             ]
           },
-          "jsonBody": "={{ JSON.stringify({ model: 'qwen3:8b', stream: false, options: { temperature: 0.45 }, prompt: `Act like a QuillBot-style paraphraser for Facebook group posts. Preserve the original meaning, offer, facts, tone level, links, and call to action. Rewrite the wording and sentence structure naturally without adding new claims, hype, emojis, hashtags, or extra details. Do not make it more salesy. Output ONLY the paraphrased post text, nothing else.\\n\\nCurrent message:\\n${$json.body?.message || $json.message || ''}\\n\\nParaphrase instruction from user:\\n${$json.body?.instruction || $json.instruction || 'Paraphrase naturally while keeping the same meaning.'}\\n\\nRecent versions to avoid repeating exactly:\\n${JSON.stringify($json.body?.history || [])}` }) }}",
+          "jsonBody": "={{ JSON.stringify({ model: ($json.body?.model || $json.model || 'qwen3:8b'), stream: false, options: { temperature: 0.35, top_p: 0.9, repeat_penalty: 1.08 }, prompt: `Act like a QuillBot-style paraphraser for Facebook group posts. Preserve the original meaning, offer, facts, tone level, links, and call to action. Rewrite the wording and sentence structure naturally without adding new claims, hype, emojis, hashtags, or extra details. Do not make it more salesy. Vary sentence structure and word choice enough that it reads freshly written, but do not change promises, prices, dates, locations, or URLs. Output ONLY the paraphrased post text, nothing else.\\n\\nCurrent message:\\n${$json.body?.message || $json.message || ''}\\n\\nParaphrase instruction from user:\\n${$json.body?.instruction || $json.instruction || 'Paraphrase naturally while keeping the same meaning.'}\\n\\nRecent versions to avoid repeating exactly:\\n${JSON.stringify($json.body?.history || [])}` }) }}",
           "method": "POST",
           "options": {},
           "sendBody": true,
@@ -96,7 +96,7 @@
         "id": "shape-response",
         "name": "Shape Amplr Response",
         "parameters": {
-          "jsCode": "const raw = $json.response || $json.text || $json.output || '';\nreturn [{ json: { rewritten: String(raw).trim(), ok: true, ollama_model: 'qwen3:8b', raw: $json } }];"
+          "jsCode": "const raw = $json.response || $json.text || $json.output || '';\nconst model = $('Amplr Rewrite Webhook').first().json.body?.model || $('Amplr Rewrite Webhook').first().json.model || 'qwen3:8b';\nreturn [{ json: { rewritten: String(raw).trim(), ok: true, ollama_model: model, raw: $json } }];"
         },
         "position": [
           740,
@@ -225,7 +225,7 @@
             }
           ]
         },
-        "jsonBody": "={{ JSON.stringify({ model: 'qwen3:8b', stream: false, options: { temperature: 0.45 }, prompt: `Act like a QuillBot-style paraphraser for Facebook group posts. Preserve the original meaning, offer, facts, tone level, links, and call to action. Rewrite the wording and sentence structure naturally without adding new claims, hype, emojis, hashtags, or extra details. Do not make it more salesy. Output ONLY the paraphrased post text, nothing else.\\n\\nCurrent message:\\n${$json.body?.message || $json.message || ''}\\n\\nParaphrase instruction from user:\\n${$json.body?.instruction || $json.instruction || 'Paraphrase naturally while keeping the same meaning.'}\\n\\nRecent versions to avoid repeating exactly:\\n${JSON.stringify($json.body?.history || [])}` }) }}",
+        "jsonBody": "={{ JSON.stringify({ model: ($json.body?.model || $json.model || 'qwen3:8b'), stream: false, options: { temperature: 0.35, top_p: 0.9, repeat_penalty: 1.08 }, prompt: `Act like a QuillBot-style paraphraser for Facebook group posts. Preserve the original meaning, offer, facts, tone level, links, and call to action. Rewrite the wording and sentence structure naturally without adding new claims, hype, emojis, hashtags, or extra details. Do not make it more salesy. Vary sentence structure and word choice enough that it reads freshly written, but do not change promises, prices, dates, locations, or URLs. Output ONLY the paraphrased post text, nothing else.\\n\\nCurrent message:\\n${$json.body?.message || $json.message || ''}\\n\\nParaphrase instruction from user:\\n${$json.body?.instruction || $json.instruction || 'Paraphrase naturally while keeping the same meaning.'}\\n\\nRecent versions to avoid repeating exactly:\\n${JSON.stringify($json.body?.history || [])}` }) }}",
         "method": "POST",
         "options": {},
         "sendBody": true,
@@ -244,7 +244,7 @@
       "id": "shape-response",
       "name": "Shape Amplr Response",
       "parameters": {
-        "jsCode": "const raw = $json.response || $json.text || $json.output || '';\nreturn [{ json: { rewritten: String(raw).trim(), ok: true, ollama_model: 'qwen3:8b', raw: $json } }];"
+        "jsCode": "const raw = $json.response || $json.text || $json.output || '';\nconst model = $('Amplr Rewrite Webhook').first().json.body?.model || $('Amplr Rewrite Webhook').first().json.model || 'qwen3:8b';\nreturn [{ json: { rewritten: String(raw).trim(), ok: true, ollama_model: model, raw: $json } }];"
       },
       "position": [
         740,

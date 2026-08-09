@@ -334,6 +334,21 @@ input[type="range"]::-webkit-slider-thumb{
 .chip .x{opacity:.5; font-size:14px; line-height:1;}
 
 /* Group finder */
+/* Product polish */
+.onboarding-steps{display:grid;gap:8px;margin-top:10px;}
+.onboarding-step{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:var(--card-2);border:1px solid var(--border);border-radius:10px;}
+.step-num{width:22px;height:22px;border-radius:7px;background:var(--grad-subtle);border:1px solid var(--border-2);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;flex-shrink:0;color:var(--text);}
+.step-copy{font-size:12px;color:var(--text-2);line-height:1.35;}
+.step-copy strong{display:block;color:var(--text);font-size:12px;margin-bottom:2px;}
+.result-list{display:grid;gap:8px;margin-top:10px;}
+.result-row{padding:10px 12px;background:var(--card-2);border:1px solid var(--border);border-radius:10px;font-size:12px;}
+.result-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;}
+.result-name{font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.result-meta{color:var(--text-3);font-size:11px;line-height:1.35;}
+.warning-chip{display:inline-flex;align-items:center;padding:2px 7px;border-radius:999px;border:1px solid rgba(234,179,8,.35);background:rgba(234,179,8,.08);color:#facc15;font-size:10px;font-weight:700;margin-left:6px;}
+.badge.warning{color:#facc15;background:rgba(234,179,8,.08);border-color:rgba(234,179,8,.35);}
+.badge.warning .dot{background:#eab308;}
+
 .finder-input-row{display:flex; gap:8px; margin-bottom:14px;}
 .finder-result{
   display:flex; align-items:center; gap:12px; padding:12px;
@@ -494,11 +509,7 @@ input[type="range"]::-webkit-slider-thumb{
 
     <div class="nav-section">
       <div class="nav-label">Workspace</div>
-      <a class="nav-item active" data-route="overview" onclick="navigate('overview')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
-        Overview
-      </a>
-      <a class="nav-item" data-route="compose" onclick="navigate('compose')">
+      <a class="nav-item active" data-route="compose" onclick="navigate('compose')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
         Compose
       </a>
@@ -510,9 +521,9 @@ input[type="range"]::-webkit-slider-thumb{
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
         Schedule
       </a>
-      <a class="nav-item" data-route="analytics" onclick="navigate('analytics')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
-        Analytics
+      <a class="nav-item" data-route="history" onclick="navigate('history')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1020 8.5"/><path d="M12 7v5l3 2"/></svg>
+        History
       </a>
       <a class="nav-item" data-route="settings" onclick="navigate('settings')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
@@ -538,7 +549,7 @@ input[type="range"]::-webkit-slider-thumb{
   <!-- Main -->
   <main class="main">
     <div class="topbar">
-      <div class="page-title" id="pageTitle">Overview</div>
+      <div class="page-title" id="pageTitle">Compose</div>
       <div class="topbar-right">
         <button class="btn btn-ghost" onclick="navigate('compose')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -552,53 +563,18 @@ input[type="range"]::-webkit-slider-thumb{
       <!-- Setup error placeholder -->
       <div id="setupErrorBox"></div>
 
-      <!-- ================= OVERVIEW ================= -->
-      <section class="page active" id="page-overview">
-        <div class="stats-grid" id="statsGrid">
-          <div class="stat"><div class="stat-label">Total Posts</div><div class="stat-value" id="statPosts">—</div><div class="stat-trend">All time</div></div>
-          <div class="stat"><div class="stat-label">Groups</div><div class="stat-value" id="statGroups">—</div><div class="stat-trend">Saved</div></div>
-          <div class="stat"><div class="stat-label">Scheduled</div><div class="stat-value" id="statSchedules">—</div><div class="stat-trend">Active</div></div>
-          <div class="stat"><div class="stat-label">Success Rate</div><div class="stat-value" id="statSuccess">—</div><div class="stat-trend">Last 30 days</div></div>
-        </div>
-
-        <div class="grid-2">
-          <div>
-            <div class="section-title">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
-              Recent Jobs
-            </div>
-            <div id="recentJobs"></div>
-          </div>
-          <div>
-            <div class="section-title">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-              Quick Actions
-            </div>
-            <div class="quick-actions">
-              <button class="quick-action" onclick="navigate('compose')">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-                <h4>New Post</h4><p>Compose and send now</p>
-              </button>
-              <button class="quick-action" onclick="navigate('groups')">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                <h4>Find Groups</h4><p>Discover new audiences</p>
-              </button>
-              <button class="quick-action" onclick="navigate('schedule')">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                <h4>Schedule</h4><p>Set up recurring posts</p>
-              </button>
-            </div>
-            <div class="card" style="margin-top:16px;">
-              <h3>Extension Status</h3>
-              <div class="desc">Your Chrome extension must be paired to execute posts.</div>
-              <div id="extPairingInfo"></div>
-            </div>
-          </div>
-        </div>
-      </section>
-
       <!-- ================= COMPOSE ================= -->
-      <section class="page" id="page-compose">
+      <section class="page active" id="page-compose">
+        <div class="card" style="margin-bottom:16px;">
+          <h3>Start here</h3>
+          <div class="desc">Simple flow: connect the extension, add groups, test one post, then schedule.</div>
+          <div class="onboarding-steps">
+            <div class="onboarding-step"><div class="step-num">1</div><div class="step-copy"><strong>Install and pair the Chrome extension</strong>Open Settings, generate a pairing code, then enter it in the extension.</div></div>
+            <div class="onboarding-step"><div class="step-num">2</div><div class="step-copy"><strong>Add Facebook groups</strong>Save the group URLs you want Amplr to post into.</div></div>
+            <div class="onboarding-step"><div class="step-num">3</div><div class="step-copy"><strong>Test one post first</strong>Select one group, use a normal delay, and confirm the result in History.</div></div>
+            <div class="onboarding-step"><div class="step-num">4</div><div class="step-copy"><strong>Then schedule or scale</strong>Amplr warns about risky volume, but it will not block you.</div></div>
+          </div>
+        </div>
         <div class="grid-2">
           <div>
             <div class="card">
@@ -607,13 +583,13 @@ input[type="range"]::-webkit-slider-thumb{
               <div class="field"><textarea id="composeMessage" rows="6" placeholder="Write your post..." style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:14px;resize:vertical;"></textarea></div>
 
               <div class="field">
-                <label>Tweak Instruction</label>
-                <input type="text" id="rewriteInstruction" placeholder="e.g. Make this more conversational, shorter, or less salesy." style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;">
+                <label>Paraphrase Instruction</label>
+                <input type="text" id="rewriteInstruction" placeholder="e.g. Paraphrase naturally, shorten it, or make it less salesy." style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;">
                 <div style="display:flex;gap:8px;margin-top:8px;">
                   <button class="btn btn-ghost" id="rewriteBtn" onclick="rewriteComposeMessage()">Paraphrase with Ollama</button>
-                  <button class="btn btn-ghost" onclick="restorePreviousRewrite()">Undo tweak</button>
+                  <button class="btn btn-ghost" onclick="restorePreviousRewrite()">Undo paraphrase</button>
                 </div>
-                <div class="desc" id="rewriteStatus">Uses your n8n webhook if configured in Settings. You can tweak the same message repeatedly before posting.</div>
+                <div class="desc" id="rewriteStatus">Uses n8n + local Ollama. Paraphrases should keep the same meaning and links.</div>
               </div>
 
               <div id="composeRiskBox" style="display:none;margin:12px 0;padding:12px;border:1px solid rgba(234,179,8,.45);border-radius:10px;background:rgba(234,179,8,.08);font-size:12px;color:var(--text-2);"></div>
@@ -746,20 +722,16 @@ input[type="range"]::-webkit-slider-thumb{
         </div>
       </section>
 
-      <!-- ================= ANALYTICS ================= -->
-      <section class="page" id="page-analytics">
+      <!-- ================= HISTORY ================= -->
+      <section class="page" id="page-history">
         <div class="grid-2" style="margin-bottom:16px;">
-          <div class="stat"><div class="stat-label">Success Rate</div><div class="stat-value" id="anSuccess">—</div></div>
-          <div class="stat"><div class="stat-label">Failed Posts</div><div class="stat-value" id="anFailed">—</div></div>
+          <div class="stat"><div class="stat-label">Success Rate</div><div class="stat-value" id="histSuccess">—</div><div class="stat-trend">Based on completed jobs</div></div>
+          <div class="stat"><div class="stat-label">Warnings</div><div class="stat-value" id="histWarnings">—</div><div class="stat-trend">Jobs with risk notes</div></div>
         </div>
         <div class="card">
-          <h3>Posts — Last 7 Days</h3>
-          <div class="desc">Daily posting volume.</div>
-          <div class="chart-bars" id="chartBars"></div>
-        </div>
-        <div class="card" style="margin-top:16px;">
-          <h3>Status Breakdown</h3>
-          <div id="statusBreakdown"></div>
+          <h3>Post History</h3>
+          <div class="desc">Per-group outcomes, warnings, and evidence links where Amplr found them.</div>
+          <div id="historyList"></div>
         </div>
       </section>
 
@@ -794,7 +766,17 @@ input[type="range"]::-webkit-slider-thumb{
               <div class="field">
                 <label>n8n Ollama Rewrite Webhook</label>
                 <input type="url" id="setRewriteWebhook" placeholder="http://localhost:5678/webhook/amplr-rewrite" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;">
-                <div class="desc">Optional. Amplr sends current message + tweak instruction to n8n, and n8n calls local Ollama.</div>
+                <div class="desc">Amplr sends current message + paraphrase instruction to n8n, and n8n calls local Ollama.</div>
+              </div>
+              <div class="field">
+                <label>Rewrite Model</label>
+                <select id="setRewriteModel" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;">
+                  <option value="qwen3:8b">qwen3:8b — current default</option>
+                  <option value="llama3.1:8b">llama3.1:8b — natural paraphrases</option>
+                  <option value="qwen2.5:14b">qwen2.5:14b — higher quality if available</option>
+                  <option value="mistral-nemo">mistral-nemo — concise rewrites</option>
+                </select>
+                <div class="desc">Sent with the n8n request. The workflow uses it when that model is installed in Ollama.</div>
               </div>
               <button class="btn btn-primary btn-block" onclick="saveSettings()">Save Settings</button>
             </div>
@@ -885,6 +867,7 @@ async function onAuthSuccess(s){
   await checkSchema();
   // Load everything
   await Promise.all([loadSettings(), loadGroups(), loadOverview(), checkExtensionStatus()]);
+  navigate(location.hash.slice(1) && PAGE_TITLES[location.hash.slice(1)] ? location.hash.slice(1) : 'compose');
   // Start global job watcher
   startGlobalJobWatcher();
 }
@@ -919,7 +902,7 @@ async function checkSchema(){
 /* ============================================================
    NAVIGATION
    ============================================================ */
-const PAGE_TITLES = {overview:'Overview',compose:'Compose',groups:'Groups',schedule:'Schedule',analytics:'Analytics',settings:'Settings'};
+const PAGE_TITLES = {compose:'Compose',groups:'Groups',schedule:'Schedule',history:'History',settings:'Settings'};
 
 function navigate(route){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
@@ -927,17 +910,16 @@ function navigate(route){
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.route===route));
   document.getElementById('pageTitle').innerHTML = PAGE_TITLES[route].replace(/(\w+)$/, '<em class="serif">$1</em>');
 
-  if (route==='overview') loadOverview();
   if (route==='compose') renderComposeGroups();
   if (route==='groups') renderGroupsList();
   if (route==='schedule') renderSchedules();
-  if (route==='analytics') loadAnalytics();
+  if (route==='history') loadHistory();
   if (route==='settings') renderSettingsPage();
   if (location.hash !== '#'+route) history.replaceState(null,'','#'+route);
 }
 
 window.addEventListener('hashchange', ()=>{
-  const r = location.hash.slice(1) || 'overview';
+  const r = location.hash.slice(1) || 'compose';
   if (PAGE_TITLES[r]) navigate(r);
 });
 
@@ -1078,15 +1060,19 @@ function getRewriteWebhook(){
   return (localStorage.getItem('amplr_rewrite_webhook') || 'http://localhost:5678/webhook/amplr-rewrite').trim();
 }
 
+function getRewriteModel(){
+  return (localStorage.getItem('amplr_rewrite_model') || 'qwen3:8b').trim();
+}
+
 async function rewriteComposeMessage(){
   const messageEl=document.getElementById('composeMessage');
   const instructionEl=document.getElementById('rewriteInstruction');
   const statusEl=document.getElementById('rewriteStatus');
   const btn=document.getElementById('rewriteBtn');
   const message=messageEl.value.trim();
-  const instruction=(instructionEl.value.trim() || 'Rewrite this as a clearer, more natural Facebook group post. Keep the meaning and link intact.');
+  const instruction=(instructionEl.value.trim() || 'Paraphrase like QuillBot. Keep the same meaning and links.');
   const webhook=getRewriteWebhook();
-  if (!message) { toast('Write a message before tweaking','error'); return; }
+  if (!message) { toast('Write a message before paraphrasing','error'); return; }
   if (!webhook) { toast('Add your n8n rewrite webhook in Settings first','error'); navigate('settings'); return; }
   rewriteHistory.push(messageEl.value);
   btn.disabled=true;
@@ -1095,7 +1081,7 @@ async function rewriteComposeMessage(){
     const res=await fetch(webhook, {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({ message, instruction, history: rewriteHistory.slice(-5), source:'amplr-dashboard' })
+      body:JSON.stringify({ message, instruction, model:getRewriteModel(), history: rewriteHistory.slice(-5), source:'amplr-dashboard' })
     });
     const raw=await res.text();
     if (!res.ok) throw new Error(`n8n returned ${res.status}: ${raw.slice(0,160)}`);
@@ -1104,9 +1090,9 @@ async function rewriteComposeMessage(){
     const rewritten = out.rewritten || out.message || out.text || out.output || out.data?.rewritten || out.data?.message;
     if (!rewritten || typeof rewritten !== 'string') throw new Error('n8n response did not include rewritten/message/text/output');
     messageEl.value=rewritten.trim();
-    statusEl.textContent='Tweak applied. You can tweak again, undo, or post.';
+    statusEl.textContent='Paraphrase applied. You can paraphrase again, undo, or post.';
     updateRiskPanels();
-    toast('Message tweaked','success');
+    toast('Message paraphrased','success');
   } catch(err) {
     rewriteHistory.pop();
     statusEl.textContent='Rewrite failed: '+(err.message||'unknown error');
@@ -1118,7 +1104,7 @@ async function rewriteComposeMessage(){
 
 function restorePreviousRewrite(){
   const previous=rewriteHistory.pop();
-  if (!previous) { toast('No previous tweak to restore','info'); return; }
+  if (!previous) { toast('No previous paraphrase to restore','info'); return; }
   document.getElementById('composeMessage').value=previous;
   document.getElementById('rewriteStatus').textContent='Previous version restored.';
   updateRiskPanels();
@@ -1231,9 +1217,13 @@ async function loadOverview(){
     sb.from('jsw_post_jobs').select('*').eq('user_id',user.id).order('created_at',{ascending:false}).limit(10)
   ]);
 
-  document.getElementById('statPosts').innerHTML = posts.count||0;
-  document.getElementById('statGroups').innerHTML = groups.count||0;
-  document.getElementById('statSchedules').innerHTML = schedules.count||0;
+  const statPosts=document.getElementById('statPosts');
+  const statGroups=document.getElementById('statGroups');
+  const statSchedules=document.getElementById('statSchedules');
+  const statSuccess=document.getElementById('statSuccess');
+  if (statPosts) statPosts.innerHTML = posts.count||0;
+  if (statGroups) statGroups.innerHTML = groups.count||0;
+  if (statSchedules) statSchedules.innerHTML = schedules.count||0;
 
   // Success rate from posts
   const { data: allPosts } = await sb.from('jsw_posts').select('status').eq('user_id',user.id);
@@ -1242,32 +1232,100 @@ async function loadOverview(){
     const ok = allPosts.filter(p=>p.status==='success').length;
     successRate = Math.round((ok/allPosts.length)*100)+'%';
   }
-  document.getElementById('statSuccess').innerHTML = successRate;
+  if (statSuccess) statSuccess.innerHTML = successRate;
 
   // Recent jobs
   const rj = document.getElementById('recentJobs');
-  if (!jobs.data || !jobs.data.length) {
-    rj.innerHTML = emptyState('No jobs yet','Create a post to see it here.');
-  } else {
-    rj.innerHTML = jobs.data.map(j=>jobRow(j)).join('');
+  if (rj) {
+    if (!jobs.data || !jobs.data.length) {
+      rj.innerHTML = emptyState('No jobs yet','Create a post to see it here.');
+    } else {
+      rj.innerHTML = jobs.data.map(j=>jobRow(j)).join('');
+    }
   }
 
   // Extension pairing info
   renderExtPairingInfo();
 }
 
+function normalizeResult(j){
+  const r = j.result || {};
+  if (typeof r === 'string') { try { return JSON.parse(r); } catch { return {}; } }
+  return r && typeof r === 'object' ? r : {};
+}
+
+function collectWarnings(j){
+  const r=normalizeResult(j);
+  const warnings=[];
+  (r.warnings||[]).forEach(w=>warnings.push(typeof w==='string'?w:(w.message||w.type||JSON.stringify(w))));
+  (r.results||[]).forEach(x=>(x.warnings||[]).forEach(w=>warnings.push(typeof w==='string'?w:(w.message||w.type||JSON.stringify(w)))));
+  return warnings.filter(Boolean);
+}
+
+function resultBadge(status, warningCount=0){
+  if (warningCount) return `<span class="badge warning"><span class="dot"></span>warning</span>`;
+  const safe=esc(status||'pending');
+  return `<span class="badge ${safe}"><span class="dot"></span>${safe}</span>`;
+}
+
 function jobRow(j){
-  const msg = (j.message||'').substring(0,60);
+  const msg = (j.message||'').substring(0,72);
   const time = new Date(j.created_at).toLocaleString();
+  const warnings=collectWarnings(j);
+  const r=normalizeResult(j);
+  const counts = [
+    Number.isFinite(r.success_count) ? `${r.success_count} posted` : null,
+    Number.isFinite(r.failed_count) ? `${r.failed_count} failed` : null,
+    Number.isFinite(r.skipped_count) && r.skipped_count ? `${r.skipped_count} skipped` : null
+  ].filter(Boolean).join(' · ');
   return `<div class="job">
     <div class="job-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></div>
-    <div class="job-body"><div class="job-msg">${esc(msg)}</div><div class="job-meta">${time} · ${(j.groups||[]).length} group(s)</div></div>
-    <span class="badge ${j.status}"><span class="dot"></span>${j.status}</span>
+    <div class="job-body"><div class="job-msg">${esc(msg)}${warnings.length?`<span class="warning-chip">${warnings.length} warning${warnings.length>1?'s':''}</span>`:''}</div><div class="job-meta">${time} · ${(j.groups||[]).length} group(s)${counts?' · '+esc(counts):''}</div></div>
+    ${resultBadge(j.status,warnings.length)}
   </div>`;
+}
+
+function resultRow(x){
+  const name=x.group_name || x.name || x.group_url || x.url || 'Group';
+  const status=x.status || 'unknown';
+  const warn=(x.warnings||[]).map(w=>typeof w==='string'?w:(w.message||w.type||JSON.stringify(w))).filter(Boolean);
+  const evidence=x.post_url ? `<a href="${esc(x.post_url)}" target="_blank" style="color:var(--accent);">View post evidence</a>` : (x.evidence_found ? 'Evidence found in feed' : 'No permalink captured');
+  return `<div class="result-row">
+    <div class="result-top"><div class="result-name">${esc(name)}</div>${resultBadge(status,warn.length)}</div>
+    <div class="result-meta">${evidence}${x.error?' · Error: '+esc(x.error):''}${x.reason?' · Reason: '+esc(x.reason):''}</div>
+    ${warn.length?`<div class="result-meta" style="margin-top:6px;color:#facc15;">${warn.map(esc).join('<br>')}</div>`:''}
+  </div>`;
+}
+
+async function loadHistory(){
+  if (!user) return;
+  const { data, error } = await sb.from('jsw_post_jobs').select('*').eq('user_id',user.id).order('created_at',{ascending:false}).limit(50);
+  const el=document.getElementById('historyList');
+  if (error) { el.innerHTML=emptyState('Could not load history', error.message); return; }
+  const jobs=data||[];
+  const finished=jobs.filter(j=>['done','failed'].includes(j.status));
+  const ok=finished.filter(j=>j.status==='done').length;
+  const warningJobs=jobs.filter(j=>collectWarnings(j).length).length;
+  document.getElementById('histSuccess').textContent = finished.length ? Math.round((ok/finished.length)*100)+'%' : '—';
+  document.getElementById('histWarnings').textContent = warningJobs;
+  if (!jobs.length) { el.innerHTML=emptyState('No post history yet','Run one test post and Amplr will show per-group results here.'); return; }
+  el.innerHTML=jobs.map(j=>{
+    const r=normalizeResult(j); const rows=(r.results||[]).map(resultRow).join(''); const warnings=collectWarnings(j);
+    return `<div class="job" style="display:block;">
+      <div style="display:flex;align-items:center;gap:14px;">
+        <div class="job-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></div>
+        <div class="job-body"><div class="job-msg">${esc((j.message||'').substring(0,110))}${warnings.length?`<span class="warning-chip">${warnings.length} warning${warnings.length>1?'s':''}</span>`:''}</div><div class="job-meta">${new Date(j.created_at).toLocaleString()} · ${(j.groups||[]).length} group(s)</div></div>
+        ${resultBadge(j.status,warnings.length)}
+      </div>
+      ${warnings.length?`<div class="result-meta" style="margin-top:10px;color:#facc15;">${warnings.slice(0,4).map(esc).join('<br>')}</div>`:''}
+      ${rows?`<div class="result-list">${rows}</div>`:''}
+    </div>`;
+  }).join('');
 }
 
 function renderExtPairingInfo(){
   const el = document.getElementById('extPairingInfo');
+  if (!el) return;
   if (!settingsCache.pairing_code) {
     el.innerHTML = '<div style="font-size:12px;color:var(--text-3);">Extension not paired. Generate a pairing code in <strong style="color:var(--text);">Settings</strong>.</div>';
   } else {
@@ -1439,43 +1497,6 @@ async function removeSchedule(id){
 }
 
 /* ============================================================
-   ANALYTICS
-   ============================================================ */
-async function loadAnalytics(){
-  const { data } = await sb.from('jsw_posts').select('*').eq('user_id',user.id).order('posted_at',{ascending:false});
-  const posts = data||[];
-  const ok = posts.filter(p=>p.status==='success').length;
-  const failed = posts.filter(p=>p.status==='failed').length;
-  document.getElementById('anSuccess').innerHTML = posts.length ? Math.round((ok/posts.length)*100)+'%' : '—';
-  document.getElementById('anFailed').innerHTML = failed;
-
-  // 7-day chart
-  const days=[];
-  for(let i=6;i>=0;i--){
-    const d=new Date(); d.setDate(d.getDate()-i);
-    const key=d.toISOString().slice(0,10);
-    const count=posts.filter(p=>(p.posted_at||p.created_at||'').slice(0,10)===key).length;
-    days.push({label:['S','M','T','W','T','F','S'][d.getDay()], count});
-  }
-  const max=Math.max(...days.map(d=>d.count),1);
-  document.getElementById('chartBars').innerHTML = days.map(d=>`
-    <div class="bar-col">
-      <div class="bar" style="height:${(d.count/max)*100}%;" title="${d.count} posts"></div>
-      <div class="bar-day">${d.label}</div>
-    </div>`).join('');
-
-  // Status breakdown
-  const sb_el=document.getElementById('statusBreakdown');
-  const { data: jobs } = await sb.from('jsw_post_jobs').select('status').eq('user_id',user.id);
-  const j=jobs||[];
-  const counts={pending:0,processing:0,done:0,failed:0};
-  j.forEach(x=>{ if(counts[x.status]!==undefined) counts[x.status]++; });
-  sb_el.innerHTML = ['pending','processing','done','failed'].map(s=>`
-    <div class="kv"><span class="badge ${s}"><span class="dot"></span>${s}</span><span>${counts[s]}</span></div>
-  `).join('');
-}
-
-/* ============================================================
    SETTINGS
    ============================================================ */
 async function loadSettings(){
@@ -1490,6 +1511,7 @@ async function saveSettings(){
     return;
   }
   localStorage.setItem('amplr_rewrite_webhook', rewriteWebhook);
+  localStorage.setItem('amplr_rewrite_model', document.getElementById('setRewriteModel')?.value || 'qwen3:8b');
 
   const payload = {
     user_id:user.id,
@@ -1512,6 +1534,8 @@ function renderSettingsPage(){
   document.getElementById('setDelay').value = settingsCache.default_delay || 30;
   const rewriteInput = document.getElementById('setRewriteWebhook');
   if (rewriteInput) rewriteInput.value = getRewriteWebhook();
+  const rewriteModel = document.getElementById('setRewriteModel');
+  if (rewriteModel) rewriteModel.value = getRewriteModel();
   renderPairingArea();
 }
 
