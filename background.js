@@ -155,8 +155,8 @@ async function callAI(userMessage, settings, variationIndex = 0) {
 
 async function callOllama(model, customPrompt, userMessage, variationIndex, temp) {
   const system = customPrompt ||
-    'You rewrite Facebook group posts to make them unique and avoid spam detection. Keep the exact same message, offer, and call to action — vary the hook, sentence structure, and word choice. Sound natural and human. Output ONLY the rewritten post text, nothing else. No explanations, no preamble.';
-  const user = `Rewrite this Facebook post (variation #${variationIndex + 1}). Change the opening, vary sentence length, use different synonyms. Keep the same core message and any links intact.\n\nOriginal:\n${userMessage}`;
+    'Act like a QuillBot-style paraphraser for Facebook group posts. Preserve the original meaning, offer, facts, tone level, links, and call to action. Rewrite the wording and sentence structure naturally without adding new claims, hype, emojis, hashtags, or extra details. Do not make it more salesy. Output ONLY the paraphrased post text, nothing else.';
+  const user = `Paraphrase this Facebook post (variant #${variationIndex + 1}) like QuillBot would: keep the same meaning and links, but change phrasing, sentence order where natural, and word choice. Do not expand the message or invent benefits.\n\nOriginal:\n${userMessage}`;
 
   const res = await fetch('http://localhost:11434/api/chat', {
     method: 'POST',

@@ -610,7 +610,7 @@ input[type="range"]::-webkit-slider-thumb{
                 <label>Tweak Instruction</label>
                 <input type="text" id="rewriteInstruction" placeholder="e.g. Make this more conversational, shorter, or less salesy." style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;">
                 <div style="display:flex;gap:8px;margin-top:8px;">
-                  <button class="btn btn-ghost" id="rewriteBtn" onclick="rewriteComposeMessage()">Tweak with Ollama</button>
+                  <button class="btn btn-ghost" id="rewriteBtn" onclick="rewriteComposeMessage()">Paraphrase with Ollama</button>
                   <button class="btn btn-ghost" onclick="restorePreviousRewrite()">Undo tweak</button>
                 </div>
                 <div class="desc" id="rewriteStatus">Uses your n8n webhook if configured in Settings. You can tweak the same message repeatedly before posting.</div>

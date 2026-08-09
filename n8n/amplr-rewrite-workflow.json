@@ -38,7 +38,7 @@
         ]
       }
     },
-    "createdAt": "2026-08-09T01:54:52.037Z",
+    "createdAt": "2026-08-09T02:05:13.906Z",
     "description": null,
     "name": null,
     "nodes": [
@@ -77,7 +77,7 @@
               }
             ]
           },
-          "jsonBody": "={{ JSON.stringify({ model: 'qwen3:8b', stream: false, options: { temperature: 0.7 }, prompt: `You rewrite Facebook group posts for small businesses. Keep links intact. Do not add hashtags unless asked. Do not use emojis or decorative symbols. Do not make unsupported claims. Output only the rewritten post, no explanation.\\n\\nCurrent message:\\n${$json.body?.message || $json.message || ''}\\n\\nUser tweak instruction:\\n${$json.body?.instruction || $json.instruction || 'Make it clearer and more natural.'}\\n\\nRecent versions for context:\\n${JSON.stringify($json.body?.history || [])}` }) }}",
+          "jsonBody": "={{ JSON.stringify({ model: 'qwen3:8b', stream: false, options: { temperature: 0.45 }, prompt: `Act like a QuillBot-style paraphraser for Facebook group posts. Preserve the original meaning, offer, facts, tone level, links, and call to action. Rewrite the wording and sentence structure naturally without adding new claims, hype, emojis, hashtags, or extra details. Do not make it more salesy. Output ONLY the paraphrased post text, nothing else.\\n\\nCurrent message:\\n${$json.body?.message || $json.message || ''}\\n\\nParaphrase instruction from user:\\n${$json.body?.instruction || $json.instruction || 'Paraphrase naturally while keeping the same meaning.'}\\n\\nRecent versions to avoid repeating exactly:\\n${JSON.stringify($json.body?.history || [])}` }) }}",
           "method": "POST",
           "options": {},
           "sendBody": true,
@@ -134,21 +134,21 @@
         "typeVersion": 1.1
       }
     ],
-    "updatedAt": "2026-08-09T01:54:52.037Z",
-    "versionId": "b6377b0c-0484-4c0b-b348-5c7a4bb15593",
+    "updatedAt": "2026-08-09T02:05:13.906Z",
+    "versionId": "35a29b14-2e23-4fed-9c2a-9d9d96b6fe3e",
     "workflowId": "v0lUXT9K3LYbfooO",
     "workflowPublishHistory": [
       {
-        "createdAt": "2026-08-09T01:54:52.062Z",
+        "createdAt": "2026-08-09T02:05:13.927Z",
         "event": "activated",
-        "id": 269,
+        "id": 271,
         "userId": "34b20bef-3a34-468f-8596-10f0b0f92e4c",
-        "versionId": "b6377b0c-0484-4c0b-b348-5c7a4bb15593",
+        "versionId": "35a29b14-2e23-4fed-9c2a-9d9d96b6fe3e",
         "workflowId": "v0lUXT9K3LYbfooO"
       }
     ]
   },
-  "activeVersionId": "b6377b0c-0484-4c0b-b348-5c7a4bb15593",
+  "activeVersionId": "35a29b14-2e23-4fed-9c2a-9d9d96b6fe3e",
   "connections": {
     "Amplr Rewrite Webhook": {
       "main": [
@@ -225,7 +225,7 @@
             }
           ]
         },
-        "jsonBody": "={{ JSON.stringify({ model: 'qwen3:8b', stream: false, options: { temperature: 0.7 }, prompt: `You rewrite Facebook group posts for small businesses. Keep links intact. Do not add hashtags unless asked. Do not use emojis or decorative symbols. Do not make unsupported claims. Output only the rewritten post, no explanation.\\n\\nCurrent message:\\n${$json.body?.message || $json.message || ''}\\n\\nUser tweak instruction:\\n${$json.body?.instruction || $json.instruction || 'Make it clearer and more natural.'}\\n\\nRecent versions for context:\\n${JSON.stringify($json.body?.history || [])}` }) }}",
+        "jsonBody": "={{ JSON.stringify({ model: 'qwen3:8b', stream: false, options: { temperature: 0.45 }, prompt: `Act like a QuillBot-style paraphraser for Facebook group posts. Preserve the original meaning, offer, facts, tone level, links, and call to action. Rewrite the wording and sentence structure naturally without adding new claims, hype, emojis, hashtags, or extra details. Do not make it more salesy. Output ONLY the paraphrased post text, nothing else.\\n\\nCurrent message:\\n${$json.body?.message || $json.message || ''}\\n\\nParaphrase instruction from user:\\n${$json.body?.instruction || $json.instruction || 'Paraphrase naturally while keeping the same meaning.'}\\n\\nRecent versions to avoid repeating exactly:\\n${JSON.stringify($json.body?.history || [])}` }) }}",
         "method": "POST",
         "options": {},
         "sendBody": true,
@@ -289,5 +289,5 @@
     "executionOrder": "v1"
   },
   "staticData": null,
-  "versionCounter": 30
+  "versionCounter": 34
 }
