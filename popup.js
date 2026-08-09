@@ -139,7 +139,7 @@ function signOut() {
 // ══════════════════════════════════════
 
 let onboardSession = null;
-let onboardState = { step1: false, step2: false, step3: false };
+let onboardState = { facebook: false };
 
 function initOnboarding(session) {
   onboardSession = session;
@@ -148,9 +148,8 @@ function initOnboarding(session) {
 }
 
 function checkOnboardComplete() {
-  const allDone = onboardState.step1 && onboardState.step2 && onboardState.step3;
   const btn = $('finishBtn');
-  if (btn) btn.disabled = !allDone;
+  if (btn) btn.disabled = !onboardState.facebook;
 }
 
 function markStep(step, label) {
@@ -162,25 +161,16 @@ function markStep(step, label) {
   if (num) num.textContent = '✓';
   if (btn) btn.style.display = 'none';
   if (done) { done.style.display = 'inline'; if (label) done.textContent = label; }
-  onboardState[step] = true;
+  if (step === 'step2') onboardState.facebook = true;
   checkOnboardComplete();
 }
 
-// Step 1: Background apps setting
+// Optional: Background apps setting. Chrome does not expose this preference to
+// extensions, so we only open a settings search and do not fake a verified state.
 function openBackgroundSetting() {
-  chrome.tabs.create({ url: 'chrome://settings/system' });
-  // Don't auto-mark done — show a confirmation button instead
-  const btn = document.getElementById('step1btn');
-  if (btn) {
-    btn.textContent = "I've enabled it ✓";
-    btn.style.background = 'rgba(16,185,129,.15)';
-    btn.style.color = '#10b981';
-    // Re-wire click to mark done
-    btn.replaceWith(btn.cloneNode(true)); // clear old listeners
-    const newBtn = document.getElementById('step1btn');
-    if (newBtn) newBtn.addEventListener('click', () => markStep('step1', '✓ Background apps enabled'));
-  }
-  document.getElementById('onboardStatus').textContent = 'Flip the toggle in Chrome settings, then tap the button above.';
+  chrome.tabs.create({ url: 'chrome://settings/?search=continue%20running%20background%20apps' });
+  const status = document.getElementById('onboardStatus');
+  if (status) status.textContent = 'Chrome does not let extensions verify this setting. Facebook login is the only required setup step.';
 }
 
 // Step 2: Facebook login check
@@ -204,7 +194,7 @@ function openFacebook() {
   let attempts = 0;
   const poll = setInterval(async () => {
     attempts++;
-    if (attempts > 30 || onboardState.step2) { clearInterval(poll); return; }
+    if (attempts > 30 || onboardState.facebook) { clearInterval(poll); return; }
     try {
       const cookies = await chrome.cookies.getAll({ domain: '.facebook.com' });
       const loggedIn = cookies.some(c => c.name === 'c_user');
@@ -214,15 +204,6 @@ function openFacebook() {
       }
     } catch(e) {}
   }, 3000);
-}
-
-// Step 3: Import groups
-function runImportGroups() {
-  const btn = $('step3btn') || $('importGroupsBtn');
-  const statusEl = $('importStatus') || $('onboardStatus');
-  if (btn) { btn.disabled = true; btn.textContent = 'Importing...'; }
-  if (statusEl) statusEl.textContent = 'Opening your Facebook groups...';
-  chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS' });
 }
 
 function finishOnboarding() {
@@ -236,9 +217,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const on = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); };
   on('step1btn', openBackgroundSetting);
   on('step2btn', openFacebook);
-  on('step3btn', runImportGroups);
   on('finishBtn', finishOnboarding);
-  on('importGroupsBtn', runImportGroups);
   on('openDashBtn', () => chrome.tabs.create({ url: 'https://jack108510.github.io/fb-autoposter/dashboard.html' }));
   on('signOutBtn', signOut);
   on('loginBtn', handleLogin);
@@ -260,19 +239,10 @@ chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === 'IMPORT_GROUPS_DONE') {
     const label = `✓ ${msg.count} groups imported`;
     if (statusEl) statusEl.textContent = label;
-    // Mark step 3 done (onboarding or connected view)
-    const step3btn = $('step3btn');
-    if (step3btn) markStep('step3', label);
-    // Reset connected view button
-    const importBtn = $('importGroupsBtn');
-    if (importBtn) { importBtn.disabled = false; }
+    // Import is dashboard-owned now; popup has no direct import button to reset.
   }
   if (msg.type === 'IMPORT_GROUPS_ERROR') {
     if (statusEl) { statusEl.textContent = 'Failed: ' + msg.error; statusEl.style.color = 'var(--red)'; }
-    const step3btn = $('step3btn');
-    if (step3btn) { step3btn.disabled = false; step3btn.textContent = 'Try Again →'; }
-    const importBtn = $('importGroupsBtn');
-    if (importBtn) importBtn.disabled = false;
   }
   if (msg.type === 'DASH_JOB_STATUS') {
     const el = $('dashStatus');

@@ -191,39 +191,27 @@
   <div id="onboardingView">
     <div class="onboard-header">
       <div class="onboard-title">Almost ready</div>
-      <div class="onboard-sub">Complete setup to get the most out of Amplr</div>
+      <div class="onboard-sub">Sign into Facebook, then manage groups from the dashboard</div>
     </div>
 
-    <!-- Step 1: Background apps -->
-    <div class="step" id="step1" data-done="false">
-      <div class="step-num" id="step1num">1</div>
+    <!-- Optional: Background apps setting -->
+    <div class="step" id="step1" data-done="optional">
+      <div class="step-num" id="step1num">i</div>
       <div class="step-body">
-        <div class="step-title">Keep scheduling alive</div>
-        <div class="step-desc">Amplr can post on schedule even when Chrome is closed — just enable one Chrome setting.</div>
-        <button class="step-action" id="step1btn">Open Chrome Setting →</button>
-        <span class="step-done-badge" id="step1done" style="display:none;">✓ Enabled</span>
+        <div class="step-title">Optional: keep Chrome awake</div>
+        <div class="step-desc">Chrome does not expose this setting to extensions, so Amplr will not fake-verify it. If you want scheduled posts while Chrome is closed, search Chrome settings for background apps and enable it.</div>
+        <button class="step-action" id="step1btn">Open Chrome Settings Search →</button>
       </div>
     </div>
 
-    <!-- Step 2: Log into Facebook -->
-    <div class="step" id="step2" data-done="false">
-      <div class="step-num" id="step2num">2</div>
+    <!-- Required: Log into Facebook -->
+    <div class="step active" id="step2" data-done="false">
+      <div class="step-num" id="step2num">1</div>
       <div class="step-body">
         <div class="step-title">Sign into Facebook</div>
         <div class="step-desc">Amplr needs you logged into Facebook in this browser to post on your behalf.</div>
         <button class="step-action" id="step2btn">Open Facebook →</button>
         <span class="step-done-badge" id="step2done" style="display:none;">✓ Logged in</span>
-      </div>
-    </div>
-
-    <!-- Step 3: Import groups -->
-    <div class="step" id="step3" data-done="false">
-      <div class="step-num" id="step3num">3</div>
-      <div class="step-body">
-        <div class="step-title">Import your groups</div>
-        <div class="step-desc">Amplr will scan your Facebook groups and save them to your dashboard.</div>
-        <button class="step-action" id="step3btn">Import Groups →</button>
-        <span class="step-done-badge" id="step3done" style="display:none;"></span>
       </div>
     </div>
 
@@ -240,12 +228,6 @@
         <div class="conn-sub" id="dashEmail"></div>
       </div>
     </div>
-
-    <button class="action-btn" id="importGroupsBtn">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9"/></svg>
-      Sync Groups from Facebook
-    </button>
-    <div id="importStatus"></div>
 
     <button class="action-btn" id="openDashBtn">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
