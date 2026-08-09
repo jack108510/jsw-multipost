@@ -251,9 +251,149 @@
     };
   }
 
+
+  // ============ FACEBOOK IDENTITY SYNC / VERIFY ============
+  function cleanIdentityName(text) {
+    return normalizeText(text)
+      .replace(/^(Switch to|Continue as|Use Facebook as)\s+/i, '')
+      .replace(/\s+(profile|page)$/i, '')
+      .trim();
+  }
+
+  function visible(el) {
+    return !!(el && el.offsetParent !== null);
+  }
+
+  function currentIdentityName() {
+    const candidates = [
+      document.querySelector('[aria-label$="profile"] img[alt]')?.getAttribute('alt'),
+      document.querySelector('[aria-label*="Your profile"] img[alt]')?.getAttribute('alt'),
+      document.querySelector('a[aria-label*="profile"] img[alt]')?.getAttribute('alt'),
+      document.querySelector('[role="banner"] img[alt]')?.getAttribute('alt')
+    ].filter(Boolean).map(cleanIdentityName).filter(Boolean);
+    return candidates[0] || null;
+  }
+
+  async function openIdentityMenu() {
+    const selectors = [
+      '[aria-label="Your profile"]',
+      '[aria-label*="Your profile"]',
+      '[aria-label="Account"]',
+      '[aria-label*="Account"]',
+      '[aria-label*="profile"]'
+    ];
+    for (const sel of selectors) {
+      const el = [...document.querySelectorAll(sel)].find(visible);
+      if (el) { el.click(); await sleep(1200); return true; }
+    }
+    const banner = document.querySelector('[role="banner"]') || document.body;
+    const imgBtn = [...banner.querySelectorAll('div[role="button"], a[role="link"], a')].find(el => visible(el) && el.querySelector('img[alt]'));
+    if (imgBtn) { imgBtn.click(); await sleep(1200); return true; }
+    return false;
+  }
+
+  function scrapeIdentityMenu() {
+    const found = new Map();
+    const add = (name, extra={}) => {
+      name = cleanIdentityName(name);
+      if (!name || name.length < 2 || /^(see all|settings|help|log out|give feedback|meta verified)$/i.test(name)) return;
+      const key = (extra.url || name).toLowerCase();
+      if (!found.has(key)) found.set(key, {
+        id: key,
+        name,
+        type: extra.type || (/page/i.test(extra.label || '') ? 'page' : 'facebook identity'),
+        url: extra.url || null,
+        avatar_url: extra.avatar_url || null,
+        is_active: !!extra.is_active
+      });
+    };
+
+    const menuRoots = [...document.querySelectorAll('[role="dialog"], [role="menu"], [aria-label*="Account"], body')];
+    const root = menuRoots.find(r => /Switch to|Continue as|See all profiles|Your profile|Vet Inc|Empty Slot/i.test(r.textContent || '')) || document.body;
+
+    root.querySelectorAll('[aria-label], [role="button"], a[href], span[dir="auto"]').forEach(el => {
+      const label = el.getAttribute('aria-label') || el.textContent || '';
+      if (!/Switch to|Continue as|Use Facebook as/i.test(label) && el.tagName !== 'A' && el.getAttribute('role') !== 'button') return;
+      let name = label;
+      if (!/Switch to|Continue as|Use Facebook as/i.test(label)) {
+        const imgAlt = el.querySelector?.('img[alt]')?.getAttribute('alt') || el.closest?.('div')?.querySelector?.('img[alt]')?.getAttribute('alt');
+        const text = normalizeText(el.textContent || '');
+        name = imgAlt || text;
+      }
+      const img = el.querySelector?.('img[src]') || el.closest?.('div')?.querySelector?.('img[src]');
+      const url = el.href || el.closest?.('a[href]')?.href || null;
+      add(name, { label, url, avatar_url: img?.src || null, type: /Page|business/i.test(label) ? 'page' : undefined });
+    });
+
+    const active = currentIdentityName();
+    if (active) add(active, { is_active: true });
+    return [...found.values()].map(i => ({ ...i, is_active: i.name === active || i.is_active }));
+  }
+
+  async function syncFacebookIdentities() {
+    log('Syncing Facebook identities...');
+    const activeBefore = currentIdentityName();
+    const opened = await openIdentityMenu();
+    if (!opened) throw new Error('Could not open Facebook profile switcher');
+    await sleep(1000);
+    let identities = scrapeIdentityMenu();
+    if (!identities.length && activeBefore) identities = [{ id: activeBefore.toLowerCase(), name: activeBefore, type: 'facebook identity', is_active: true }];
+    if (!identities.length) throw new Error('No Facebook identities found in switcher');
+    return { identities, active_identity: identities.find(i => i.is_active)?.name || activeBefore || null, pageUrl: location.href };
+  }
+
+  function identityMatches(actual, expected) {
+    if (!expected) return true;
+    actual = cleanIdentityName(actual || '').toLowerCase();
+    expected = cleanIdentityName(expected || '').toLowerCase();
+    return actual && expected && (actual === expected || actual.includes(expected) || expected.includes(actual));
+  }
+
+  async function switchToIdentity(expectedName) {
+    if (!expectedName) return { switched: false, active_identity: currentIdentityName() };
+    let active = currentIdentityName();
+    if (identityMatches(active, expectedName)) return { switched: false, active_identity: active };
+
+    const opened = await openIdentityMenu();
+    if (!opened) throw new Error('Could not open Facebook profile switcher to change identity');
+    await sleep(1000);
+
+    const candidates = [...document.querySelectorAll('[aria-label], [role="button"], a[href], span[dir="auto"]')].filter(visible);
+    const target = candidates.find(el => {
+      const label = cleanIdentityName(el.getAttribute('aria-label') || el.textContent || '');
+      return identityMatches(label, expectedName) && /Switch to|Continue as|Use Facebook as|.+/i.test(label);
+    });
+    if (!target) throw new Error(`Could not find Facebook identity "${expectedName}" in switcher`);
+    target.click();
+    await sleep(6000);
+    active = currentIdentityName();
+    if (!identityMatches(active, expectedName)) {
+      // Facebook sometimes navigates after switch; reload detection from page text/menu can lag.
+      log('Identity switch verification uncertain:', active, expectedName);
+    }
+    return { switched: true, active_identity: active || expectedName };
+  }
+
+  async function verifyComposerIdentity(expectedName) {
+    if (!expectedName) return { active_identity: currentIdentityName(), verified: true };
+    const main = document.querySelector('[role="main"]') || document.body;
+    const text = normalizeText(main.textContent || '').slice(0, 2000);
+    const profileHint = [...main.querySelectorAll('[aria-label], img[alt]')]
+      .map(el => el.getAttribute('aria-label') || el.getAttribute('alt') || '')
+      .find(v => identityMatches(v, expectedName));
+    const active = currentIdentityName();
+    const verified = identityMatches(active, expectedName) || !!profileHint || text.toLowerCase().includes(expectedName.toLowerCase());
+    if (!verified) throw new Error(`Active Facebook identity is not confirmed as ${expectedName}. Current: ${active || 'unknown'}`);
+    return { active_identity: active || expectedName, verified };
+  }
+
   // ============ MAIN ============
-  async function postToGroup(message, imageUrl) {
+  async function postToGroup(message, imageUrl, identityName) {
     log('=== START POST ===');
+
+    // 0. Verify/switch Facebook posting identity before opening composer
+    const identitySwitch = await switchToIdentity(identityName);
+    const identityCheck = await verifyComposerIdentity(identityName);
 
     // 1. Find trigger
     const trigger = await findTrigger();
@@ -315,18 +455,48 @@
       postUrl: evidence.postUrl || null,
       evidenceFound: !!evidence.found,
       matchedText: evidence.matchedText || null,
-      pageUrl: location.href
+      pageUrl: location.href,
+      identityName: identityName || null,
+      activeIdentity: identityCheck?.active_identity || identitySwitch?.active_identity || null
     };
   }
 
   // ============ MESSAGE LISTENER ============
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (msg.type !== 'POST_TO_PAGE') return;
+    if (!['POST_TO_PAGE','SYNC_FACEBOOK_IDENTITIES','SWITCH_FACEBOOK_IDENTITY'].includes(msg.type)) return;
+
+    if (msg.type === 'SWITCH_FACEBOOK_IDENTITY') {
+      log('Received identity switch command');
+      (async () => {
+        try {
+          const result = await switchToIdentity(msg.identityName || msg.identity_name);
+          sendResponse({ success: true, ...result });
+        } catch (error) {
+          log('IDENTITY SWITCH ERROR:', error.message);
+          sendResponse({ success: false, error: error.message });
+        }
+      })();
+      return true;
+    }
+
+    if (msg.type === 'SYNC_FACEBOOK_IDENTITIES') {
+      log('Received identity sync command');
+      (async () => {
+        try {
+          const result = await syncFacebookIdentities();
+          sendResponse({ success: true, ...result });
+        } catch (error) {
+          log('IDENTITY SYNC ERROR:', error.message);
+          sendResponse({ success: false, error: error.message });
+        }
+      })();
+      return true;
+    }
 
     log('Received post command');
     (async () => {
       try {
-        const result = await postToGroup(msg.message, msg.imageUrl);
+        const result = await postToGroup(msg.message, msg.imageUrl, msg.identityName || msg.identity_name || null);
         sendResponse({ success: true, ...result });
       } catch (error) {
         log('ERROR:', error.message);
@@ -337,5 +507,5 @@
     return true; // keep channel open
   });
 
-  log('Content script v4 loaded');
+  log('Content script v6 loaded');
 })();

@@ -570,7 +570,7 @@ input[type="range"]::-webkit-slider-thumb{
           <div class="desc">Simple flow: connect the extension, add groups, test one post, then schedule.</div>
           <div class="onboarding-steps">
             <div class="onboarding-step"><div class="step-num">1</div><div class="step-copy"><strong>Install and pair the Chrome extension</strong>Open Settings, generate a pairing code, then enter it in the extension.</div></div>
-            <div class="onboarding-step"><div class="step-num">2</div><div class="step-copy"><strong>Add Facebook groups</strong>Save the group URLs you want Amplr to post into.</div></div>
+            <div class="onboarding-step"><div class="step-num">2</div><div class="step-copy"><strong>Sync identities, then add groups</strong>Detect Facebook Pages/profiles from the extension, then save or sync groups for that identity.</div></div>
             <div class="onboarding-step"><div class="step-num">3</div><div class="step-copy"><strong>Test one post first</strong>Select one group, use a normal delay, and confirm the result in History.</div></div>
             <div class="onboarding-step"><div class="step-num">4</div><div class="step-copy"><strong>Then schedule or scale</strong>Amplr warns about risky volume, but it will not block you.</div></div>
           </div>
@@ -613,6 +613,12 @@ input[type="range"]::-webkit-slider-thumb{
 
           <div>
             <div class="card">
+              <h3>Posting Identity</h3>
+              <div class="desc">Choose which Facebook profile/Page the extension should verify before posting.</div>
+              <select id="composeIdentitySelect" onchange="setSelectedIdentity(this.value); renderComposeGroups(); updateRiskPanels();" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;"></select>
+              <div class="desc" id="composeIdentityHint" style="margin-top:8px;">Sync identities in Settings if this list is empty.</div>
+            </div>
+            <div class="card">
               <h3>Target Groups</h3>
               <div class="desc">Select which saved groups to post to.</div>
               <div class="group-chips" id="composeGroupSelect">
@@ -649,10 +655,15 @@ input[type="range"]::-webkit-slider-thumb{
             <div class="card">
               <h3>Your Groups</h3>
               <div class="desc">Saved groups used for posting.</div>
-              <div style="display:flex; gap:8px; margin-bottom:14px;">
+              <div class="field">
+                <label>Group identity</label>
+                <select id="groupIdentitySelect" onchange="setSelectedIdentity(this.value); renderGroupsList(); renderComposeIdentitySelect();" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;"></select>
+              </div>
+              <div style="display:flex; gap:8px; margin-bottom:10px;">
                 <input type="text" id="newGroupUrl" placeholder="facebook.com/groups/123" style="flex:1;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;">
                 <button class="btn btn-primary" onclick="addGroup()">Add</button>
               </div>
+              <button class="btn btn-ghost btn-block" style="margin-bottom:14px;" onclick="syncGroupsForSelectedIdentity()">Sync Groups for Selected Identity</button>
               <div id="groupsList"></div>
             </div>
           </div>
@@ -782,6 +793,12 @@ input[type="range"]::-webkit-slider-thumb{
             </div>
           </div>
           <div>
+            <div class="card" style="margin-bottom:16px;">
+              <h3>Posting Identities</h3>
+              <div class="desc">Sync Facebook profiles/Pages visible in the current Chrome Facebook switcher.</div>
+              <button class="btn btn-primary btn-block" id="syncIdentitiesBtn" onclick="syncPostingIdentities()">Sync Posting Identities</button>
+              <div id="postingIdentitiesList" style="margin-top:14px;"></div>
+            </div>
             <div class="card">
               <h3>Extension Pairing</h3>
               <div class="desc">Enter this code in your Chrome extension to connect.</div>
@@ -808,6 +825,7 @@ const SUPABASE_KEY = 'sb_publishable_1TNu5hqotJ7GGQXfjliivQ_ttK51EAA';
 let sb, session, user, authMode='signin';
 let activeJobPoller=null;
 let groupsCache=[];
+let postingIdentitiesCache=[];
 let settingsCache={};
 let rewriteHistory=[];
 
@@ -866,7 +884,7 @@ async function onAuthSuccess(s){
   // Check if tables exist
   await checkSchema();
   // Load everything
-  await Promise.all([loadSettings(), loadGroups(), loadOverview(), checkExtensionStatus()]);
+  await Promise.all([loadSettings(), loadGroups(), loadPostingIdentities(), loadOverview(), checkExtensionStatus()]);
   navigate(location.hash.slice(1) && PAGE_TITLES[location.hash.slice(1)] ? location.hash.slice(1) : 'compose');
   // Start global job watcher
   startGlobalJobWatcher();
@@ -911,9 +929,10 @@ function navigate(route){
   document.getElementById('pageTitle').innerHTML = PAGE_TITLES[route].replace(/(\w+)$/, '<em class="serif">$1</em>');
 
   if (route==='compose') renderComposeGroups();
-  if (route==='groups') renderGroupsList();
+  if (route==='groups') { renderIdentitySelectors(); renderGroupsList(); }
   if (route==='schedule') renderSchedules();
   if (route==='history') loadHistory();
+  if (route==='settings') renderPostingIdentities();
   if (route==='settings') renderSettingsPage();
   if (location.hash !== '#'+route) history.replaceState(null,'','#'+route);
 }
@@ -922,6 +941,150 @@ window.addEventListener('hashchange', ()=>{
   const r = location.hash.slice(1) || 'compose';
   if (PAGE_TITLES[r]) navigate(r);
 });
+
+/* ============================================================
+   POSTING IDENTITIES
+   ============================================================ */
+function identityKey(i){ return i?.id || i?.url || i?.name || ''; }
+function getSelectedIdentityKey(){
+  return localStorage.getItem('amplr_selected_identity') || identityKey(postingIdentitiesCache[0]) || '';
+}
+function getSelectedIdentity(){
+  const key=getSelectedIdentityKey();
+  return postingIdentitiesCache.find(i=>identityKey(i)===key) || postingIdentitiesCache[0] || null;
+}
+function setSelectedIdentity(key){
+  if (key) localStorage.setItem('amplr_selected_identity', key);
+  renderIdentitySelectors();
+}
+async function loadPostingIdentities(){
+  if (!user) return;
+  const { data, error } = await sb.from('amplr_data').select('value').eq('user_id', user.id).eq('key', 'posting_identities').maybeSingle();
+  if (error && !isNoTable(error)) { console.warn('posting identity load failed', error); }
+  const value=data?.value || {};
+  postingIdentitiesCache = Array.isArray(value) ? value : (value.identities || []);
+  if (postingIdentitiesCache.length && !getSelectedIdentityKey()) localStorage.setItem('amplr_selected_identity', identityKey(postingIdentitiesCache[0]));
+}
+function identityOptionHtml(identity){
+  const key=identityKey(identity);
+  const type=identity.type || (identity.is_active ? 'active identity' : 'Facebook identity');
+  return `<option value="${esc(key)}">${esc(identity.name || 'Unnamed identity')} — ${esc(type)}</option>`;
+}
+function renderIdentitySelectors(){
+  const html = postingIdentitiesCache.length
+    ? postingIdentitiesCache.map(identityOptionHtml).join('')
+    : '<option value="">No identities synced yet</option>';
+  ['composeIdentitySelect','groupIdentitySelect'].forEach(id=>{
+    const el=document.getElementById(id); if (!el) return;
+    el.innerHTML=html;
+    el.value=getSelectedIdentityKey();
+  });
+  const hint=document.getElementById('composeIdentityHint');
+  if (hint) {
+    const selected=getSelectedIdentity();
+    hint.textContent = selected ? `Amplr will verify Facebook is posting as ${selected.name}.` : 'Sync identities in Settings before posting as a Page.';
+  }
+}
+function renderComposeIdentitySelect(){ renderIdentitySelectors(); }
+function renderPostingIdentities(){
+  const el=document.getElementById('postingIdentitiesList');
+  if (!el) return;
+  if (!postingIdentitiesCache.length) {
+    el.innerHTML=emptyState('No identities synced','Click Sync Posting Identities while the extension is paired and Facebook is logged in.');
+    renderIdentitySelectors();
+    return;
+  }
+  const selectedKey=getSelectedIdentityKey();
+  el.innerHTML=postingIdentitiesCache.map(i=>{
+    const key=identityKey(i);
+    return `<div class="job">
+      <div class="job-icon">${i.avatar_url?`<img src="${esc(i.avatar_url)}" style="width:22px;height:22px;border-radius:999px;object-fit:cover;">`:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0113 0"/></svg>'}</div>
+      <div class="job-body"><div class="job-msg">${esc(i.name || 'Unnamed identity')} ${i.is_active?'<span class="warning-chip">active</span>':''}</div><div class="job-meta">${esc(i.type || 'facebook identity')}${i.url?' · '+esc(i.url):''}</div></div>
+      <button class="btn ${key===selectedKey?'btn-primary':'btn-ghost'}" style="padding:6px 10px;" onclick="setSelectedIdentity(${jsArg(key)}); renderPostingIdentities(); renderComposeGroups();">${key===selectedKey?'Selected':'Use'}</button>
+    </div>`;
+  }).join('');
+  renderIdentitySelectors();
+}
+async function savePostingIdentitiesFromJob(job){
+  const r=normalizeResult(job);
+  if (Array.isArray(r.identities)) {
+    postingIdentitiesCache=r.identities;
+    await sb.from('amplr_data').upsert({ user_id:user.id, key:'posting_identities', value:{ identities:postingIdentitiesCache, synced_at:new Date().toISOString() } }, { onConflict:'user_id,key' });
+    if (postingIdentitiesCache.length && !getSelectedIdentityKey()) setSelectedIdentity(identityKey(postingIdentitiesCache[0]));
+  }
+}
+async function syncPostingIdentities(){
+  if (!user) return;
+  const btn=document.getElementById('syncIdentitiesBtn');
+  if (btn) btn.disabled=true;
+  const { data, error } = await sb.from('jsw_post_jobs').insert({
+    user_id:user.id,
+    message:'__sync_identities__',
+    groups:[],
+    delay:0,
+    ai_enabled:false,
+    status:'pending'
+  }).select();
+  if (error) { toast('Could not start identity sync: '+error.message,'error'); if(btn) btn.disabled=false; return; }
+  toast('Identity sync queued — waiting for extension','info');
+  pollIdentitySyncJob(data[0].id);
+}
+function pollIdentitySyncJob(jobId){
+  const started=Date.now();
+  const timer=setInterval(async()=>{
+    const { data } = await sb.from('jsw_post_jobs').select('*').eq('id',jobId).maybeSingle();
+    if (!data) return;
+    const r=normalizeResult(data);
+    if (r.text) setExtensionStatus(data.status==='processing'?'processing':'idle', 'Syncing identities', r.text);
+    if (['done','failed'].includes(data.status)) {
+      clearInterval(timer);
+      const btn=document.getElementById('syncIdentitiesBtn'); if(btn) btn.disabled=false;
+      if (data.status==='done') {
+        await savePostingIdentitiesFromJob(data);
+        renderPostingIdentities();
+        renderComposeGroups();
+        toast(`Synced ${postingIdentitiesCache.length} posting identities`,'success');
+      } else {
+        toast('Identity sync failed: '+(r.error || data.error || 'unknown'),'error');
+      }
+    } else if (Date.now()-started > 120000) {
+      clearInterval(timer);
+      const btn=document.getElementById('syncIdentitiesBtn'); if(btn) btn.disabled=false;
+      toast('Identity sync is still pending. Check that the extension is paired and Chrome is open.','info');
+    }
+  }, 2000);
+}
+async function syncGroupsForSelectedIdentity(){
+  const identity=getSelectedIdentity();
+  if (!identity) { toast('Sync posting identities first','error'); navigate('settings'); return; }
+  const { data, error } = await sb.from('jsw_post_jobs').insert({
+    user_id:user.id,
+    message:'__import_groups__',
+    groups:[],
+    delay:0,
+    ai_enabled:false,
+    ai_prompt: identity.name || null,
+    status:'pending'
+  }).select();
+  if (error) { toast('Could not start group sync: '+error.message,'error'); return; }
+  toast(`Group sync queued for ${identity.name}`,'info');
+  pollGroupSyncJob(data[0].id, identity);
+}
+function pollGroupSyncJob(jobId, identity){
+  const timer=setInterval(async()=>{
+    const { data } = await sb.from('jsw_post_jobs').select('*').eq('id',jobId).maybeSingle();
+    if (!data) return;
+    const r=normalizeResult(data);
+    if (r.text) setExtensionStatus(data.status==='processing'?'processing':'idle', 'Syncing groups', r.text);
+    if (['done','failed'].includes(data.status)) {
+      clearInterval(timer);
+      if (data.status==='done') {
+        await loadGroups(); renderGroupsList(); renderComposeGroups();
+        toast(`Synced groups for ${identity.name}`,'success');
+      } else toast('Group sync failed: '+(r.error || data.error || 'unknown'),'error');
+    }
+  }, 2500);
+}
 
 /* ============================================================
    GROUPS
@@ -942,6 +1105,7 @@ async function addGroup(){
   if (!url.startsWith('http')) url = 'https://facebook.com/groups/' + url;
   url = url.replace(/\/$/,'');
   const name = url.split('/').pop() || url;
+  const identity=getSelectedIdentity();
   const { error } = await sb.from('jsw_groups').insert({ user_id:user.id, group_url:url, group_name:name });
   if (error) { toast('Error: '+error.message,'error'); return; }
   input.value='';
@@ -975,6 +1139,7 @@ function renderGroupsList(){
 }
 
 function renderComposeGroups(){
+  renderIdentitySelectors();
   const el = document.getElementById('composeGroupSelect');
   if (!groupsCache.length) {
     el.innerHTML = '<span style="color:var(--text-3);font-size:12px;">No groups saved. Add some in the Groups tab.</span>';
@@ -991,7 +1156,8 @@ function toggleGroupChip(el){
 
 function getSelectedGroups(){
   const selected = [...document.querySelectorAll('#composeGroupSelect .chip.selected')];
-  return selected.map(c=>groupsCache.find(g=>g.id===c.dataset.id)).filter(Boolean).map(g=>({url:g.group_url,name:g.group_name}));
+  const identity=getSelectedIdentity();
+  return selected.map(c=>groupsCache.find(g=>g.id===c.dataset.id)).filter(Boolean).map(g=>({url:g.group_url,name:g.group_name,identity_name:identity?.name || null,identity_key:identityKey(identity) || null,identity_type:identity?.type || null}));
 }
 
 /* ============================================================
@@ -1120,6 +1286,8 @@ async function createPostJob(){
   const delay = parseInt(document.getElementById('composeDelay').value) || 30;
   const aiEnabled = document.getElementById('composeAiEnabled').checked;
   const aiPrompt = document.getElementById('composeAiPrompt').value.trim() || null;
+  const identity=getSelectedIdentity();
+  if (postingIdentitiesCache.length && !identity) { toast('Choose a posting identity first','error'); return; }
   const riskWarnings = buildRiskWarnings({ message, groups, delay, mode:'now' });
   renderRiskBox('composeRiskBox', riskWarnings);
   if (!acknowledgeRiskIfNeeded(riskWarnings, 'Post now anyway?')) return;
@@ -1280,7 +1448,7 @@ function jobRow(j){
   ].filter(Boolean).join(' · ');
   return `<div class="job">
     <div class="job-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></div>
-    <div class="job-body"><div class="job-msg">${esc(msg)}${warnings.length?`<span class="warning-chip">${warnings.length} warning${warnings.length>1?'s':''}</span>`:''}</div><div class="job-meta">${time} · ${(j.groups||[]).length} group(s)${counts?' · '+esc(counts):''}</div></div>
+    <div class="job-body"><div class="job-msg">${esc(msg)}${warnings.length?`<span class="warning-chip">${warnings.length} warning${warnings.length>1?'s':''}</span>`:''}</div><div class="job-meta">${time} · ${((j.groups||[])[0]?.identity_name)?esc((j.groups||[])[0].identity_name)+' · ':''}${(j.groups||[]).length} group(s)${counts?' · '+esc(counts):''}</div></div>
     ${resultBadge(j.status,warnings.length)}
   </div>`;
 }
@@ -1314,7 +1482,7 @@ async function loadHistory(){
     return `<div class="job" style="display:block;">
       <div style="display:flex;align-items:center;gap:14px;">
         <div class="job-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></div>
-        <div class="job-body"><div class="job-msg">${esc((j.message||'').substring(0,110))}${warnings.length?`<span class="warning-chip">${warnings.length} warning${warnings.length>1?'s':''}</span>`:''}</div><div class="job-meta">${new Date(j.created_at).toLocaleString()} · ${(j.groups||[]).length} group(s)</div></div>
+        <div class="job-body"><div class="job-msg">${esc((j.message||'').substring(0,110))}${warnings.length?`<span class="warning-chip">${warnings.length} warning${warnings.length>1?'s':''}</span>`:''}</div><div class="job-meta">${new Date(j.created_at).toLocaleString()} · ${((j.groups||[])[0]?.identity_name)?esc((j.groups||[])[0].identity_name)+' · ':''}${(j.groups||[]).length} group(s)</div></div>
         ${resultBadge(j.status,warnings.length)}
       </div>
       ${warnings.length?`<div class="result-meta" style="margin-top:10px;color:#facc15;">${warnings.slice(0,4).map(esc).join('<br>')}</div>`:''}
@@ -1432,7 +1600,8 @@ function repeatDaysForSchedule(frequency, dayOfWeek){
 async function addSchedule(){
   const message = document.getElementById('schedMessage').value.trim();
   if (!message) { toast('Write a message','error'); return; }
-  const groups = groupsCache.map(g=>({url:g.group_url,name:g.group_name}));
+  const identity=getSelectedIdentity();
+  const groups = groupsCache.map(g=>({url:g.group_url,name:g.group_name,identity_name:identity?.name || null,identity_key:identityKey(identity) || null,identity_type:identity?.type || null}));
   if (!groups.length) { toast('Add groups first in the Groups tab','error'); return; }
 
   const frequency = document.getElementById('schedFreq').value;
@@ -1537,6 +1706,7 @@ function renderSettingsPage(){
   const rewriteModel = document.getElementById('setRewriteModel');
   if (rewriteModel) rewriteModel.value = getRewriteModel();
   renderPairingArea();
+  renderPostingIdentities();
 }
 
 function renderPairingArea(){
@@ -1593,6 +1763,7 @@ async function checkExtensionStatus(){
    HELPERS
    ============================================================ */
 function esc(s){ return (s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function jsArg(v){ return JSON.stringify(v || '').replace(/</g,'\\u003c').replace(/>/g,'\\u003e').replace(/&/g,'\\u0026'); }
 
 function emptyState(title, sub){
   return `<div class="empty-state">

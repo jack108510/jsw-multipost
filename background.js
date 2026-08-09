@@ -557,6 +557,26 @@ async function executeDashJob(job) {
   dashSession = await getStoredSession();
   if (!dashSession) return;
   // Special job: import groups from Facebook
+  if (job.message === '__sync_identities__') {
+    const claimed = await sbUpdateJob(job.id, {
+      status: 'processing',
+      started_at: new Date().toISOString(),
+      result: { text: 'Opening Facebook identity switcher...' }
+    });
+    if (!claimed) return;
+    extLog('info', 'Running sync_identities job ' + job.id);
+    try {
+      await syncFacebookIdentitiesForJob(job.id);
+    } catch (e) {
+      await sbUpdateJob(job.id, {
+        status: 'failed',
+        result: { error: e.message },
+        completed_at: new Date().toISOString()
+      });
+    }
+    return;
+  }
+
   if (job.message === '__import_groups__') {
     const claimed = await sbUpdateJob(job.id, {
       status: 'processing',
@@ -565,7 +585,7 @@ async function executeDashJob(job) {
     if (!claimed) return;
     extLog('info', 'Running import_groups job ' + job.id);
     try {
-      await importFacebookGroupsForJob(job.id);
+      await importFacebookGroupsForJob(job.id, job.ai_prompt || null);
     } catch (e) {
       await sbUpdateJob(job.id, {
         status: 'failed',
@@ -593,7 +613,8 @@ async function executeDashJob(job) {
   if (!Array.isArray(groups)) {
     try { groups = JSON.parse(groups); } catch (e) { groups = []; }
   }
-  const groupUrls = groups.map(g => typeof g === 'string' ? g : g.url).filter(Boolean);
+  const groupTargets = groups.map(g => typeof g === 'string' ? { url:g } : g).filter(g => g && g.url);
+  const groupUrls = groupTargets.map(g => g.url);
 
   extLog('info', 'Job ' + job.id + ' — ' + groupUrls.length + ' groups');
 
@@ -646,7 +667,9 @@ async function executeDashJob(job) {
   }
 
   for (let i = 0; i < groupUrls.length; i++) {
-    const groupUrl = groupUrls[i];
+    const target = groupTargets[i] || { url: groupUrls[i] };
+    const groupUrl = target.url;
+    const identityName = target.identity_name || job.identity_name || null;
     let finalText = job.message;
 
     // ── Cooldown awareness — warning only, never blocks posting ──
@@ -689,7 +712,8 @@ async function executeDashJob(job) {
       const response = await chrome.tabs.sendMessage(tab.id, {
         type: 'POST_TO_PAGE',
         message: finalText,
-        imageUrl: job.image_url || ''
+        imageUrl: job.image_url || '',
+        identityName
       });
 
       if (response?.success) {
@@ -700,6 +724,8 @@ async function executeDashJob(job) {
         extLog('info', `Posted ${i + 1}/${groupUrls.length} → ${groupUrl}${postUrl ? ' (' + postUrl + ')' : evidenceFound ? ' (evidence matched)' : ' (submitted, no permalink found)'}`);
         perGroupResults.push({
           group_url: groupUrl,
+          group_name: target.name || target.group_name || null,
+          identity_name: identityName || response?.activeIdentity || null,
           status: 'posted',
           post_url: postUrl,
           evidence_found: evidenceFound,
@@ -739,6 +765,8 @@ async function executeDashJob(job) {
         lastError = response?.error || 'Unknown error';
         perGroupResults.push({
           group_url: groupUrl,
+          group_name: target.name || target.group_name || null,
+          identity_name: identityName || null,
           status: 'failed',
           error: lastError,
           warnings: cooldownWarning ? [cooldownWarning] : [],
@@ -755,6 +783,8 @@ async function executeDashJob(job) {
       lastError = e.message;
       perGroupResults.push({
         group_url: groupUrl,
+        group_name: target.name || target.group_name || null,
+        identity_name: identityName || null,
         status: 'failed',
         error: e.message,
         warnings: cooldownWarning ? [cooldownWarning] : [],
@@ -903,12 +933,80 @@ async function sbUpdateJob(jobId, patch) {
 }
 
 // ============================================================
+// SYNC FACEBOOK POSTING IDENTITIES
+// Opens Facebook, asks content script to scrape the profile/Page switcher,
+// and stores results in amplr_data.key = posting_identities.
+// ============================================================
+async function syncFacebookIdentitiesForJob(jobId) {
+  const session = await getStoredSession();
+  if (!session || !session.userId) {
+    await sbUpdateJob(jobId, { status: 'failed', result: { error: 'Not signed in' }, completed_at: new Date().toISOString() });
+    return;
+  }
+
+  let tab;
+  try {
+    await sbUpdateJob(jobId, { result: { text: 'Opening Facebook...' } });
+    tab = await chrome.tabs.create({ url: 'https://www.facebook.com/', active: false });
+    await sleep(5000);
+
+    await sbUpdateJob(jobId, { result: { text: 'Reading Facebook profile/Page switcher...' } });
+    const response = await chrome.tabs.sendMessage(tab.id, { type: 'SYNC_FACEBOOK_IDENTITIES' });
+    if (!response?.success) throw new Error(response?.error || 'Identity sync failed');
+
+    const identities = (response.identities || []).map((i, idx) => ({
+      id: i.id || i.url || i.name || `identity-${idx + 1}`,
+      name: i.name || `Identity ${idx + 1}`,
+      type: i.type || 'facebook identity',
+      url: i.url || null,
+      avatar_url: i.avatar_url || null,
+      is_active: !!i.is_active,
+      synced_at: new Date().toISOString()
+    }));
+    if (!identities.length) throw new Error('No Facebook identities found');
+
+    await upsertAmplrData(session, 'posting_identities', {
+      identities,
+      active_identity: response.active_identity || identities.find(i => i.is_active)?.name || null,
+      synced_at: new Date().toISOString()
+    });
+
+    await chrome.tabs.remove(tab.id);
+    tab = null;
+    await sbUpdateJob(jobId, {
+      status: 'done',
+      result: { count: identities.length, identities, active_identity: response.active_identity || null, text: `Synced ${identities.length} posting identities` },
+      completed_at: new Date().toISOString()
+    });
+    extLog('info', `Synced ${identities.length} posting identities`);
+  } catch (e) {
+    if (tab) { try { await chrome.tabs.remove(tab.id); } catch (_) {} }
+    extLog('error', 'syncFacebookIdentitiesForJob error: ' + e.message);
+    await sbUpdateJob(jobId, { status: 'failed', result: { error: e.message }, completed_at: new Date().toISOString() });
+  }
+}
+
+async function upsertAmplrData(session, key, value) {
+  const res = await fetch(`${SB_URL}/rest/v1/amplr_data?on_conflict=user_id,key`, {
+    method: 'POST',
+    headers: {
+      'apikey': SB_ANON_KEY,
+      'Authorization': `Bearer ${session.accessToken}`,
+      'Content-Type': 'application/json',
+      'Prefer': 'resolution=merge-duplicates,return=minimal'
+    },
+    body: JSON.stringify({ user_id: session.userId, key, value, updated_at: new Date().toISOString() })
+  });
+  if (!res.ok) throw new Error('amplr_data save failed: ' + await res.text());
+}
+
+// ============================================================
 // IMPORT FACEBOOK GROUPS
 // Opens facebook.com/groups/joins, scrolls to load all,
 // scrapes name + URL, saves to jsw_groups via Supabase REST.
 // ============================================================
 // Job-aware version: updates job progress and result in jsw_post_jobs
-async function importFacebookGroupsForJob(jobId) {
+async function importFacebookGroupsForJob(jobId, identityName = null) {
   const session = await getStoredSession();
   if (!session || !session.userId) {
     await sbUpdateJob(jobId, { status: 'failed', result: { error: 'Not signed in' }, completed_at: new Date().toISOString() });
@@ -925,6 +1023,14 @@ async function importFacebookGroupsForJob(jobId) {
     await updateProgress('Opening your Facebook groups...');
     tab = await chrome.tabs.create({ url: 'https://www.facebook.com/groups/joins/', active: false });
     await sleep(5000);
+    if (identityName) {
+      await updateProgress(`Switching to ${identityName}...`);
+      const switchRes = await chrome.tabs.sendMessage(tab.id, { type: 'SWITCH_FACEBOOK_IDENTITY', identityName });
+      if (!switchRes?.success) throw new Error(switchRes?.error || `Could not switch to ${identityName}`);
+      await sleep(4000);
+      await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/groups/joins/' });
+      await sleep(5000);
+    }
 
     let groups = [];
     let prevCount = -1;
@@ -1022,7 +1128,7 @@ async function importFacebookGroupsForJob(jobId) {
     }
 
     extLog('info', `Imported ${groups.length} groups via job ${jobId}`);
-    await sbUpdateJob(jobId, { status: 'done', result: { count: groups.length, text: `Imported ${groups.length} groups` }, completed_at: new Date().toISOString() });
+    await sbUpdateJob(jobId, { status: 'done', result: { count: groups.length, identity_name: identityName || null, text: `Imported ${groups.length} groups${identityName ? ' for ' + identityName : ''}` }, completed_at: new Date().toISOString() });
     chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_DONE', count: groups.length, groups }).catch(() => {});
 
   } catch (e) {
