@@ -1,7 +1,8 @@
-// ============ Amplr Content Script v4 ============
+// ============ Amplr Content Script v5 ============
 // Based on verified FB DOM research.
 // Key insight: clicking the composer opens a [role="dialog"] modal.
 // All textbox + Post button searches are scoped INSIDE that dialog.
+// v5 returns post-submit evidence instead of only a boolean click result.
 
 (() => {
   if (window.__jsw_multipost_loaded) return;
@@ -211,6 +212,45 @@
     }
   }
 
+  // ============ POST EVIDENCE ============
+  function normalizeText(text) {
+    return (text || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function findSubmittedPostEvidence(message) {
+    const wanted = normalizeText(message).slice(0, 80).toLowerCase();
+    const wantedWords = wanted.split(' ').filter(w => w.length > 3).slice(0, 6);
+    const articles = [...document.querySelectorAll('[role="article"], div[data-pagelet*="FeedUnit"], div[data-ad-preview="message"]')];
+
+    for (const article of articles) {
+      const articleText = normalizeText(article.textContent).toLowerCase();
+      if (!articleText) continue;
+      const exactish = wanted && articleText.includes(wanted.slice(0, Math.min(45, wanted.length)));
+      const wordHits = wantedWords.filter(w => articleText.includes(w)).length;
+      if (!exactish && wordHits < Math.min(4, wantedWords.length)) continue;
+
+      const link = [...article.querySelectorAll('a[href]')].find(a => {
+        const href = a.href || '';
+        return /\/posts\/|\/permalink\/|story_fbid=|multi_permalinks=/.test(href);
+      });
+      return {
+        found: true,
+        postUrl: link ? link.href : null,
+        matchedText: normalizeText(article.textContent).slice(0, 240)
+      };
+    }
+
+    const permalink = [...document.querySelectorAll('a[href]')].find(a => {
+      const href = a.href || '';
+      return /\/posts\/|\/permalink\/|story_fbid=|multi_permalinks=/.test(href);
+    });
+    return {
+      found: false,
+      postUrl: permalink ? permalink.href : null,
+      matchedText: null
+    };
+  }
+
   // ============ MAIN ============
   async function postToGroup(message, imageUrl) {
     log('=== START POST ===');
@@ -266,10 +306,17 @@
     log('Clicking Post...');
     postBtn.click();
 
-    // 10. Wait for dialog to close (post submitted)
-    await sleep(5000);
-    log('=== POST DONE ===');
-    return true;
+    // 10. Wait for dialog to close / feed to refresh, then collect evidence
+    await sleep(8000);
+    const evidence = findSubmittedPostEvidence(message);
+    log('=== POST DONE ===', evidence);
+    return {
+      submitted: true,
+      postUrl: evidence.postUrl || null,
+      evidenceFound: !!evidence.found,
+      matchedText: evidence.matchedText || null,
+      pageUrl: location.href
+    };
   }
 
   // ============ MESSAGE LISTENER ============
@@ -279,8 +326,8 @@
     log('Received post command');
     (async () => {
       try {
-        await postToGroup(msg.message, msg.imageUrl);
-        sendResponse({ success: true });
+        const result = await postToGroup(msg.message, msg.imageUrl);
+        sendResponse({ success: true, ...result });
       } catch (error) {
         log('ERROR:', error.message);
         sendResponse({ success: false, error: error.message });

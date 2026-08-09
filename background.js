@@ -1,4 +1,4 @@
-// ============ Amplr Background Worker v2.1 ============
+// ============ Amplr Background Worker v2.1.2 ============
 // Orchestrates posting queue, AI refinement, and scheduled posts via chrome.alarms.
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -609,6 +609,7 @@ async function executeDashJob(job) {
 
   let successCount = 0;
   let lastError = null;
+  const perGroupResults = [];
 
   // Load cooldown setting (default 2 days) — fetch once before the loop
   const cooldownDays = dashSession?.cooldown_days ?? 2;
@@ -639,7 +640,16 @@ async function executeDashJob(job) {
       if (lastPosted && cooldownDays > 0) {
         const daysSince = (Date.now() - new Date(lastPosted).getTime()) / (1000 * 60 * 60 * 24);
         if (daysSince < cooldownDays) {
+          const skippedAt = new Date().toISOString();
           extLog('info', `Skipping ${groupUrl} — cooldown (${daysSince.toFixed(1)} days since last post)`);
+          perGroupResults.push({
+            group_url: groupUrl,
+            status: 'skipped',
+            reason: 'cooldown',
+            days_since_last_post: Number(daysSince.toFixed(2)),
+            final_message: finalText,
+            skipped_at: skippedAt
+          });
           chrome.runtime.sendMessage({ type: 'DASH_STATUS', text: `Skipping (cooldown): ${groupUrl.split('/').filter(Boolean).pop()}` }).catch(() => {});
           broadcastDashStatus(`Cooldown skip ${i + 1}/${groupUrls.length}`, '#6a6a8a');
           continue;
@@ -671,21 +681,33 @@ async function executeDashJob(job) {
 
       if (response?.success) {
         successCount++;
-        extLog('info', `Posted ${i + 1}/${groupUrls.length} → ${groupUrl}`);
+        const postedAt = new Date().toISOString();
+        const postUrl = response?.postUrl || null;
+        const evidenceFound = !!response?.evidenceFound;
+        extLog('info', `Posted ${i + 1}/${groupUrls.length} → ${groupUrl}${postUrl ? ' (' + postUrl + ')' : evidenceFound ? ' (evidence matched)' : ' (submitted, no permalink found)'}`);
+        perGroupResults.push({
+          group_url: groupUrl,
+          status: 'posted',
+          post_url: postUrl,
+          evidence_found: evidenceFound,
+          matched_text: response?.matchedText || null,
+          page_url: response?.pageUrl || null,
+          final_message: finalText,
+          posted_at: postedAt
+        });
         broadcastDashStatus(`Posted ${i + 1}/${groupUrls.length}`, '#4ecca3');
         // Update last_posted_at for cooldown tracking
         fetch(`${SB_URL}/rest/v1/jsw_groups?user_id=eq.${dashSession.userId}&group_url=eq.${encodeURIComponent(groupUrl)}`, {
           method: 'PATCH',
           headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${dashSession.accessToken}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-          body: JSON.stringify({ last_posted_at: new Date().toISOString() })
+          body: JSON.stringify({ last_posted_at: postedAt })
         }).catch(e => extLog('warn', 'last_posted_at update error: ' + e.message));
 
         // Record post result for ban detection
-        const postUrl = response?.postUrl || null;
         fetch(`${SB_URL}/rest/v1/jsw_post_results`, {
           method: 'POST',
           headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${dashSession.accessToken}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
-          body: JSON.stringify({ user_id: dashSession.userId, group_url: groupUrl, post_url: postUrl, job_id: job.id, posted_at: new Date().toISOString() })
+          body: JSON.stringify({ user_id: dashSession.userId, group_url: groupUrl, post_url: postUrl, job_id: job.id, posted_at: postedAt })
         }).catch(e => extLog('warn', 'jsw_post_results insert error: ' + e.message));
 
         // First comment automation
@@ -701,6 +723,13 @@ async function executeDashJob(job) {
 
       } else {
         lastError = response?.error || 'Unknown error';
+        perGroupResults.push({
+          group_url: groupUrl,
+          status: 'failed',
+          error: lastError,
+          final_message: finalText,
+          failed_at: new Date().toISOString()
+        });
         extLog('error', `Failed ${i + 1}/${groupUrls.length} → ${groupUrl}: ${lastError}`);
         broadcastDashStatus(`Failed ${i + 1}/${groupUrls.length}`, '#e94560');
       }
@@ -709,6 +738,13 @@ async function executeDashJob(job) {
       await chrome.tabs.remove(tab.id);
     } catch (e) {
       lastError = e.message;
+      perGroupResults.push({
+        group_url: groupUrl,
+        status: 'failed',
+        error: e.message,
+        final_message: finalText,
+        failed_at: new Date().toISOString()
+      });
       extLog('error', `Error on group ${i + 1} (${groupUrl}): ${e.message}`);
       broadcastDashStatus(`Error on group ${i + 1}`, '#e94560');
     }
@@ -721,27 +757,39 @@ async function executeDashJob(job) {
 
   // Mark done or failed
   const success = successCount > 0;
+  const failedCount = perGroupResults.filter(r => r.status === 'failed').length;
+  const skippedCount = perGroupResults.filter(r => r.status === 'skipped').length;
+  const completedWithoutHardFailure = success || (skippedCount > 0 && failedCount === 0);
+  const completedAt = new Date().toISOString();
   await sbUpdateJob(job.id, {
-    status: success ? 'done' : 'failed',
-    error: success ? null : (lastError || 'All groups failed'),
-    completed_at: new Date().toISOString()
+    status: completedWithoutHardFailure ? 'done' : 'failed',
+    error: completedWithoutHardFailure ? null : (lastError || 'All groups failed'),
+    result: {
+      success_count: successCount,
+      total_groups: groupUrls.length,
+      failed_count: failedCount,
+      skipped_count: skippedCount,
+      results: perGroupResults,
+      completed_at: completedAt
+    },
+    completed_at: completedAt
   });
 
-  extLog(success ? 'info' : 'error', `Job ${job.id} ${success ? 'DONE' : 'FAILED'} — ${successCount}/${groupUrls.length} posted`);
+  extLog(completedWithoutHardFailure ? 'info' : 'error', `Job ${job.id} ${completedWithoutHardFailure ? 'DONE' : 'FAILED'} — ${successCount}/${groupUrls.length} posted, ${skippedCount} skipped`);
 
   broadcastDashStatus(
-    success ? `Done — ${successCount}/${groupUrls.length} posted` : 'Job failed',
-    success ? '#4ecca3' : '#e94560'
+    completedWithoutHardFailure ? `Done — ${successCount}/${groupUrls.length} posted${skippedCount ? `, ${skippedCount} skipped` : ''}` : 'Job failed',
+    completedWithoutHardFailure ? '#4ecca3' : '#e94560'
   );
 
-  notify(success
-    ? `Dashboard job complete — ${successCount}/${groupUrls.length} groups posted.`
+  notify(completedWithoutHardFailure
+    ? `Dashboard job complete — ${successCount}/${groupUrls.length} groups posted${skippedCount ? `, ${skippedCount} skipped` : ''}.`
     : `Dashboard job failed: ${lastError}`
   );
 
   // ── Webhook delivery (fire-and-forget, best-effort) ──
   if (job.webhook_url) {
-    fireWebhook(job, success, successCount, groupUrls.length, lastError);
+    fireWebhook(job, completedWithoutHardFailure, successCount, groupUrls.length, lastError);
   }
 }
 

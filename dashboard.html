@@ -700,7 +700,7 @@ input[type="range"]::-webkit-slider-thumb{
                 <div class="field">
                   <label>Frequency</label>
                   <select id="schedFreq" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;">
-                    <option value="once">Once</option><option value="hourly">Hourly</option>
+                    <option value="once">Once</option>
                     <option value="daily" selected>Daily</option><option value="weekly">Weekly</option>
                   </select>
                 </div>
@@ -1106,7 +1106,7 @@ async function loadOverview(){
   const [posts, groups, schedules, jobs] = await Promise.all([
     sb.from('jsw_posts').select('id,status', { count:'exact' }).eq('user_id',user.id),
     sb.from('jsw_groups').select('id', { count:'exact' }).eq('user_id',user.id),
-    sb.from('jsw_schedules').select('id', { count:'exact' }).eq('user_id',user.id),
+    sb.from('jsw_post_jobs').select('id', { count:'exact' }).eq('user_id',user.id).eq('status','pending').not('scheduled_for','is',null),
     sb.from('jsw_post_jobs').select('*').eq('user_id',user.id).order('created_at',{ascending:false}).limit(10)
   ]);
 
@@ -1226,17 +1226,60 @@ function runFinder(){
 /* ============================================================
    SCHEDULES
    ============================================================ */
+async function nextScheduledTime(frequency, time, dayOfWeek){
+  const [hours, minutes] = (time || '09:00').split(':').map(Number);
+  const now = new Date();
+  let next = new Date(now);
+  next.setSeconds(0, 0);
+  next.setHours(Number.isFinite(hours) ? hours : 9, Number.isFinite(minutes) ? minutes : 0);
+
+  if (frequency === 'hourly') {
+    next = new Date(now.getTime() + 60 * 60 * 1000);
+    next.setSeconds(0, 0);
+    return next;
+  }
+
+  if (frequency === 'weekly') {
+    const targetDay = Number.isInteger(dayOfWeek) ? dayOfWeek : now.getDay();
+    while (next <= now || next.getDay() !== targetDay) next.setDate(next.getDate() + 1);
+    return next;
+  }
+
+  // once/daily: if today's time has passed, schedule tomorrow.
+  if (next <= now) next.setDate(next.getDate() + 1);
+  return next;
+}
+
+function repeatDaysForSchedule(frequency, dayOfWeek){
+  if (frequency === 'once') return [];
+  if (frequency === 'hourly') return [0,1,2,3,4,5,6];
+  if (frequency === 'weekly') return [Number.isInteger(dayOfWeek) ? dayOfWeek : 1];
+  return [0,1,2,3,4,5,6];
+}
+
 async function addSchedule(){
   const message = document.getElementById('schedMessage').value.trim();
   if (!message) { toast('Write a message','error'); return; }
   const groups = groupsCache.map(g=>({url:g.group_url,name:g.group_name}));
   if (!groups.length) { toast('Add groups first in the Groups tab','error'); return; }
-  const { error } = await sb.from('jsw_schedules').insert({
-    user_id:user.id, message, groups,
-    frequency: document.getElementById('schedFreq').value,
-    post_time: document.getElementById('schedTime').value || '09:00',
-    day_of_week: parseInt(document.getElementById('schedDay').value),
-    ai_enabled: document.getElementById('schedAi').checked
+
+  const frequency = document.getElementById('schedFreq').value;
+  const postTime = document.getElementById('schedTime').value || '09:00';
+  const dayOfWeek = parseInt(document.getElementById('schedDay').value);
+  const scheduledFor = await nextScheduledTime(frequency, postTime, dayOfWeek);
+  const repeatDays = repeatDaysForSchedule(frequency, dayOfWeek);
+
+  const { error } = await sb.from('jsw_post_jobs').insert({
+    user_id:user.id,
+    message,
+    groups,
+    delay: settingsCache.default_delay || 30,
+    ai_enabled: document.getElementById('schedAi').checked,
+    ai_prompt: settingsCache.ai_prompt || null,
+    status: 'pending',
+    scheduled_for: scheduledFor.toISOString(),
+    repeat_days: repeatDays,
+    repeat_time: postTime
   });
   if (error) { toast('Error: '+error.message,'error'); return; }
   document.getElementById('schedMessage').value='';
@@ -1245,28 +1288,37 @@ async function addSchedule(){
 }
 
 async function renderSchedules(){
-  const { data, error } = await sb.from('jsw_schedules').select('*').eq('user_id',user.id).order('created_at',{ascending:false});
+  const { data, error } = await sb.from('jsw_post_jobs')
+    .select('*')
+    .eq('user_id',user.id)
+    .eq('status','pending')
+    .not('scheduled_for','is',null)
+    .order('scheduled_for',{ascending:true});
   const el = document.getElementById('schedulesList');
   if (error || !data || !data.length) {
     el.innerHTML = emptyState('No schedules','Create a recurring post schedule.');
     return;
   }
   const dayLabel=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  const freqLabel={once:'Once',hourly:'Hourly',daily:'Daily',weekly:'Weekly'};
-  el.innerHTML = data.map(s=>`
+  el.innerHTML = data.map(s=>{
+    const repeatDays = (s.repeat_days || []).map(d=>dayLabel[d]).join(', ');
+    const nextFire = s.scheduled_for ? new Date(s.scheduled_for).toLocaleString() : '—';
+    const type = (s.repeat_days || []).length ? `${repeatDays} @ ${s.repeat_time || '09:00'}` : 'One-time';
+    return `
     <div class="job">
       <div class="job-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
       <div class="job-body"><div class="job-msg">${esc((s.message||'').substring(0,50))}...</div>
-      <div class="job-meta">${freqLabel[s.frequency]} · ${s.frequency==='weekly'?(dayLabel[s.day_of_week]+' '):''}${s.post_time}</div></div>
-      <button class="btn btn-ghost" style="padding:6px 10px;" onclick="removeSchedule('${s.id}')">Delete</button>
-    </div>`).join('');
+      <div class="job-meta">Next: ${esc(nextFire)} · ${esc(type)} · ${(s.groups||[]).length} group(s)</div></div>
+      <button class="btn btn-ghost" style="padding:6px 10px;" onclick="removeSchedule('${s.id}')">Cancel</button>
+    </div>`;
+  }).join('');
 }
 
 async function removeSchedule(id){
-  const { error } = await sb.from('jsw_schedules').delete().eq('id',id);
+  const { error } = await sb.from('jsw_post_jobs').update({status:'cancelled'}).eq('id',id).eq('user_id',user.id).eq('status','pending');
   if (error) { toast('Error: '+error.message,'error'); return; }
   await renderSchedules();
-  toast('Schedule deleted','info');
+  toast('Schedule cancelled','info');
 }
 
 /* ============================================================
