@@ -606,6 +606,18 @@ input[type="range"]::-webkit-slider-thumb{
               <div class="desc">This is what gets posted to each group.</div>
               <div class="field"><textarea id="composeMessage" rows="6" placeholder="Write your post..." style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:14px;resize:vertical;"></textarea></div>
 
+              <div class="field">
+                <label>Tweak Instruction</label>
+                <input type="text" id="rewriteInstruction" placeholder="e.g. Make this more conversational, shorter, or less salesy." style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;">
+                <div style="display:flex;gap:8px;margin-top:8px;">
+                  <button class="btn btn-ghost" id="rewriteBtn" onclick="rewriteComposeMessage()">Tweak with Ollama</button>
+                  <button class="btn btn-ghost" onclick="restorePreviousRewrite()">Undo tweak</button>
+                </div>
+                <div class="desc" id="rewriteStatus">Uses your n8n webhook if configured in Settings. You can tweak the same message repeatedly before posting.</div>
+              </div>
+
+              <div id="composeRiskBox" style="display:none;margin:12px 0;padding:12px;border:1px solid rgba(234,179,8,.45);border-radius:10px;background:rgba(234,179,8,.08);font-size:12px;color:var(--text-2);"></div>
+
               <div class="toggle">
                 <span>AI Refinement — rewrite message before posting</span>
                 <label class="switch"><input type="checkbox" id="composeAiEnabled"><span class="slider"></span></label>
@@ -720,6 +732,7 @@ input[type="range"]::-webkit-slider-thumb{
                 <span>Use AI refinement</span>
                 <label class="switch"><input type="checkbox" id="schedAi"><span class="slider"></span></label>
               </div>
+              <div id="scheduleRiskBox" style="display:none;margin:12px 0;padding:12px;border:1px solid rgba(234,179,8,.45);border-radius:10px;background:rgba(234,179,8,.08);font-size:12px;color:var(--text-2);"></div>
               <button class="btn btn-primary btn-block" onclick="addSchedule()">Create Schedule</button>
             </div>
           </div>
@@ -778,6 +791,11 @@ input[type="range"]::-webkit-slider-thumb{
                 <label>Default Delay (seconds)</label>
                 <input type="number" id="setDelay" value="30" min="5" max="300" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;">
               </div>
+              <div class="field">
+                <label>n8n Ollama Rewrite Webhook</label>
+                <input type="url" id="setRewriteWebhook" placeholder="http://localhost:5678/webhook/amplr-rewrite" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;">
+                <div class="desc">Optional. Amplr sends current message + tweak instruction to n8n, and n8n calls local Ollama.</div>
+              </div>
               <button class="btn btn-primary btn-block" onclick="saveSettings()">Save Settings</button>
             </div>
           </div>
@@ -809,6 +827,7 @@ let sb, session, user, authMode='signin';
 let activeJobPoller=null;
 let groupsCache=[];
 let settingsCache={};
+let rewriteHistory=[];
 
 try {
   sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -981,6 +1000,7 @@ function renderComposeGroups(){
   }
   el.innerHTML = groupsCache.map(g=>`<div class="chip" data-id="${g.id}" onclick="toggleGroupChip(this)">
     <span>${esc(g.group_name||g.group_url.split('/').pop())}</span></div>`).join('');
+  updateRiskPanels();
 }
 
 function toggleGroupChip(el){
@@ -1004,7 +1024,105 @@ document.addEventListener('input', e=>{
   if (e.target.id==='composeDelay') {
     document.getElementById('composeDelayVal').textContent = e.target.value+'s';
   }
+  if (['composeMessage','composeDelay','schedMessage','schedTime'].includes(e.target.id)) updateRiskPanels();
 });
+document.addEventListener('click', e=>{
+  if (e.target.closest('#composeGroupSelect .chip')) setTimeout(updateRiskPanels, 0);
+});
+document.addEventListener('change', e=>{
+  if (['schedFreq','schedDay','schedAi'].includes(e.target.id)) updateRiskPanels();
+});
+
+function buildRiskWarnings({ message='', groups=[], delay=30, scheduledFor=null, mode='now' } = {}){
+  const warnings=[];
+  const text=(message||'').trim();
+  const groupCount=groups.length || 0;
+  if (groupCount >= 15) warnings.push(`High risk: ${groupCount} groups selected. Large batches can look spammy to Facebook and group admins.`);
+  else if (groupCount >= 8) warnings.push(`Moderate risk: ${groupCount} groups selected. Watch for duplicate-looking posts across groups.`);
+  if (delay < 15 && groupCount > 1) warnings.push(`Short delay: ${delay}s between posts may look automated. You can proceed, but slower is safer.`);
+  if (text.length < 80) warnings.push('Short message: very brief promo copy can look spammy. Consider adding context or value.');
+  if (/\b(buy now|limited time|act now|guaranteed|free money|click here)\b/i.test(text)) warnings.push('Sales-heavy wording detected. Softer copy usually performs better in Facebook groups.');
+  if ((text.match(/https?:\/\//g)||[]).length > 1) warnings.push('Multiple links detected. Facebook/group admins may treat link-heavy posts as spam.');
+  if (mode === 'schedule') {
+    warnings.push('Scheduled posts only run while Chrome is open, the extension is paired, and Facebook is logged in. If Chrome wakes late, the job may run late.');
+    if (scheduledFor && scheduledFor < new Date()) warnings.push('This scheduled time is already past. Amplr will queue the next valid time instead of blocking you.');
+  }
+  return warnings;
+}
+
+function renderRiskBox(id, warnings){
+  const el=document.getElementById(id);
+  if (!el) return;
+  if (!warnings.length) { el.style.display='none'; el.innerHTML=''; return; }
+  el.style.display='block';
+  el.innerHTML = `<strong style="color:var(--text);">Posting risk warnings</strong><ul style="margin:8px 0 0 18px;padding:0;">${warnings.map(w=>`<li>${esc(w)}</li>`).join('')}</ul><div style="margin-top:8px;color:var(--text-3);">Amplr will not block this. These warnings are here so you can choose the risk knowingly.</div>`;
+}
+
+function updateRiskPanels(){
+  const composeMessage=document.getElementById('composeMessage')?.value || '';
+  const composeGroups=getSelectedGroups();
+  const composeDelay=parseInt(document.getElementById('composeDelay')?.value)||30;
+  renderRiskBox('composeRiskBox', buildRiskWarnings({message:composeMessage, groups:composeGroups, delay:composeDelay, mode:'now'}));
+
+  const schedMessage=document.getElementById('schedMessage')?.value || '';
+  const schedGroups=groupsCache.map(g=>({url:g.group_url,name:g.group_name}));
+  renderRiskBox('scheduleRiskBox', buildRiskWarnings({message:schedMessage, groups:schedGroups, delay:settingsCache.default_delay || 30, mode:'schedule'}));
+}
+
+function acknowledgeRiskIfNeeded(warnings, actionLabel){
+  if (!warnings.length) return true;
+  return confirm(`${actionLabel}\n\nAmplr found these risk warnings:\n\n- ${warnings.join('\n- ')}\n\nAmplr will not block you. Press OK to proceed anyway, or Cancel to revise.`);
+}
+
+function getRewriteWebhook(){
+  return (localStorage.getItem('amplr_rewrite_webhook') || 'http://localhost:5678/webhook/amplr-rewrite').trim();
+}
+
+async function rewriteComposeMessage(){
+  const messageEl=document.getElementById('composeMessage');
+  const instructionEl=document.getElementById('rewriteInstruction');
+  const statusEl=document.getElementById('rewriteStatus');
+  const btn=document.getElementById('rewriteBtn');
+  const message=messageEl.value.trim();
+  const instruction=(instructionEl.value.trim() || 'Rewrite this as a clearer, more natural Facebook group post. Keep the meaning and link intact.');
+  const webhook=getRewriteWebhook();
+  if (!message) { toast('Write a message before tweaking','error'); return; }
+  if (!webhook) { toast('Add your n8n rewrite webhook in Settings first','error'); navigate('settings'); return; }
+  rewriteHistory.push(messageEl.value);
+  btn.disabled=true;
+  statusEl.textContent='Sending to n8n/Ollama...';
+  try {
+    const res=await fetch(webhook, {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({ message, instruction, history: rewriteHistory.slice(-5), source:'amplr-dashboard' })
+    });
+    const raw=await res.text();
+    if (!res.ok) throw new Error(`n8n returned ${res.status}: ${raw.slice(0,160)}`);
+    let out;
+    try { out=JSON.parse(raw); } catch { out={ text: raw }; }
+    const rewritten = out.rewritten || out.message || out.text || out.output || out.data?.rewritten || out.data?.message;
+    if (!rewritten || typeof rewritten !== 'string') throw new Error('n8n response did not include rewritten/message/text/output');
+    messageEl.value=rewritten.trim();
+    statusEl.textContent='Tweak applied. You can tweak again, undo, or post.';
+    updateRiskPanels();
+    toast('Message tweaked','success');
+  } catch(err) {
+    rewriteHistory.pop();
+    statusEl.textContent='Rewrite failed: '+(err.message||'unknown error');
+    toast('Rewrite failed: '+(err.message||'unknown'),'error');
+  } finally {
+    btn.disabled=false;
+  }
+}
+
+function restorePreviousRewrite(){
+  const previous=rewriteHistory.pop();
+  if (!previous) { toast('No previous tweak to restore','info'); return; }
+  document.getElementById('composeMessage').value=previous;
+  document.getElementById('rewriteStatus').textContent='Previous version restored.';
+  updateRiskPanels();
+}
 
 async function createPostJob(){
   const message = document.getElementById('composeMessage').value.trim();
@@ -1016,6 +1134,9 @@ async function createPostJob(){
   const delay = parseInt(document.getElementById('composeDelay').value) || 30;
   const aiEnabled = document.getElementById('composeAiEnabled').checked;
   const aiPrompt = document.getElementById('composeAiPrompt').value.trim() || null;
+  const riskWarnings = buildRiskWarnings({ message, groups, delay, mode:'now' });
+  renderRiskBox('composeRiskBox', riskWarnings);
+  if (!acknowledgeRiskIfNeeded(riskWarnings, 'Post now anyway?')) return;
 
   const btn = document.getElementById('postNowBtn');
   btn.disabled = true;
@@ -1233,12 +1354,6 @@ async function nextScheduledTime(frequency, time, dayOfWeek){
   next.setSeconds(0, 0);
   next.setHours(Number.isFinite(hours) ? hours : 9, Number.isFinite(minutes) ? minutes : 0);
 
-  if (frequency === 'hourly') {
-    next = new Date(now.getTime() + 60 * 60 * 1000);
-    next.setSeconds(0, 0);
-    return next;
-  }
-
   if (frequency === 'weekly') {
     const targetDay = Number.isInteger(dayOfWeek) ? dayOfWeek : now.getDay();
     while (next <= now || next.getDay() !== targetDay) next.setDate(next.getDate() + 1);
@@ -1252,7 +1367,6 @@ async function nextScheduledTime(frequency, time, dayOfWeek){
 
 function repeatDaysForSchedule(frequency, dayOfWeek){
   if (frequency === 'once') return [];
-  if (frequency === 'hourly') return [0,1,2,3,4,5,6];
   if (frequency === 'weekly') return [Number.isInteger(dayOfWeek) ? dayOfWeek : 1];
   return [0,1,2,3,4,5,6];
 }
@@ -1268,6 +1382,9 @@ async function addSchedule(){
   const dayOfWeek = parseInt(document.getElementById('schedDay').value);
   const scheduledFor = await nextScheduledTime(frequency, postTime, dayOfWeek);
   const repeatDays = repeatDaysForSchedule(frequency, dayOfWeek);
+  const riskWarnings = buildRiskWarnings({ message, groups, delay:settingsCache.default_delay || 30, scheduledFor, mode:'schedule' });
+  renderRiskBox('scheduleRiskBox', riskWarnings);
+  if (!acknowledgeRiskIfNeeded(riskWarnings, 'Create this schedule anyway?')) return;
 
   const { error } = await sb.from('jsw_post_jobs').insert({
     user_id:user.id,
@@ -1367,6 +1484,13 @@ async function loadSettings(){
 }
 
 async function saveSettings(){
+  const rewriteWebhook = document.getElementById('setRewriteWebhook')?.value.trim() || '';
+  if (rewriteWebhook && !/^https?:\/\//.test(rewriteWebhook)) {
+    toast('Rewrite webhook must start with http:// or https://','error');
+    return;
+  }
+  localStorage.setItem('amplr_rewrite_webhook', rewriteWebhook);
+
   const payload = {
     user_id:user.id,
     ai_provider: document.getElementById('setProvider').value,
@@ -1386,6 +1510,8 @@ function renderSettingsPage(){
   document.getElementById('setApiKey').value = settingsCache.api_key || '';
   document.getElementById('setModel').value = settingsCache.ai_model || 'gpt-4o-mini';
   document.getElementById('setDelay').value = settingsCache.default_delay || 30;
+  const rewriteInput = document.getElementById('setRewriteWebhook');
+  if (rewriteInput) rewriteInput.value = getRewriteWebhook();
   renderPairingArea();
 }
 

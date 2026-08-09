@@ -1,4 +1,4 @@
-// ============ Amplr Background Worker v2.1.2 ============
+// ============ Amplr Background Worker v2.1.3 ============
 // Orchestrates posting queue, AI refinement, and scheduled posts via chrome.alarms.
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -597,6 +597,22 @@ async function executeDashJob(job) {
 
   extLog('info', 'Job ' + job.id + ' — ' + groupUrls.length + ' groups');
 
+  const jobWarnings = [];
+  if (job.scheduled_for) {
+    const lateMinutes = Math.round((Date.now() - new Date(job.scheduled_for).getTime()) / 60000);
+    if (lateMinutes > 5) {
+      const warning = {
+        type: 'late_scheduled_job',
+        late_minutes: lateMinutes,
+        scheduled_for: job.scheduled_for,
+        message: `Scheduled job is running ${lateMinutes} minutes late. Continuing because Amplr warns but does not block.`
+      };
+      jobWarnings.push(warning);
+      extLog('warn', warning.message);
+      broadcastDashStatus(`Late scheduled job warning: ${lateMinutes}m`, '#eab308');
+    }
+  }
+
   let settings = {
     aiEnabled: job.ai_enabled,
     aiPrompt: job.ai_prompt || null,
@@ -633,30 +649,27 @@ async function executeDashJob(job) {
     const groupUrl = groupUrls[i];
     let finalText = job.message;
 
-    // ── Cooldown check — uses pre-fetched map ──
+    // ── Cooldown awareness — warning only, never blocks posting ──
+    let cooldownWarning = null;
     try {
       const gd = groupCooldownMap[groupUrl];
       const lastPosted = gd?.last_posted_at;
       if (lastPosted && cooldownDays > 0) {
         const daysSince = (Date.now() - new Date(lastPosted).getTime()) / (1000 * 60 * 60 * 24);
         if (daysSince < cooldownDays) {
-          const skippedAt = new Date().toISOString();
-          extLog('info', `Skipping ${groupUrl} — cooldown (${daysSince.toFixed(1)} days since last post)`);
-          perGroupResults.push({
-            group_url: groupUrl,
-            status: 'skipped',
-            reason: 'cooldown',
+          cooldownWarning = {
+            type: 'cooldown_warning',
             days_since_last_post: Number(daysSince.toFixed(2)),
-            final_message: finalText,
-            skipped_at: skippedAt
-          });
-          chrome.runtime.sendMessage({ type: 'DASH_STATUS', text: `Skipping (cooldown): ${groupUrl.split('/').filter(Boolean).pop()}` }).catch(() => {});
-          broadcastDashStatus(`Cooldown skip ${i + 1}/${groupUrls.length}`, '#6a6a8a');
-          continue;
+            cooldown_days: cooldownDays,
+            message: `Posted to this group ${daysSince.toFixed(1)} days ago. Continuing because Amplr warns but does not block.`
+          };
+          extLog('warn', `${groupUrl} — cooldown warning only (${daysSince.toFixed(1)} days since last post)`);
+          chrome.runtime.sendMessage({ type: 'DASH_STATUS', text: `Risk warning: recent post to ${groupUrl.split('/').filter(Boolean).pop()}` }).catch(() => {});
+          broadcastDashStatus(`Risk warning ${i + 1}/${groupUrls.length}`, '#eab308');
         }
       }
     } catch (e) {
-      extLog('warn', 'Cooldown check error: ' + e.message);
+      extLog('warn', 'Cooldown warning check error: ' + e.message);
     }
 
     // Ollama doesn't need an API key — always attempt if ai_enabled
@@ -693,6 +706,7 @@ async function executeDashJob(job) {
           matched_text: response?.matchedText || null,
           page_url: response?.pageUrl || null,
           final_message: finalText,
+          warnings: cooldownWarning ? [cooldownWarning] : [],
           posted_at: postedAt
         });
         broadcastDashStatus(`Posted ${i + 1}/${groupUrls.length}`, '#4ecca3');
@@ -727,6 +741,7 @@ async function executeDashJob(job) {
           group_url: groupUrl,
           status: 'failed',
           error: lastError,
+          warnings: cooldownWarning ? [cooldownWarning] : [],
           final_message: finalText,
           failed_at: new Date().toISOString()
         });
@@ -742,6 +757,7 @@ async function executeDashJob(job) {
         group_url: groupUrl,
         status: 'failed',
         error: e.message,
+        warnings: cooldownWarning ? [cooldownWarning] : [],
         final_message: finalText,
         failed_at: new Date().toISOString()
       });
@@ -769,6 +785,7 @@ async function executeDashJob(job) {
       total_groups: groupUrls.length,
       failed_count: failedCount,
       skipped_count: skippedCount,
+      warnings: jobWarnings,
       results: perGroupResults,
       completed_at: completedAt
     },

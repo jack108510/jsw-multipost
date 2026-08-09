@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Amplr",
   "short_name": "Amplr",
-  "version": "2.1.2",
+  "version": "2.1.3",
   "description": "Post to multiple Facebook groups at once. AI-powered prompts, scheduled posts, dashboard pairing.",
   "author": "JSW Enterprises",
   "icons": {
@@ -46,6 +46,8 @@
     "*://openrouter.ai/*",
     "*://*.supabase.co/*",
     "https://*/*",
-    "http://localhost:11434/*"
+    "http://localhost:11434/*",
+    "http://localhost:*/*",
+    "http://127.0.0.1:*/*"
   ]
 }

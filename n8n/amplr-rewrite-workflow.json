@@ -1,0 +1,293 @@
+{
+  "active": true,
+  "activeVersion": {
+    "authors": "Jack Wilde",
+    "autosaved": false,
+    "connections": {
+      "Amplr Rewrite Webhook": {
+        "main": [
+          [
+            {
+              "index": 0,
+              "node": "Rewrite with local Ollama",
+              "type": "main"
+            }
+          ]
+        ]
+      },
+      "Rewrite with local Ollama": {
+        "main": [
+          [
+            {
+              "index": 0,
+              "node": "Shape Amplr Response",
+              "type": "main"
+            }
+          ]
+        ]
+      },
+      "Shape Amplr Response": {
+        "main": [
+          [
+            {
+              "index": 0,
+              "node": "Return rewritten copy",
+              "type": "main"
+            }
+          ]
+        ]
+      }
+    },
+    "createdAt": "2026-08-09T01:54:52.037Z",
+    "description": null,
+    "name": null,
+    "nodes": [
+      {
+        "id": "amplr-webhook",
+        "name": "Amplr Rewrite Webhook",
+        "parameters": {
+          "httpMethod": "POST",
+          "options": {
+            "allowedOrigins": "*"
+          },
+          "path": "amplr-rewrite",
+          "responseMode": "responseNode"
+        },
+        "position": [
+          240,
+          300
+        ],
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "webhookId": "amplr-rewrite-prod"
+      },
+      {
+        "id": "ollama-generate",
+        "name": "Rewrite with local Ollama",
+        "parameters": {
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Accept",
+                "value": "application/json"
+              }
+            ]
+          },
+          "jsonBody": "={{ JSON.stringify({ model: 'qwen3:8b', stream: false, options: { temperature: 0.7 }, prompt: `You rewrite Facebook group posts for small businesses. Keep links intact. Do not add hashtags unless asked. Do not use emojis or decorative symbols. Do not make unsupported claims. Output only the rewritten post, no explanation.\\n\\nCurrent message:\\n${$json.body?.message || $json.message || ''}\\n\\nUser tweak instruction:\\n${$json.body?.instruction || $json.instruction || 'Make it clearer and more natural.'}\\n\\nRecent versions for context:\\n${JSON.stringify($json.body?.history || [])}` }) }}",
+          "method": "POST",
+          "options": {},
+          "sendBody": true,
+          "sendHeaders": true,
+          "specifyBody": "json",
+          "url": "http://127.0.0.1:11434/api/generate"
+        },
+        "position": [
+          500,
+          300
+        ],
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2
+      },
+      {
+        "id": "shape-response",
+        "name": "Shape Amplr Response",
+        "parameters": {
+          "jsCode": "const raw = $json.response || $json.text || $json.output || '';\nreturn [{ json: { rewritten: String(raw).trim(), ok: true, ollama_model: 'qwen3:8b', raw: $json } }];"
+        },
+        "position": [
+          740,
+          300
+        ],
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2
+      },
+      {
+        "id": "respond",
+        "name": "Return rewritten copy",
+        "parameters": {
+          "options": {
+            "responseHeaders": {
+              "entries": [
+                {
+                  "name": "Access-Control-Allow-Origin",
+                  "value": "*"
+                },
+                {
+                  "name": "Content-Type",
+                  "value": "application/json"
+                }
+              ]
+            }
+          },
+          "respondWith": "json",
+          "responseBody": "={{ JSON.stringify({ rewritten: $json.rewritten || '', ok: true, ollama_model: $json.ollama_model || null }) }}"
+        },
+        "position": [
+          980,
+          300
+        ],
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.1
+      }
+    ],
+    "updatedAt": "2026-08-09T01:54:52.037Z",
+    "versionId": "b6377b0c-0484-4c0b-b348-5c7a4bb15593",
+    "workflowId": "v0lUXT9K3LYbfooO",
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-08-09T01:54:52.062Z",
+        "event": "activated",
+        "id": 269,
+        "userId": "34b20bef-3a34-468f-8596-10f0b0f92e4c",
+        "versionId": "b6377b0c-0484-4c0b-b348-5c7a4bb15593",
+        "workflowId": "v0lUXT9K3LYbfooO"
+      }
+    ]
+  },
+  "activeVersionId": "b6377b0c-0484-4c0b-b348-5c7a4bb15593",
+  "connections": {
+    "Amplr Rewrite Webhook": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Rewrite with local Ollama",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Rewrite with local Ollama": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Shape Amplr Response",
+            "type": "main"
+          }
+        ]
+      ]
+    },
+    "Shape Amplr Response": {
+      "main": [
+        [
+          {
+            "index": 0,
+            "node": "Return rewritten copy",
+            "type": "main"
+          }
+        ]
+      ]
+    }
+  },
+  "description": null,
+  "id": "v0lUXT9K3LYbfooO",
+  "isArchived": false,
+  "meta": null,
+  "name": "Amplr - n8n Ollama Rewrite Webhook",
+  "nodes": [
+    {
+      "id": "amplr-webhook",
+      "name": "Amplr Rewrite Webhook",
+      "parameters": {
+        "httpMethod": "POST",
+        "options": {
+          "allowedOrigins": "*"
+        },
+        "path": "amplr-rewrite",
+        "responseMode": "responseNode"
+      },
+      "position": [
+        240,
+        300
+      ],
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "webhookId": "amplr-rewrite-prod"
+    },
+    {
+      "id": "ollama-generate",
+      "name": "Rewrite with local Ollama",
+      "parameters": {
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "jsonBody": "={{ JSON.stringify({ model: 'qwen3:8b', stream: false, options: { temperature: 0.7 }, prompt: `You rewrite Facebook group posts for small businesses. Keep links intact. Do not add hashtags unless asked. Do not use emojis or decorative symbols. Do not make unsupported claims. Output only the rewritten post, no explanation.\\n\\nCurrent message:\\n${$json.body?.message || $json.message || ''}\\n\\nUser tweak instruction:\\n${$json.body?.instruction || $json.instruction || 'Make it clearer and more natural.'}\\n\\nRecent versions for context:\\n${JSON.stringify($json.body?.history || [])}` }) }}",
+        "method": "POST",
+        "options": {},
+        "sendBody": true,
+        "sendHeaders": true,
+        "specifyBody": "json",
+        "url": "http://127.0.0.1:11434/api/generate"
+      },
+      "position": [
+        500,
+        300
+      ],
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2
+    },
+    {
+      "id": "shape-response",
+      "name": "Shape Amplr Response",
+      "parameters": {
+        "jsCode": "const raw = $json.response || $json.text || $json.output || '';\nreturn [{ json: { rewritten: String(raw).trim(), ok: true, ollama_model: 'qwen3:8b', raw: $json } }];"
+      },
+      "position": [
+        740,
+        300
+      ],
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2
+    },
+    {
+      "id": "respond",
+      "name": "Return rewritten copy",
+      "parameters": {
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        },
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ rewritten: $json.rewritten || '', ok: true, ollama_model: $json.ollama_model || null }) }}"
+      },
+      "position": [
+        980,
+        300
+      ],
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1
+    }
+  ],
+  "pinData": null,
+  "settings": {
+    "availableInMCP": false,
+    "callerPolicy": "workflowsFromSameOwner",
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "versionCounter": 30
+}
