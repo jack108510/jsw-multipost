@@ -324,7 +324,7 @@
   }
 
   function isForbiddenIdentityName(name) {
-    return /^(quick switch profiles?|see all profiles?|settings(?: & privacy)?|help(?: & support)?|report a problem|give feedback|meta verified|meta business suite|display & accessibility|privacy|terms|advertising|ad choices|cookies|more|active|log out)$/i.test(cleanIdentityName(name || ''));
+    return /^(quick switch profiles?|see all profiles?|see all pages?|settings(?: & privacy)?|help(?: & support)?|report a problem|give feedback|meta verified|meta business suite|display & accessibility|privacy|terms|advertising|ad choices|cookies|more|active|log out)$/i.test(cleanIdentityName(name || ''));
   }
 
   function identityUrlAllowed(url) {
@@ -376,26 +376,50 @@
   }
 
   function identityMenuRoot() {
-    const roots = [...document.querySelectorAll('[role="dialog"], [role="menu"], [aria-label*="Account"], [aria-label*="profile"]')].filter(visible);
-    return roots.find(r => /Switch to|Continue as|See all profiles|See your profile|View your profile|Quick switch profiles/i.test(r.textContent || '')) || document.body;
+    const roots = [...document.querySelectorAll('[role="dialog"], [role="menu"], [aria-label*="Account"], [aria-label*="profile"], [aria-label*="Page"]')].filter(visible);
+    return roots.find(r => /Switch to|Continue as|See all profiles|See all pages|Your Pages|See your profile|View your profile|Quick switch profiles/i.test(r.textContent || '')) || document.body;
   }
 
-  function findSeeAllProfilesButton(root=identityMenuRoot()) {
+  function clickLikeUser(el) {
+    const target = el?.closest?.('[role="button"], a[href], button') || el;
+    if (!target) return false;
+    try { target.scrollIntoView({ block: 'center', inline: 'center' }); } catch (_) {}
+    try { target.focus?.(); } catch (_) {}
+    try { HTMLElement.prototype.click.call(target); } catch (_) { try { target.click?.(); } catch (__) {} }
+    ['pointerdown','mousedown','mouseup','click'].forEach(type => {
+      const Ctor = type.startsWith('pointer') && window.PointerEvent ? PointerEvent : MouseEvent;
+      target.dispatchEvent(new Ctor(type, { bubbles: true, cancelable: true, view: window, pointerType: 'mouse', button: 0 }));
+    });
+    ['Enter', ' '].forEach(key => {
+      target.dispatchEvent(new KeyboardEvent('keydown', { key, code: key === ' ' ? 'Space' : 'Enter', bubbles: true, cancelable: true }));
+      target.dispatchEvent(new KeyboardEvent('keyup', { key, code: key === ' ' ? 'Space' : 'Enter', bubbles: true, cancelable: true }));
+    });
+    return true;
+  }
+
+  function findSeeAllIdentitiesButton(root=identityMenuRoot()) {
     return [...root.querySelectorAll('[role="button"], a[href], [aria-label]')]
       .filter(visible)
       .find(el => {
         const label = el.getAttribute('aria-label') || '';
         const text = normalizeText(el.innerText || el.textContent || '');
-        return /^See all profiles\b/i.test(cleanIdentityName(label)) || /^See all profiles\b/i.test(cleanIdentityName(text));
+        const cleanedLabel = cleanIdentityName(label);
+        const cleanedText = cleanIdentityName(text);
+        return /^(See all profiles|See all pages)\b/i.test(cleanedLabel) || /^(See all profiles|See all pages)\b/i.test(cleanedText);
       }) || null;
   }
 
-  async function expandAllProfilesIfPresent() {
-    const button = findSeeAllProfilesButton();
-    if (!button) return false;
-    button.click();
-    await sleep(1800);
-    return true;
+  async function expandAllIdentitiesIfPresent(maxClicks=2) {
+    let clicked = false;
+    for (let i = 0; i < maxClicks; i++) {
+      const button = findSeeAllIdentitiesButton();
+      if (!button) break;
+      log('Expanding identity switcher:', normalizeText(button.innerText || button.textContent || button.getAttribute('aria-label') || 'see all'));
+      clickLikeUser(button);
+      clicked = true;
+      await sleep(2200);
+    }
+    return clicked;
   }
 
   function mergeIdentityLists(...lists) {
@@ -427,6 +451,29 @@
       const combined = cleanIdentityName(`${label} ${text}`);
       return (identityMatches(name, expectedName) || identityMatches(combined, expectedName)) && !isForbiddenIdentityName(name);
     }) || null;
+  }
+
+  function identitySwitcherDebugSummary() {
+    const root = identityMenuRoot();
+    const rowEls = [...root.querySelectorAll('[role="button"], a[href], [aria-label]')]
+      .filter(visible);
+    const rows = rowEls
+      .map(el => normalizeText(el.getAttribute('aria-label') || el.innerText || el.textContent || ''))
+      .filter(Boolean)
+      .filter(text => !/^\s*$/.test(text))
+      .slice(0, 30);
+    const scraped = scrapeIdentityMenu().map(i => i.name).filter(Boolean).slice(0, 20);
+    const seeAllEls = rowEls.filter(el => /see all|pages?|profiles?/i.test(normalizeText(el.getAttribute('aria-label') || el.innerText || el.textContent || ''))).slice(0, 10);
+    const seeAll = seeAllEls.map(el => {
+      const clickable = el.closest?.('[role="button"], a[href], button') || el;
+      const text = normalizeText(el.getAttribute('aria-label') || el.innerText || el.textContent || '');
+      const role = clickable.getAttribute?.('role') || clickable.tagName;
+      const href = clickable.href || clickable.getAttribute?.('href') || '';
+      const aria = clickable.getAttribute?.('aria-label') || '';
+      const rect = clickable.getBoundingClientRect?.();
+      return `${text} [${role}${href ? ' href=' + href : ''}${aria ? ' aria=' + aria : ''}${rect ? ' rect=' + Math.round(rect.width) + 'x' + Math.round(rect.height) : ''}]`;
+    });
+    return `Switcher visible rows: ${rows.join(' | ') || 'none'}; scraped identities: ${scraped.join(', ') || 'none'}; see-all/page rows: ${seeAll.join(' | ') || 'none'}`;
   }
 
   function scrapeIdentityMenu() {
@@ -562,7 +609,7 @@
     await sleep(1000);
     const activeAfterOpen = activeIdentityFromMenu() || currentIdentityName() || activeBefore;
     const quickIdentities = scrapeIdentityMenu();
-    const expanded = await expandAllProfilesIfPresent();
+    const expanded = await expandAllIdentitiesIfPresent();
     if (expanded) await sleep(800);
     let identities = mergeIdentityLists(quickIdentities, expanded ? scrapeIdentityMenu() : []);
     if (activeAfterOpen && !identities.some(i => identityMatches(i.name, activeAfterOpen))) identities.unshift({ id: activeAfterOpen.toLowerCase(), name: activeAfterOpen, type: 'facebook identity', is_active: true });
@@ -578,10 +625,22 @@
     return actual && expected && (actual === expected || actual.includes(expected) || expected.includes(actual));
   }
 
-  async function switchToIdentity(expectedName) {
+  async function switchToIdentity(expectedName, identityUrl=null) {
     if (!expectedName) return { switched: false, active_identity: currentIdentityName() };
     let active = currentIdentityName();
     if (identityMatches(active, expectedName)) return { switched: false, active_identity: active };
+
+    const tryDirectPageUrl = async (reason='') => {
+      if (!identityUrl || !/^https:\/\/(www\.)?facebook\.com\/profile\.php\?id=\d+/i.test(identityUrl)) return null;
+      log('Trying direct Facebook Page profile URL fallback:', identityUrl, reason);
+      location.href = identityUrl;
+      await sleep(7000);
+      active = currentIdentityName();
+      if (identityMatches(active, expectedName) || /profile\.php\?id=\d+/i.test(location.href)) {
+        return { switched: true, active_identity: active || expectedName, direct_url_fallback: true, page_url: location.href };
+      }
+      return null;
+    };
 
     const opened = await openIdentityMenu();
     if (!opened) throw new Error('Could not open Facebook profile switcher to change identity');
@@ -589,14 +648,18 @@
 
     let target = findIdentityTarget(expectedName);
     if (!target) {
-      const expanded = await expandAllProfilesIfPresent();
+      const expanded = await expandAllIdentitiesIfPresent();
       if (expanded) {
         await sleep(800);
         target = findIdentityTarget(expectedName);
       }
     }
-    if (!target) throw new Error(`Could not find Facebook identity "${expectedName}" in switcher`);
-    target.click();
+    if (!target) {
+      const direct = await tryDirectPageUrl('switcher target not found');
+      if (direct) return direct;
+      throw new Error(`Could not find Facebook identity "${expectedName}" in switcher. ${identitySwitcherDebugSummary()}`);
+    }
+    clickLikeUser(target);
     await sleep(6000);
     active = currentIdentityName();
     if (!identityMatches(active, expectedName)) {
@@ -665,11 +728,17 @@
   }
 
   // ============ MAIN ============
-  async function postToGroup(message, imageUrl, identityName) {
+  async function postToGroup(message, imageUrl, identityName, identityUrl=null) {
     log('=== START POST ===');
+    const groupPageUrl = location.href;
 
     // 0. Switch Facebook posting identity before opening the group composer.
-    const identitySwitch = await switchToIdentity(identityName);
+    const identitySwitch = await switchToIdentity(identityName, identityUrl);
+    if (identitySwitch?.direct_url_fallback && groupPageUrl && location.href !== groupPageUrl) {
+      log('Returning to group after direct identity URL fallback:', groupPageUrl);
+      location.href = groupPageUrl;
+      await sleep(7000);
+    }
 
     // 1. Find trigger
     const trigger = await findTrigger();
@@ -753,7 +822,7 @@
       log('Received identity switch command');
       (async () => {
         try {
-          const result = await switchToIdentity(msg.identityName || msg.identity_name);
+          const result = await switchToIdentity(msg.identityName || msg.identity_name, msg.identityUrl || msg.identity_url || null);
           sendResponse({ success: true, ...result });
         } catch (error) {
           log('IDENTITY SWITCH ERROR:', error.message);
@@ -794,7 +863,7 @@
     log('Received post command');
     (async () => {
       try {
-        const result = await postToGroup(msg.message, msg.imageUrl, msg.identityName || msg.identity_name || null);
+        const result = await postToGroup(msg.message, msg.imageUrl, msg.identityName || msg.identity_name || null, msg.identityUrl || msg.identity_url || null);
         sendResponse({ success: true, ...result });
       } catch (error) {
         log('ERROR:', error.message);

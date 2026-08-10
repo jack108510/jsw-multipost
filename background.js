@@ -602,6 +602,30 @@ async function requeueRepeatingJob(job, session) {
   }
 }
 
+async function getPostingIdentityByNameOrKey(name, key) {
+  try {
+    const session = await getStoredSession();
+    if (!session || !session.userId) return null;
+    const res = await fetch(`${SB_URL}/rest/v1/amplr_data?user_id=eq.${session.userId}&key=eq.posting_identities&select=value`, {
+      headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}` }
+    });
+    if (!res.ok) return null;
+    const rows = await res.json();
+    const value = rows?.[0]?.value;
+    const identities = Array.isArray(value) ? value : (value?.identities || []);
+    const norm = v => String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
+    const wantedName = norm(name);
+    const wantedKey = norm(key);
+    return identities.find(i =>
+      (wantedName && norm(i.name) === wantedName) ||
+      (wantedKey && [i.id, i.url, i.name].some(v => norm(v) === wantedKey))
+    ) || null;
+  } catch (e) {
+    extLog('warn', 'getPostingIdentityByNameOrKey error: ' + e.message);
+    return null;
+  }
+}
+
 // Claim a job (set status=processing) then run it
 async function executeDashJob(job) {
   dashSession = await getStoredSession();
@@ -636,10 +660,14 @@ async function executeDashJob(job) {
     extLog('info', 'Running import_groups job ' + job.id);
     try {
       const identityMeta = Array.isArray(job.groups) ? job.groups[0] : null;
+      const identityName = job.ai_prompt || identityMeta?.identity_name || null;
+      const identityKey = identityMeta?.identity_key || null;
+      const storedIdentity = await getPostingIdentityByNameOrKey(identityName, identityKey);
       await importFacebookGroupsForJob(job.id, {
-        name: job.ai_prompt || identityMeta?.identity_name || null,
-        key: identityMeta?.identity_key || null,
-        type: identityMeta?.identity_type || null
+        name: identityName,
+        key: identityKey,
+        type: identityMeta?.identity_type || storedIdentity?.type || null,
+        url: identityMeta?.identity_url || storedIdentity?.url || null
       });
     } catch (e) {
       await sbUpdateJob(job.id, {
@@ -726,6 +754,8 @@ async function executeDashJob(job) {
     const groupUrl = target.url;
     const identityName = target.identity_name || job.identity_name || null;
     const identityKey = target.identity_key || job.identity_key || (identityName || '__legacy__');
+    const storedIdentity = identityName ? await getPostingIdentityByNameOrKey(identityName, identityKey) : null;
+    const identityUrl = target.identity_url || job.identity_url || storedIdentity?.url || null;
     let finalText = job.message;
 
     // ── Cooldown awareness — warning only, never blocks posting ──
@@ -770,7 +800,8 @@ async function executeDashJob(job) {
         type: 'POST_TO_PAGE',
         message: finalText,
         imageUrl: job.image_url || '',
-        identityName
+        identityName,
+        identityUrl
       });
 
       if (response?.success) {
@@ -1158,6 +1189,7 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null) {
   const identityName = typeof identityMeta === 'string' ? identityMeta : (identityMeta?.name || null);
   const identityKey = (typeof identityMeta === 'object' && identityMeta?.key) ? identityMeta.key : (identityName || '__legacy__');
   const identityType = (typeof identityMeta === 'object' && identityMeta?.type) ? identityMeta.type : null;
+  const identityUrl = (typeof identityMeta === 'object' && identityMeta?.url) ? identityMeta.url : null;
   const session = await getStoredSession();
   if (!session || !session.userId) {
     await sbUpdateJob(jobId, { status: 'failed', result: { error: 'Not signed in' }, completed_at: new Date().toISOString() });
@@ -1176,7 +1208,7 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null) {
     await sleep(5000);
     if (identityName) {
       await updateProgress(`Switching to ${identityName}...`);
-      const switchRes = await chrome.tabs.sendMessage(tab.id, { type: 'SWITCH_FACEBOOK_IDENTITY', identityName });
+      const switchRes = await chrome.tabs.sendMessage(tab.id, { type: 'SWITCH_FACEBOOK_IDENTITY', identityName, identityUrl });
       if (!switchRes?.success) throw new Error(switchRes?.error || `Could not switch to ${identityName}`);
       await sleep(4000);
       await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/groups/joins/' });
@@ -1201,7 +1233,9 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null) {
             const t = (text || '')
               .replace(/\u00a0/g, ' ')
               .replace(/\s+/g, ' ')
-              .replace(/^(Group:|Facebook group:)\s*/i, '')
+              .replace(/^(Unread|Group:|Facebook group:)\s*/i, '')
+              .replace(/\bLast active\b.*$/i, '')
+              .replace(/\b\d+[smhdw]\b.*$/i, '')
               .trim();
             const notificationMatch = t.match(/\bin\s+(.+?):\s*["“]/i);
             return notificationMatch ? notificationMatch[1].trim() : t;
@@ -1300,6 +1334,7 @@ async function importFacebookGroups(identityMeta = null) {
   const identityName = typeof identityMeta === 'string' ? identityMeta : (identityMeta?.name || identityMeta?.identity_name || null);
   const identityKey = (typeof identityMeta === 'object' && (identityMeta?.key || identityMeta?.identity_key)) ? (identityMeta.key || identityMeta.identity_key) : (identityName || '__legacy__');
   const identityType = (typeof identityMeta === 'object' && (identityMeta?.type || identityMeta?.identity_type)) ? (identityMeta.type || identityMeta.identity_type) : null;
+  const identityUrl = (typeof identityMeta === 'object' && (identityMeta?.url || identityMeta?.identity_url)) ? (identityMeta.url || identityMeta.identity_url) : null;
   const session = await getStoredSession();
   if (!session || !session.userId) {
     chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_ERROR', error: 'Not signed in' });
@@ -1314,7 +1349,7 @@ async function importFacebookGroups(identityMeta = null) {
     await sleep(5000);
     if (identityName) {
       chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_PROGRESS', text: `Switching to ${identityName}...` });
-      const switchRes = await chrome.tabs.sendMessage(tab.id, { type: 'SWITCH_FACEBOOK_IDENTITY', identityName });
+      const switchRes = await chrome.tabs.sendMessage(tab.id, { type: 'SWITCH_FACEBOOK_IDENTITY', identityName, identityUrl });
       if (!switchRes?.success) throw new Error(switchRes?.error || `Could not switch to ${identityName}`);
       await sleep(4000);
       await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/groups/joins/' });
@@ -1341,7 +1376,9 @@ async function importFacebookGroups(identityMeta = null) {
             const t = (text || '')
               .replace(/\u00a0/g, ' ')
               .replace(/\s+/g, ' ')
-              .replace(/^(Group:|Facebook group:)\s*/i, '')
+              .replace(/^(Unread|Group:|Facebook group:)\s*/i, '')
+              .replace(/\bLast active\b.*$/i, '')
+              .replace(/\b\d+[smhdw]\b.*$/i, '')
               .trim();
             const notificationMatch = t.match(/\bin\s+(.+?):\s*["“]/i);
             return notificationMatch ? notificationMatch[1].trim() : t;
