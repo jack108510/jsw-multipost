@@ -265,12 +265,43 @@
   }
 
   function currentIdentityName() {
-    const candidates = [
-      document.querySelector('[aria-label$="profile"] img[alt]')?.getAttribute('alt'),
-      document.querySelector('[aria-label*="Your profile"] img[alt]')?.getAttribute('alt'),
-      document.querySelector('a[aria-label*="profile"] img[alt]')?.getAttribute('alt'),
-      document.querySelector('[role="banner"] img[alt]')?.getAttribute('alt')
-    ].filter(Boolean).map(cleanIdentityName).filter(Boolean);
+    const candidates = [];
+    const push = (value) => {
+      const name = cleanIdentityName(value || '');
+      if (!name || /^(profile picture|photo|your profile)$/i.test(name)) return;
+      if (/^(see your profile|view your profile|facebook identity)$/i.test(name)) return;
+      candidates.push(name);
+    };
+
+    [
+      '[aria-label="Your profile"]',
+      '[aria-label*="Your profile"]',
+      '[aria-label$="profile"]',
+      'a[aria-label*="profile"]',
+      '[role="banner"] [aria-label*="profile"]'
+    ].forEach(sel => {
+      document.querySelectorAll(sel).forEach(el => {
+        push(el.querySelector?.('img[alt]')?.getAttribute('alt'));
+        const label = el.getAttribute?.('aria-label') || '';
+        if (!/Your profile/i.test(label)) push(label);
+      });
+    });
+
+    document.querySelectorAll('[role="dialog"], [role="menu"], [aria-label*="Account"]')
+      .forEach(root => {
+        [...root.querySelectorAll('[role="button"], a[href], div')]
+          .filter(visible)
+          .forEach(el => {
+            const rawText = el.innerText || el.textContent || '';
+            const text = normalizeText(rawText);
+            if (!/See your profile|View your profile/i.test(text)) return;
+            const lines = rawText.split('\n').map(cleanIdentityName).filter(Boolean);
+            const name = lines.find(line => !/^(see your profile|view your profile|facebook identity)$/i.test(line));
+            push(name);
+            push(el.querySelector?.('img[alt]')?.getAttribute('alt'));
+          });
+      });
+
     return candidates[0] || null;
   }
 
@@ -324,6 +355,24 @@
     return lines[0] || cleanIdentityName(rawLabel);
   }
 
+  function activeIdentityFromMenu(root=document) {
+    const rows = [...root.querySelectorAll('[role="button"], a[href], div')].filter(visible);
+    for (const el of rows) {
+      const rawText = el.innerText || el.textContent || '';
+      const text = normalizeText(rawText);
+      if (!/See your profile|View your profile/i.test(text)) continue;
+      const lines = rawText.split('\n')
+        .map(cleanIdentityName)
+        .filter(Boolean)
+        .filter(line => !/^facebook identity$/i.test(line))
+        .filter(line => !/^(see your profile|view your profile)$/i.test(line))
+        .filter(line => !isForbiddenIdentityName(line));
+      const name = lines[0] || cleanIdentityName(el.querySelector?.('img[alt]')?.getAttribute('alt') || '');
+      if (name) return name;
+    }
+    return null;
+  }
+
   function scrapeIdentityMenu() {
     const found = new Map();
     const add = (name, extra={}) => {
@@ -364,8 +413,8 @@
       add(name, { label: combined, url, avatar_url: img?.src || null, type: /page|business/i.test(combined) ? 'page' : undefined });
     }
 
-    const active = currentIdentityName();
-    if (active) add(active, { is_active: true });
+    const active = activeIdentityFromMenu(root) || currentIdentityName();
+    if (active) add(active, { is_active: true, label: 'active profile' });
     return [...found.values()].map(i => ({ ...i, is_active: i.name === active || i.is_active }));
   }
 
@@ -375,10 +424,12 @@
     const opened = await openIdentityMenu();
     if (!opened) throw new Error('Could not open Facebook profile switcher');
     await sleep(1000);
+    const activeAfterOpen = activeIdentityFromMenu() || currentIdentityName() || activeBefore;
     let identities = scrapeIdentityMenu();
-    if (!identities.length && activeBefore) identities = [{ id: activeBefore.toLowerCase(), name: activeBefore, type: 'facebook identity', is_active: true }];
+    if (activeAfterOpen && !identities.some(i => identityMatches(i.name, activeAfterOpen))) identities.unshift({ id: activeAfterOpen.toLowerCase(), name: activeAfterOpen, type: 'facebook identity', is_active: true });
+    if (!identities.length && activeAfterOpen) identities = [{ id: activeAfterOpen.toLowerCase(), name: activeAfterOpen, type: 'facebook identity', is_active: true }];
     if (!identities.length) throw new Error('No Facebook identities found in switcher');
-    return { identities, active_identity: identities.find(i => i.is_active)?.name || activeBefore || null, pageUrl: location.href };
+    return { identities, active_identity: identities.find(i => i.is_active)?.name || activeAfterOpen || activeBefore || null, pageUrl: location.href };
   }
 
   function identityMatches(actual, expected) {
