@@ -481,8 +481,11 @@
     const pageUrl = location.href;
     const add = (name, extra={}) => {
       name = cleanIdentityName(name);
+      name = name.replace(/^Profile picture for\s+/i, '').trim();
       if (!name || name.length < 2 || isForbiddenIdentityName(name)) return;
-      if (/^(pages?|your pages?|followed pages?|discover|inbox|insights|notifications?|messages?|switch now|meta business suite)$/i.test(name)) return;
+      if (/^(pages?|your pages?|followed pages?|discover|inbox|insights|notifications?|messages?|switch now|meta business suite|edit notification settings|click to expand)$/i.test(name)) return;
+      if (/^\d+\s+notifications?$/i.test(name)) return;
+      if (/^Pages\s+.+\s+manages$/i.test(name)) return;
       if (/https?:\/\//i.test(name)) return;
       const key = name.toLowerCase();
       const prev = found.get(key) || {};
@@ -509,33 +512,42 @@
     for (const card of [...main.querySelectorAll('[role="article"], [role="listitem"], div')].filter(visible)) {
       const raw = card.innerText || card.textContent || '';
       const text = normalizeText(raw);
+      const switchCount = (text.match(/\bSwitch Now\b/gi) || []).length;
+      if (switchCount !== 1) continue;
       if (!/\b(Messages|Notifications?|Switch Now)\b/i.test(text)) continue;
       const lines = raw.split('\n').map(cleanIdentityName).filter(Boolean)
-        .filter(line => !/^(messages?|notifications?|switch now)$/i.test(line))
+        .filter(line => !/^(messages?|notifications?|switch now|edit notification settings|click to expand)$/i.test(line))
         .filter(line => !/^\d+\s+notifications?$/i.test(line))
         .filter(line => !/^Pages\s+.+\s+manages$/i.test(line))
+        .filter(line => !/^Profile picture for\s+/i.test(line))
         .filter(line => !isForbiddenIdentityName(line));
       const name = lines[0];
       if (!name) continue;
       const img = card.querySelector?.('img[src]');
-      const url = card.querySelector?.('a[href*="facebook.com"]')?.href || null;
+      const url = card.querySelector?.('a[href*="/profile.php"], a[href*="facebook.com/profile.php"]')?.href || null;
       add(name, { url, avatar_url: img?.src || null });
     }
 
-    // Secondary path: left sidebar under "Your Pages" often lists all managed Pages,
-    // even when cards are virtualized or Facebook changes card markup.
-    for (const el of [...root.querySelectorAll('a[href], [role="link"], [role="button"], span[dir="auto"]')].filter(visible)) {
-      const label = el.getAttribute('aria-label') || '';
-      const raw = el.innerText || el.textContent || label;
-      const lines = raw.split('\n').map(cleanIdentityName).filter(Boolean)
-        .filter(line => !/^(your pages?|pages?|meta business suite|inbox|insights|discover|followed pages?)$/i.test(line))
+    // Secondary path: real Page links from the Pages manager. Avoid buttons,
+    // notifications, headings, and image alt text as identities.
+    for (const a of [...root.querySelectorAll('a[href*="/profile.php"], a[href*="facebook.com/profile.php"]')].filter(visible)) {
+      const href = a.href || '';
+      if (!/profile\.php\?id=\d+/i.test(href)) continue;
+      const raw = a.innerText || a.textContent || '';
+      const imgAlt = a.querySelector?.('img[alt]')?.getAttribute('alt') || '';
+      const label = a.getAttribute('aria-label') || '';
+      const candidates = [raw, label, imgAlt.replace(/^Profile picture for\s+/i, '')]
+        .flatMap(v => String(v || '').split('\n'))
+        .map(cleanIdentityName)
+        .filter(Boolean)
+        .filter(line => !/^(messages?|notifications?|switch now|edit notification settings|click to expand)$/i.test(line))
+        .filter(line => !/^\d+\s+notifications?$/i.test(line))
+        .filter(line => !/^Pages\s+.+\s+manages$/i.test(line))
+        .filter(line => !/^Profile picture for\s+/i.test(line))
         .filter(line => !isForbiddenIdentityName(line));
-      const name = lines[0];
+      const name = candidates[0];
       if (!name) continue;
-      const href = el.href || el.closest?.('a[href]')?.href || null;
-      const combined = normalizeText(`${label} ${raw} ${href || ''}`);
-      if (!/pages|profile\.php|Switch Now|Notifications?|Messages|category=your_pages/i.test(combined) && !el.closest?.('[aria-label*="Your Pages"]')) continue;
-      const img = el.querySelector?.('img[src]') || el.closest?.('div')?.querySelector?.('img[src]');
+      const img = a.querySelector?.('img[src]');
       add(name, { url: href, avatar_url: img?.src || null });
     }
 
