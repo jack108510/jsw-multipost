@@ -268,8 +268,8 @@
     const candidates = [];
     const push = (value) => {
       const name = cleanIdentityName(value || '');
-      if (!name || /^(profile picture|photo|your profile)$/i.test(name)) return;
-      if (/^(see your profile|view your profile|facebook identity)$/i.test(name)) return;
+      if (!name || /^(profile picture|photo|your profile|active)$/i.test(name)) return;
+      if (isForbiddenIdentityName(name) || /^(see your profile|view your profile|facebook identity)$/i.test(name)) return;
       candidates.push(name);
     };
 
@@ -324,7 +324,7 @@
   }
 
   function isForbiddenIdentityName(name) {
-    return /^(see all profiles?|settings(?: & privacy)?|help(?: & support)?|report a problem|give feedback|meta verified|meta business suite|display & accessibility|privacy|terms|advertising|ad choices|cookies|more|log out)$/i.test(cleanIdentityName(name || ''));
+    return /^(quick switch profiles?|see all profiles?|settings(?: & privacy)?|help(?: & support)?|report a problem|give feedback|meta verified|meta business suite|display & accessibility|privacy|terms|advertising|ad choices|cookies|more|active|log out)$/i.test(cleanIdentityName(name || ''));
   }
 
   function identityUrlAllowed(url) {
@@ -360,15 +360,17 @@
     for (const el of rows) {
       const rawText = el.innerText || el.textContent || '';
       const text = normalizeText(rawText);
-      if (!/See your profile|View your profile/i.test(text)) continue;
+      const isProfileRow = /See your profile|View your profile/i.test(text);
+      const isActiveRow = /(?:^|\s)Active(?:\s|$)/i.test(text);
+      if (!isProfileRow && !isActiveRow) continue;
       const lines = rawText.split('\n')
         .map(cleanIdentityName)
         .filter(Boolean)
         .filter(line => !/^facebook identity$/i.test(line))
         .filter(line => !/^(see your profile|view your profile)$/i.test(line))
         .filter(line => !isForbiddenIdentityName(line));
-      const name = lines[0] || cleanIdentityName(el.querySelector?.('img[alt]')?.getAttribute('alt') || '');
-      if (name) return name;
+      const name = lines.find(line => !/active/i.test(line)) || cleanIdentityName(el.querySelector?.('img[alt]')?.getAttribute('alt') || '');
+      if (name && !isForbiddenIdentityName(name)) return name;
     }
     return null;
   }
@@ -400,7 +402,7 @@
       const text = normalizeText(el.innerText || el.textContent || '');
       const combined = normalizeText(`${label} ${text}`);
       if (/^See all profiles/i.test(combined)) break;
-      if (isForbiddenIdentityName(combined)) continue;
+      if (isForbiddenIdentityName(combined) || /quick switch profiles/i.test(combined)) continue;
 
       const hasSwitcherVerb = /Switch to|Continue as|Use Facebook as/i.test(combined);
       const hasAvatar = !!(el.querySelector?.('img[src]') || el.closest?.('div')?.querySelector?.('img[src]'));
