@@ -663,7 +663,10 @@ input[type="range"]::-webkit-slider-thumb{
                 <input type="text" id="newGroupUrl" placeholder="facebook.com/groups/123" style="flex:1;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;">
                 <button class="btn btn-primary" onclick="addGroup()">Add</button>
               </div>
-              <button class="btn btn-ghost btn-block" style="margin-bottom:14px;" onclick="syncGroupsForSelectedIdentity()">Sync Groups for Selected Identity</button>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">
+                <button class="btn btn-ghost" id="syncSelectedGroupsBtn" onclick="syncGroupsForSelectedIdentity()">Sync Selected Channel</button>
+                <button class="btn btn-primary" id="syncAllGroupsBtn" onclick="syncGroupsForAllIdentities()">Sync All Channels</button>
+              </div>
               <div id="groupsList"></div>
             </div>
           </div>
@@ -954,6 +957,9 @@ function getSelectedIdentity(){
   const key=getSelectedIdentityKey();
   return postingIdentitiesCache.find(i=>identityKey(i)===key) || postingIdentitiesCache[0] || null;
 }
+function identityByKey(key){ return postingIdentitiesCache.find(i=>identityKey(i)===key) || null; }
+function groupCountForIdentityKey(key){ return groupsCache.filter(g => (g?.identity_key || legacyIdentityKey()) === key).length; }
+function totalGroupCount(){ return groupsCache.length; }
 function currentIdentityKey(){ return identityKey(getSelectedIdentity()) || legacyIdentityKey(); }
 function currentIdentityName(){ return getSelectedIdentity()?.name || null; }
 function currentIdentityType(){ return getSelectedIdentity()?.type || null; }
@@ -963,7 +969,32 @@ function groupMatchesSelectedIdentity(g){
   return groupKey === selectedKey;
 }
 function groupsForSelectedIdentity(){ return groupsCache.filter(groupMatchesSelectedIdentity); }
-function identityLabelForGroup(g){ return g?.identity_name || (g?.identity_key === legacyIdentityKey() ? 'Legacy / unscoped' : null); }
+function groupsForIdentityKey(key){ return groupsCache.filter(g => (g?.identity_key || legacyIdentityKey()) === key); }
+function identityLabelForKey(key){
+  if (key === legacyIdentityKey()) return 'Legacy / unscoped';
+  const identity=identityByKey(key);
+  return identity?.name || groupsCache.find(g => (g?.identity_key || legacyIdentityKey()) === key)?.identity_name || key || 'Unknown channel';
+}
+function identityLabelForGroup(g){ return g?.identity_name || identityLabelForKey(g?.identity_key || legacyIdentityKey()); }
+function organizedGroupBuckets(){
+  const seen=new Set();
+  const buckets=[];
+  postingIdentitiesCache.forEach(identity=>{
+    const key=identityKey(identity) || legacyIdentityKey();
+    if (seen.has(key)) return;
+    seen.add(key);
+    buckets.push({ key, identity, label:identity.name || 'Unnamed channel', groups:groupsForIdentityKey(key), isLegacy:false });
+  });
+  const extraKeys=[...new Set(groupsCache.map(g=>g?.identity_key || legacyIdentityKey()))].filter(key=>!seen.has(key));
+  extraKeys.forEach(key=>{
+    buckets.push({ key, identity:null, label:identityLabelForKey(key), groups:groupsForIdentityKey(key), isLegacy:key===legacyIdentityKey() });
+  });
+  return buckets;
+}
+function updateGroupCounts(){
+  const countEl = document.getElementById('navGroupCount');
+  if (countEl) countEl.textContent = totalGroupCount();
+}
 function setSelectedIdentity(key){
   if (key) localStorage.setItem('amplr_selected_identity', key);
   renderIdentitySelectors();
@@ -982,7 +1013,8 @@ async function loadPostingIdentities(){
 function identityOptionHtml(identity){
   const key=identityKey(identity);
   const type=identity.type || (identity.is_active ? 'active identity' : 'Facebook identity');
-  return `<option value="${esc(key)}">${esc(identity.name || 'Unnamed identity')} — ${esc(type)}</option>`;
+  const count=groupCountForIdentityKey(key);
+  return `<option value="${esc(key)}">${esc(identity.name || 'Unnamed identity')} — ${count} group${count===1?'':'s'} — ${esc(type)}</option>`;
 }
 function renderIdentitySelectors(){
   const html = postingIdentitiesCache.length
@@ -1011,9 +1043,11 @@ function renderPostingIdentities(){
   const selectedKey=getSelectedIdentityKey();
   el.innerHTML=postingIdentitiesCache.map(i=>{
     const key=identityKey(i);
+    const count=groupCountForIdentityKey(key);
     return `<div class="job">
       <div class="job-icon">${i.avatar_url?`<img src="${esc(i.avatar_url)}" style="width:22px;height:22px;border-radius:999px;object-fit:cover;">`:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0113 0"/></svg>'}</div>
-      <div class="job-body"><div class="job-msg">${esc(i.name || 'Unnamed identity')} ${i.is_active?'<span class="warning-chip">active</span>':''}</div><div class="job-meta">${esc(i.type || 'facebook identity')}${i.url?' · '+esc(i.url):''}</div></div>
+      <div class="job-body"><div class="job-msg">${esc(i.name || 'Unnamed identity')} ${i.is_active?'<span class="warning-chip">active</span>':''}</div><div class="job-meta">${count} group${count===1?'':'s'} · ${esc(i.type || 'facebook identity')}${i.url?' · '+esc(i.url):''}</div></div>
+      <button class="btn btn-ghost" style="padding:6px 10px;" onclick="setSelectedIdentity(${jsArg(key)}); syncGroupsForSelectedIdentity();">Sync</button>
       <button class="btn ${key===selectedKey?'btn-primary':'btn-ghost'}" style="padding:6px 10px;" onclick="setSelectedIdentity(${jsArg(key)}); renderPostingIdentities();">${key===selectedKey?'Selected':'Use'}</button>
     </div>`;
   }).join('');
@@ -1071,6 +1105,8 @@ function pollIdentitySyncJob(jobId){
 async function syncGroupsForSelectedIdentity(){
   const identity=getSelectedIdentity();
   if (!identity) { toast('Sync posting identities first','error'); navigate('settings'); return; }
+  const btn=document.getElementById('syncSelectedGroupsBtn');
+  if (btn) btn.disabled=true;
   const { data, error } = await sb.from('jsw_post_jobs').insert({
     user_id:user.id,
     message:'__import_groups__',
@@ -1080,11 +1116,29 @@ async function syncGroupsForSelectedIdentity(){
     groups:[{ identity_name: identity.name || null, identity_key: identityKey(identity) || legacyIdentityKey(), identity_type: identity.type || null }],
     status:'pending'
   }).select();
-  if (error) { toast('Could not start group sync: '+error.message,'error'); return; }
+  if (error) { toast('Could not start group sync: '+error.message,'error'); if(btn) btn.disabled=false; return; }
   toast(`Group sync queued for ${identity.name}`,'info');
-  pollGroupSyncJob(data[0].id, identity);
+  pollGroupSyncJob(data[0].id, identity, btn);
 }
-function pollGroupSyncJob(jobId, identity){
+async function syncGroupsForAllIdentities(){
+  if (!postingIdentitiesCache.length) { toast('Sync posting identities first','error'); navigate('settings'); return; }
+  const btn=document.getElementById('syncAllGroupsBtn');
+  if (btn) btn.disabled=true;
+  const jobs=postingIdentitiesCache.map(identity=>({
+    user_id:user.id,
+    message:'__import_groups__',
+    delay:0,
+    ai_enabled:false,
+    ai_prompt: identity.name || null,
+    groups:[{ identity_name: identity.name || null, identity_key: identityKey(identity) || legacyIdentityKey(), identity_type: identity.type || null }],
+    status:'pending'
+  }));
+  const { data, error } = await sb.from('jsw_post_jobs').insert(jobs).select();
+  if (error) { toast('Could not start all-channel sync: '+error.message,'error'); if(btn) btn.disabled=false; return; }
+  toast(`Queued group sync for ${data.length} channel${data.length===1?'':'s'}`,'info');
+  pollAllGroupSyncJobs(data.map(j=>j.id), btn);
+}
+function pollGroupSyncJob(jobId, identity, button=null){
   const timer=setInterval(async()=>{
     const { data } = await sb.from('jsw_post_jobs').select('*').eq('id',jobId).maybeSingle();
     if (!data) return;
@@ -1092,12 +1146,32 @@ function pollGroupSyncJob(jobId, identity){
     if (r.text) setExtensionStatus(data.status==='processing'?'processing':'idle', 'Syncing groups', r.text);
     if (['done','failed'].includes(data.status)) {
       clearInterval(timer);
+      if (button) button.disabled=false;
       if (data.status==='done') {
-        await loadGroups(); renderGroupsList(); renderComposeGroups();
-        toast(`Synced groups for ${identity.name}`,'success');
+        await loadGroups(); renderGroupsList(); renderComposeGroups(); renderIdentitySelectors(); renderPostingIdentities();
+        toast(`Synced ${r.count || 0} groups for ${identity.name}`,'success');
       } else toast('Group sync failed: '+(r.error || data.error || 'unknown'),'error');
     }
   }, 2500);
+}
+function pollAllGroupSyncJobs(jobIds, button=null){
+  const remaining=new Set(jobIds);
+  const timer=setInterval(async()=>{
+    const { data } = await sb.from('jsw_post_jobs').select('*').in('id', [...remaining]);
+    if (!data) return;
+    const done=data.filter(j=>['done','failed'].includes(j.status));
+    done.forEach(j=>remaining.delete(j.id));
+    const processing=data.filter(j=>j.status==='processing').length;
+    setExtensionStatus(processing?'processing':'idle', 'Organizing channel groups', `${jobIds.length-remaining.size}/${jobIds.length} channel syncs finished`);
+    if (!remaining.size) {
+      clearInterval(timer);
+      if (button) button.disabled=false;
+      await loadGroups(); renderGroupsList(); renderComposeGroups(); renderIdentitySelectors(); renderPostingIdentities();
+      const ok=data.filter(j=>j.status==='done').length;
+      const failed=data.filter(j=>j.status==='failed').length;
+      toast(`Organized groups for ${ok} channel${ok===1?'':'s'}${failed?`, ${failed} failed`:''}`,'success');
+    }
+  }, 3000);
 }
 
 /* ============================================================
@@ -1107,8 +1181,7 @@ async function loadGroups(){
   const { data, error } = await sb.from('jsw_groups').select('*').order('created_at',{ascending:false});
   if (error) { if (!isNoTable(error)) toast('Failed to load groups: '+error.message,'error'); return; }
   groupsCache = data || [];
-  const countEl = document.getElementById('navGroupCount');
-  if (countEl) countEl.textContent = groupsForSelectedIdentity().length;
+  updateGroupCounts();
 }
 
 function isNoTable(e){ return e && (e.code==='42P01' || (e.message||'').includes('relation') || (e.message||'').includes('does not exist')); }
@@ -1147,22 +1220,46 @@ async function removeGroup(id){
 
 function renderGroupsList(){
   const el = document.getElementById('groupsList');
-  const visibleGroups = groupsForSelectedIdentity();
-  const countEl = document.getElementById('navGroupCount');
-  if (countEl) countEl.textContent = visibleGroups.length;
+  updateGroupCounts();
   if (!el) return;
-  if (!visibleGroups.length) {
-    const identityName = currentIdentityName() || 'this identity';
-    el.innerHTML = emptyState(`No groups for ${identityName}`,'Choose an identity above, then Sync Groups or add a Facebook group URL.');
+  const buckets=organizedGroupBuckets();
+  if (!groupsCache.length && !postingIdentitiesCache.length) {
+    el.innerHTML = emptyState('No groups or channels yet','Sync posting identities first, then use Sync All Channels to organize groups automatically.');
     return;
   }
-  el.innerHTML = visibleGroups.map(g=>`
-    <div class="job">
-      <div class="job-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div>
-      <div class="job-body"><div class="job-msg">${esc(g.group_name||g.group_url)}</div>
-      <div class="job-meta">${identityLabelForGroup(g)?esc(identityLabelForGroup(g))+' · ':''}<a href="${esc(g.group_url)}" target="_blank" style="color:var(--accent);">${esc(g.group_url)}</a></div></div>
-      <button class="btn btn-ghost" style="padding:6px 10px;" onclick="removeGroup('${g.id}')">Remove</button>
-    </div>`).join('');
+  if (!groupsCache.length) {
+    el.innerHTML = postingIdentitiesCache.map(identity=>{
+      const key=identityKey(identity);
+      return `<div class="job" style="display:block;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div class="job-icon">${identity.avatar_url?`<img src="${esc(identity.avatar_url)}" style="width:22px;height:22px;border-radius:999px;object-fit:cover;">`:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0113 0"/></svg>'}</div>
+          <div class="job-body"><div class="job-msg">${esc(identity.name || 'Unnamed channel')}</div><div class="job-meta">0 groups · ${esc(identity.type || 'facebook identity')}</div></div>
+          <button class="btn btn-ghost" style="padding:6px 10px;" onclick="setSelectedIdentity(${jsArg(key)}); syncGroupsForSelectedIdentity();">Sync</button>
+        </div>
+      </div>`;
+    }).join('') || emptyState('No groups yet','Use Sync All Channels to import and organize groups by posting identity.');
+    return;
+  }
+  el.innerHTML = buckets.map(bucket=>{
+    const selected=bucket.key===currentIdentityKey();
+    const groupsHtml = bucket.groups.length ? bucket.groups.map(g=>`
+      <div class="job" style="margin-top:8px;">
+        <div class="job-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div>
+        <div class="job-body"><div class="job-msg">${esc(g.group_name||g.group_url)}</div>
+        <div class="job-meta"><a href="${esc(g.group_url)}" target="_blank" style="color:var(--accent);">${esc(g.group_url)}</a></div></div>
+        <button class="btn btn-ghost" style="padding:6px 10px;" onclick="removeGroup('${g.id}')">Remove</button>
+      </div>`).join('') : `<div class="result-meta" style="margin-top:10px;">No groups synced for this channel yet.</div>`;
+    return `<div class="job" style="display:block;${selected?'border-color:rgba(78,204,163,.45);':''}">
+      <div style="display:flex;align-items:center;gap:12px;">
+        <div class="job-icon">${bucket.identity?.avatar_url?`<img src="${esc(bucket.identity.avatar_url)}" style="width:22px;height:22px;border-radius:999px;object-fit:cover;">`:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0113 0"/></svg>'}</div>
+        <div class="job-body"><div class="job-msg">${esc(bucket.label)} ${selected?'<span class="warning-chip">selected</span>':''}${bucket.isLegacy?'<span class="warning-chip">needs channel</span>':''}</div><div class="job-meta">${bucket.groups.length} group${bucket.groups.length===1?'':'s'}${bucket.identity?.type?' · '+esc(bucket.identity.type):''}</div></div>
+        ${bucket.identity?`<button class="btn btn-ghost" style="padding:6px 10px;" onclick="setSelectedIdentity(${jsArg(bucket.key)}); syncGroupsForSelectedIdentity();">Sync</button>`:''}
+        ${bucket.identity?`<button class="btn ${selected?'btn-primary':'btn-ghost'}" style="padding:6px 10px;" onclick="setSelectedIdentity(${jsArg(bucket.key)}); renderPostingIdentities();">${selected?'Selected':'Use'}</button>`:''}
+      </div>
+      ${bucket.isLegacy?`<div class="result-meta" style="margin-top:10px;color:#facc15;">Legacy groups are preserved separately so they do not get mixed into Wildrose, Vet Inc, or other channels. Re-sync each channel to organize them under the right Page/profile.</div>`:''}
+      <div class="result-list" style="margin-top:10px;">${groupsHtml}</div>
+    </div>`;
+  }).join('');
 }
 
 function renderComposeGroups(){
@@ -1242,7 +1339,8 @@ function updateRiskPanels(){
   renderRiskBox('composeRiskBox', buildRiskWarnings({message:composeMessage, groups:composeGroups, delay:composeDelay, mode:'now'}));
 
   const schedMessage=document.getElementById('schedMessage')?.value || '';
-  const schedGroups=groupsForSelectedIdentity().map(g=>({url:g.group_url,name:g.group_name}));
+  const schedIdentity=getSelectedIdentity();
+  const schedGroups=groupsForSelectedIdentity().map(g=>({url:g.group_url,name:g.group_name,identity_name:schedIdentity?.name || null,identity_key:identityKey(schedIdentity) || legacyIdentityKey(),identity_type:schedIdentity?.type || null}));
   renderRiskBox('scheduleRiskBox', buildRiskWarnings({message:schedMessage, groups:schedGroups, delay:settingsCache.default_delay || 30, mode:'schedule'}));
 }
 

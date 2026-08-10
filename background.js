@@ -10,7 +10,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'START_POSTING') {
     runPostingQueue(msg, sender);
   } else if (msg.type === 'IMPORT_GROUPS') {
-    importFacebookGroups();
+    importFacebookGroups(msg.identity || msg.identityMeta || null);
   }
 });
 
@@ -1290,7 +1290,10 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null) {
   }
 }
 
-async function importFacebookGroups() {
+async function importFacebookGroups(identityMeta = null) {
+  const identityName = typeof identityMeta === 'string' ? identityMeta : (identityMeta?.name || identityMeta?.identity_name || null);
+  const identityKey = (typeof identityMeta === 'object' && (identityMeta?.key || identityMeta?.identity_key)) ? (identityMeta.key || identityMeta.identity_key) : (identityName || '__legacy__');
+  const identityType = (typeof identityMeta === 'object' && (identityMeta?.type || identityMeta?.identity_type)) ? (identityMeta.type || identityMeta.identity_type) : null;
   const session = await getStoredSession();
   if (!session || !session.userId) {
     chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_ERROR', error: 'Not signed in' });
@@ -1303,6 +1306,14 @@ async function importFacebookGroups() {
 
     tab = await chrome.tabs.create({ url: 'https://www.facebook.com/groups/joins/', active: false });
     await sleep(5000);
+    if (identityName) {
+      chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_PROGRESS', text: `Switching to ${identityName}...` });
+      const switchRes = await chrome.tabs.sendMessage(tab.id, { type: 'SWITCH_FACEBOOK_IDENTITY', identityName });
+      if (!switchRes?.success) throw new Error(switchRes?.error || `Could not switch to ${identityName}`);
+      await sleep(4000);
+      await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/groups/joins/' });
+      await sleep(5000);
+    }
 
     // Scroll and collect — runs multiple passes until no new groups appear
     let groups = [];
@@ -1408,9 +1419,9 @@ async function importFacebookGroups() {
       user_id:    session.userId,
       group_url:  g.url,
       group_name: g.name || null,
-      identity_name: null,
-      identity_key: '__legacy__',
-      identity_type: null
+      identity_name: identityName || null,
+      identity_key: identityKey || '__legacy__',
+      identity_type: identityType || null
     }));
 
     // Batch in chunks of 50
@@ -1430,8 +1441,8 @@ async function importFacebookGroups() {
       if (!saveRes.ok) throw new Error('Group save failed: ' + await saveRes.text());
     }
 
-    extLog('info', `Imported ${groups.length} groups for user ${session.userId}`);
-    chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_DONE', count: groups.length, groups });
+    extLog('info', `Imported ${groups.length} groups for user ${session.userId}${identityName ? ' / ' + identityName : ''}`);
+    chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_DONE', count: groups.length, groups, identity_name: identityName || null, identity_key: identityKey || '__legacy__', identity_type: identityType || null });
 
   } catch (e) {
     extLog('error', 'importFacebookGroups error: ' + e.message);
