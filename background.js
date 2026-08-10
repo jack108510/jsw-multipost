@@ -1234,36 +1234,45 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null) {
               .replace(/\u00a0/g, ' ')
               .replace(/\s+/g, ' ')
               .replace(/^(Unread|Group:|Facebook group:)\s*/i, '')
-              .replace(/\bLast active\b.*$/i, '')
+              .replace(/Last active.*$/i, '')
               .replace(/\b\d+[smhdw]\b.*$/i, '')
               .trim();
             const notificationMatch = t.match(/\bin\s+(.+?):\s*["“]/i);
-            return notificationMatch ? notificationMatch[1].trim() : t;
+            if (notificationMatch) return notificationMatch[1].trim();
+            const crosspostMatch = t.match(/crossposted to\s+(.+?)(?:\.\s*\d+[smhdw]?|\.?$)/i);
+            if (crosspostMatch) return crosspostMatch[1].trim().toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+            if (/^[A-Z0-9 &'’/()_-]+$/.test(t) && /[A-Z]/.test(t) && t.length > 6) return t.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+            return t;
           };
           const badName = (text) => {
             const t = cleanName(text);
             if (t.length < 3 || t.length > 90) return true;
             if (/^\d+$/.test(t)) return true;
             if (/^(new|see all|join|joined|member|members|post|posts|comment|comments|notification|notifications)$/i.test(t)) return true;
-            if (/\b(left a comment|commented|reacted|shared a post|posted in|new post|see all|sponsored)\b/i.test(t)) return true;
+            if (/\b(left a comment|commented|reacted|shared a post|posted in|new post|see all|sponsored|crossposted|your post was|make progress|grow your audience|follow a few steps)\b/i.test(t)) return true;
+            if (/[.!?]\s+[A-Z0-9].*[.!?]/.test(t)) return true;
             return false;
           };
-          const slugToName = (slug) => decodeURIComponent(slug)
-            .replace(/[-_.]+/g, ' ')
-            .replace(/\b\w/g, c => c.toUpperCase())
-            .trim();
+          const slugToName = (slug) => {
+            const decoded = decodeURIComponent(slug || '').trim();
+            if (/^\d+$/.test(decoded)) return '';
+            return decoded
+              .replace(/[-_.]+/g, ' ')
+              .replace(/\b\w/g, c => c.toUpperCase())
+              .trim();
+          };
           const candidateTexts = (a) => {
             const out = [];
             const push = (v) => { v = cleanName(v); if (v && !out.includes(v)) out.push(v); };
-            push(a.getAttribute('aria-label'));
-            push(a.textContent);
             const container = a.closest('[role=article], [role=listitem], div');
+            push(a.getAttribute('aria-label'));
             const img = a.querySelector('img[alt]') || container?.querySelector('img[alt]');
             if (img) push(img.getAttribute('alt'));
             let el = a;
             for (let i = 0; i < 5 && el; i++, el = el.parentElement) {
               el.querySelectorAll('strong, h1, h2, h3, span[dir=auto], a[role=link] span').forEach(n => push(n.textContent));
             }
+            push(a.textContent);
             return out;
           };
 
@@ -1274,7 +1283,8 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null) {
             const slug = decodeURIComponent(match[1]);
             if (skipSlugs.has(slug)) return;
             if (found.has(slug)) return;
-            const name = candidateTexts(a).find(t => !badName(t)) || slugToName(slug) || slug;
+            const name = candidateTexts(a).find(t => !badName(t)) || slugToName(slug);
+            if (!name || badName(name)) return;
             found.set(slug, { name, url: `https://www.facebook.com/groups/${encodeURIComponent(slug)}/` });
           });
           return [...found.values()];
@@ -1377,36 +1387,45 @@ async function importFacebookGroups(identityMeta = null) {
               .replace(/\u00a0/g, ' ')
               .replace(/\s+/g, ' ')
               .replace(/^(Unread|Group:|Facebook group:)\s*/i, '')
-              .replace(/\bLast active\b.*$/i, '')
+              .replace(/Last active.*$/i, '')
               .replace(/\b\d+[smhdw]\b.*$/i, '')
               .trim();
             const notificationMatch = t.match(/\bin\s+(.+?):\s*["“]/i);
-            return notificationMatch ? notificationMatch[1].trim() : t;
+            if (notificationMatch) return notificationMatch[1].trim();
+            const crosspostMatch = t.match(/crossposted to\s+(.+?)(?:\.\s*\d+[smhdw]?|\.?$)/i);
+            if (crosspostMatch) return crosspostMatch[1].trim().toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+            if (/^[A-Z0-9 &'’/()_-]+$/.test(t) && /[A-Z]/.test(t) && t.length > 6) return t.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+            return t;
           };
           const badName = (text) => {
             const t = cleanName(text);
             if (t.length < 3 || t.length > 90) return true;
             if (/^\d+$/.test(t)) return true;
             if (/^(new|see all|join|joined|member|members|post|posts|comment|comments|notification|notifications)$/i.test(t)) return true;
-            if (/\b(left a comment|commented|reacted|shared a post|posted in|new post|see all|sponsored)\b/i.test(t)) return true;
+            if (/\b(left a comment|commented|reacted|shared a post|posted in|new post|see all|sponsored|crossposted|your post was|make progress|grow your audience|follow a few steps)\b/i.test(t)) return true;
+            if (/[.!?]\s+[A-Z0-9].*[.!?]/.test(t)) return true;
             return false;
           };
-          const slugToName = (slug) => decodeURIComponent(slug)
-            .replace(/[-_.]+/g, ' ')
-            .replace(/\b\w/g, c => c.toUpperCase())
-            .trim();
+          const slugToName = (slug) => {
+            const decoded = decodeURIComponent(slug || '').trim();
+            if (/^\d+$/.test(decoded)) return '';
+            return decoded
+              .replace(/[-_.]+/g, ' ')
+              .replace(/\b\w/g, c => c.toUpperCase())
+              .trim();
+          };
           const candidateTexts = (a) => {
             const out = [];
             const push = (v) => { v = cleanName(v); if (v && !out.includes(v)) out.push(v); };
-            push(a.getAttribute('aria-label'));
-            push(a.textContent);
             const container = a.closest('[role=article], [role=listitem], div');
+            push(a.getAttribute('aria-label'));
             const img = a.querySelector('img[alt]') || container?.querySelector('img[alt]');
             if (img) push(img.getAttribute('alt'));
             let el = a;
             for (let i = 0; i < 5 && el; i++, el = el.parentElement) {
               el.querySelectorAll('strong, h1, h2, h3, span[dir=auto], a[role=link] span').forEach(n => push(n.textContent));
             }
+            push(a.textContent);
             return out;
           };
 
@@ -1417,7 +1436,8 @@ async function importFacebookGroups(identityMeta = null) {
             const slug = decodeURIComponent(match[1]);
             if (skipSlugs.has(slug)) return;
             if (found.has(slug)) return;
-            const name = candidateTexts(a).find(t => !badName(t)) || slugToName(slug) || slug;
+            const name = candidateTexts(a).find(t => !badName(t)) || slugToName(slug);
+            if (!name || badName(name)) return;
             const cleanUrl = `https://www.facebook.com/groups/${encodeURIComponent(slug)}/`;
             found.set(slug, { name, url: cleanUrl });
           });
