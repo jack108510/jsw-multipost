@@ -1487,9 +1487,15 @@ function resultRow(x){
   const status=x.status || 'unknown';
   const warn=(x.warnings||[]).map(w=>typeof w==='string'?w:(w.message||w.type||JSON.stringify(w))).filter(Boolean);
   const evidence=x.post_url ? `<a href="${esc(x.post_url)}" target="_blank" style="color:var(--accent);">View post evidence</a>` : (x.evidence_found ? 'Evidence found in feed' : 'No permalink captured');
+  const identityBits = [
+    x.composer_identity_verified ? `Verified as ${x.identity_used || x.composer_identity || x.identity_name || 'selected identity'}` : null,
+    x.identity_switched ? 'switched profile' : null,
+    x.error_code === 'identity_not_verified' ? 'identity not verified' : null
+  ].filter(Boolean).join(' · ');
   return `<div class="result-row">
     <div class="result-top"><div class="result-name">${esc(name)}</div>${resultBadge(status,warn.length)}</div>
     <div class="result-meta">${evidence}${x.error?' · Error: '+esc(x.error):''}${x.reason?' · Reason: '+esc(x.reason):''}</div>
+    ${identityBits?`<div class="result-meta" style="margin-top:6px;">${esc(identityBits)}</div>`:''}
     ${warn.length?`<div class="result-meta" style="margin-top:6px;color:#facc15;">${warn.map(esc).join('<br>')}</div>`:''}
   </div>`;
 }

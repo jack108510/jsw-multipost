@@ -606,26 +606,70 @@
     return { switched: true, active_identity: active || expectedName };
   }
 
-  async function verifyComposerIdentity(expectedName) {
-    if (!expectedName) return { active_identity: currentIdentityName(), verified: true };
-    const main = document.querySelector('[role="main"]') || document.body;
-    const text = normalizeText(main.textContent || '').slice(0, 2000);
-    const profileHint = [...main.querySelectorAll('[aria-label], img[alt]')]
-      .map(el => el.getAttribute('aria-label') || el.getAttribute('alt') || '')
-      .find(v => identityMatches(v, expectedName));
+  function extractComposerIdentity(dialog) {
+    if (!dialog) return null;
+    const values = [];
+    const push = (value) => {
+      const cleaned = cleanIdentityName(value || '');
+      if (!cleaned || isForbiddenIdentityName(cleaned)) return;
+      if (/\b(post|publish|create a public post|write something|what's on your mind|add to your post|audience|public|group|more options)\b/i.test(cleaned)) return;
+      values.push(cleaned);
+    };
+
+    // Facebook group composer usually exposes the active identity near the top of the modal
+    // as text plus avatar alt/ARIA labels. Read only the dialog, never the wider feed.
+    [...dialog.querySelectorAll('[aria-label], img[alt], span[dir="auto"], strong, h2, h3')]
+      .filter(visible)
+      .slice(0, 80)
+      .forEach(el => {
+        push(el.getAttribute?.('aria-label'));
+        push(el.getAttribute?.('alt'));
+        push(el.innerText || el.textContent);
+      });
+
+    const raw = dialog.innerText || dialog.textContent || '';
+    raw.split('\n').map(cleanIdentityName).filter(Boolean).slice(0, 20).forEach(push);
+    return values[0] || null;
+  }
+
+  function verifyComposerIdentity(dialog, expectedName) {
     const active = currentIdentityName();
-    const verified = identityMatches(active, expectedName) || !!profileHint || text.toLowerCase().includes(expectedName.toLowerCase());
-    if (!verified) throw new Error(`Active Facebook identity is not confirmed as ${expectedName}. Current: ${active || 'unknown'}`);
-    return { active_identity: active || expectedName, verified };
+    const composerIdentity = extractComposerIdentity(dialog);
+    if (!expectedName) {
+      return {
+        active_identity: active || composerIdentity || null,
+        composer_identity: composerIdentity || null,
+        verified: true
+      };
+    }
+
+    const dialogText = normalizeText(dialog?.innerText || dialog?.textContent || '').toLowerCase();
+    const verified =
+      identityMatches(composerIdentity, expectedName) ||
+      dialogText.includes(cleanIdentityName(expectedName).toLowerCase());
+
+    if (!verified) {
+      const err = new Error(`Composer identity is not confirmed as ${expectedName}. Active: ${active || 'unknown'}; composer: ${composerIdentity || 'unknown'}`);
+      err.code = 'identity_not_verified';
+      err.identity_expected = expectedName;
+      err.identity_active = active || null;
+      err.composer_identity = composerIdentity || null;
+      throw err;
+    }
+
+    return {
+      active_identity: active || composerIdentity || expectedName,
+      composer_identity: composerIdentity || expectedName,
+      verified: true
+    };
   }
 
   // ============ MAIN ============
   async function postToGroup(message, imageUrl, identityName) {
     log('=== START POST ===');
 
-    // 0. Verify/switch Facebook posting identity before opening composer
+    // 0. Switch Facebook posting identity before opening the group composer.
     const identitySwitch = await switchToIdentity(identityName);
-    const identityCheck = await verifyComposerIdentity(identityName);
 
     // 1. Find trigger
     const trigger = await findTrigger();
@@ -637,8 +681,12 @@
     // 3. Wait for dialog to appear
     const dialog = await findDialog();
 
-    // 4. Find textbox inside dialog
+    // 4. Verify the actual composer identity before typing/submitting.
+    // This is the hard safety gate that prevents accidental cross-Page posts.
     await sleep(500);
+    const identityCheck = verifyComposerIdentity(dialog, identityName);
+
+    // 5. Find textbox inside dialog
     const textbox = findTextboxInDialog(dialog);
     if (!textbox) throw new Error('No textbox found in composer dialog');
 
@@ -689,7 +737,11 @@
       matchedText: evidence.matchedText || null,
       pageUrl: location.href,
       identityName: identityName || null,
-      activeIdentity: identityCheck?.active_identity || identitySwitch?.active_identity || null
+      activeIdentity: identityCheck?.active_identity || identitySwitch?.active_identity || null,
+      identityUsed: identityCheck?.composer_identity || identityCheck?.active_identity || identitySwitch?.active_identity || null,
+      composerIdentity: identityCheck?.composer_identity || null,
+      composerIdentityVerified: !!identityCheck?.verified,
+      identitySwitched: !!identitySwitch?.switched
     };
   }
 
@@ -746,7 +798,15 @@
         sendResponse({ success: true, ...result });
       } catch (error) {
         log('ERROR:', error.message);
-        sendResponse({ success: false, error: error.message });
+        sendResponse({
+          success: false,
+          error: error.message,
+          error_code: error.code || null,
+          identity_expected: error.identity_expected || msg.identityName || msg.identity_name || null,
+          identity_active: error.identity_active || null,
+          composer_identity: error.composer_identity || null,
+          composer_identity_verified: false
+        });
       }
     })();
 

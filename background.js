@@ -755,8 +755,9 @@ async function executeDashJob(job) {
       }
     }
 
+    let tab = null;
     try {
-      const tab = await chrome.tabs.create({ url: groupUrl, active: true });
+      tab = await chrome.tabs.create({ url: groupUrl, active: true });
       await sleep(5000);
 
       const response = await chrome.tabs.sendMessage(tab.id, {
@@ -775,8 +776,13 @@ async function executeDashJob(job) {
         perGroupResults.push({
           group_url: groupUrl,
           group_name: target.name || target.group_name || null,
-          identity_name: identityName || response?.activeIdentity || null,
+          identity_name: identityName || response?.activeIdentity || response?.identityUsed || null,
           identity_key: identityKey || null,
+          identity_used: response?.identityUsed || response?.composerIdentity || response?.activeIdentity || identityName || null,
+          active_identity: response?.activeIdentity || null,
+          composer_identity: response?.composerIdentity || null,
+          composer_identity_verified: response?.composerIdentityVerified === true,
+          identity_switched: response?.identitySwitched === true,
           status: 'posted',
           post_url: postUrl,
           evidence_found: evidenceFound,
@@ -817,8 +823,13 @@ async function executeDashJob(job) {
         perGroupResults.push({
           group_url: groupUrl,
           group_name: target.name || target.group_name || null,
-          identity_name: identityName || null,
+          identity_name: identityName || response?.identity_active || null,
           identity_key: identityKey || null,
+          identity_used: response?.composer_identity || response?.identity_active || null,
+          active_identity: response?.identity_active || null,
+          composer_identity: response?.composer_identity || null,
+          composer_identity_verified: response?.composer_identity_verified === true,
+          error_code: response?.error_code || null,
           status: 'failed',
           error: lastError,
           warnings: cooldownWarning ? [cooldownWarning] : [],
@@ -830,14 +841,22 @@ async function executeDashJob(job) {
       }
 
       await sleep(1000);
-      await chrome.tabs.remove(tab.id);
+      if (tab) {
+        await chrome.tabs.remove(tab.id);
+        tab = null;
+      }
     } catch (e) {
       lastError = e.message;
       perGroupResults.push({
         group_url: groupUrl,
         group_name: target.name || target.group_name || null,
-        identity_name: identityName || null,
+        identity_name: identityName || e.identity_active || null,
         identity_key: identityKey || null,
+        identity_used: e.composer_identity || e.identity_active || null,
+        active_identity: e.identity_active || null,
+        composer_identity: e.composer_identity || null,
+        composer_identity_verified: false,
+        error_code: e.code || null,
         status: 'failed',
         error: e.message,
         warnings: cooldownWarning ? [cooldownWarning] : [],
@@ -846,6 +865,10 @@ async function executeDashJob(job) {
       });
       extLog('error', `Error on group ${i + 1} (${groupUrl}): ${e.message}`);
       broadcastDashStatus(`Error on group ${i + 1}`, '#e94560');
+      if (tab) {
+        try { await chrome.tabs.remove(tab.id); } catch (_) {}
+        tab = null;
+      }
     }
 
     if (i < groupUrls.length - 1) {
