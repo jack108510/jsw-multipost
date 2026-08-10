@@ -672,15 +672,24 @@ input[type="range"]::-webkit-slider-thumb{
           </div>
           <div>
             <div class="card">
-              <h3>Group Finder</h3>
-              <div class="desc">Describe your niche and get FB group search links.</div>
-              <div class="finder-input-row">
-                <input type="text" id="finderInput" placeholder="e.g. I sell yoga mats and meditation courses" style="flex:1;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;">
+              <h3>Safe Group Finder</h3>
+              <div class="desc">Find and score candidate groups for the selected channel. Amplr saves them as a review queue — it does not auto-join blindly.</div>
+              <div class="field">
+                <label>Finder channel</label>
+                <select id="finderIdentitySelect" onchange="setSelectedIdentity(this.value); renderFinderCandidates();" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;"></select>
+              </div>
+              <div class="field">
+                <label>Audience / niche</label>
+                <textarea id="finderInput" rows="3" placeholder="e.g. Wildrose: Alberta small businesses, contractors, vet clinics, local service businesses" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;resize:vertical;"></textarea>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
                 <button class="btn btn-primary" id="finderBtn" onclick="runFinder()">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                  Find
+                  Generate Candidates
                 </button>
+                <button class="btn btn-ghost" onclick="seedFinderFromChannel()">Use Channel Profile</button>
               </div>
+              <div class="result-meta" style="margin-bottom:10px;">Workflow: candidate → safe to request → requested → joined. Keep unsafe or off-niche groups out of posting.</div>
               <div id="finderResults"></div>
             </div>
           </div>
@@ -828,6 +837,7 @@ const SUPABASE_KEY = 'sb_publishable_1TNu5hqotJ7GGQXfjliivQ_ttK51EAA';
 let sb, session, user, authMode='signin';
 let activeJobPoller=null;
 let groupsCache=[];
+let groupCandidatesCache=[];
 let postingIdentitiesCache=[];
 let settingsCache={};
 let rewriteHistory=[];
@@ -887,7 +897,7 @@ async function onAuthSuccess(s){
   // Check if tables exist
   await checkSchema();
   // Load everything
-  await Promise.all([loadSettings(), loadGroups(), loadPostingIdentities(), loadOverview(), checkExtensionStatus()]);
+  await Promise.all([loadSettings(), loadGroups(), loadGroupCandidates(), loadPostingIdentities(), loadOverview(), checkExtensionStatus()]);
   navigate(location.hash.slice(1) && PAGE_TITLES[location.hash.slice(1)] ? location.hash.slice(1) : 'compose');
   // Start global job watcher
   startGlobalJobWatcher();
@@ -932,7 +942,7 @@ function navigate(route){
   document.getElementById('pageTitle').innerHTML = PAGE_TITLES[route].replace(/(\w+)$/, '<em class="serif">$1</em>');
 
   if (route==='compose') renderComposeGroups();
-  if (route==='groups') { renderIdentitySelectors(); renderGroupsList(); }
+  if (route==='groups') { renderIdentitySelectors(); renderGroupsList(); renderFinderCandidates(); }
   if (route==='schedule') renderSchedules();
   if (route==='history') loadHistory();
   if (route==='settings') renderPostingIdentities();
@@ -999,6 +1009,7 @@ function setSelectedIdentity(key){
   if (key) localStorage.setItem('amplr_selected_identity', key);
   renderIdentitySelectors();
   renderGroupsList();
+  renderFinderCandidates();
   renderComposeGroups();
   updateRiskPanels();
 }
@@ -1020,7 +1031,7 @@ function renderIdentitySelectors(){
   const html = postingIdentitiesCache.length
     ? postingIdentitiesCache.map(identityOptionHtml).join('')
     : '<option value="">No identities synced yet</option>';
-  ['composeIdentitySelect','groupIdentitySelect'].forEach(id=>{
+  ['composeIdentitySelect','groupIdentitySelect','finderIdentitySelect'].forEach(id=>{
     const el=document.getElementById(id); if (!el) return;
     el.innerHTML=html;
     el.value=getSelectedIdentityKey();
@@ -1638,69 +1649,187 @@ function renderExtPairingInfo(){
 }
 
 /* ============================================================
-   GROUP FINDER (ported from index.html)
+   SAFE GROUP FINDER + JOIN QUEUE
    ============================================================ */
+const GROUP_FINDER_STATUS = {
+  candidate:'Candidate',
+  safe:'Safe to request',
+  requested:'Requested',
+  joined:'Joined',
+  rejected:'Rejected',
+  unsafe:'Unsafe / avoid'
+};
+const SAFE_JOIN_STATUSES=['candidate','safe','requested','joined','rejected','unsafe'];
+const CHANNEL_PROFILE_PRESETS=[
+  {match:['wildrose','wildrose automations','automation','website'], text:'Alberta small business owners, Calgary Edmonton contractors, service businesses, vet clinics, entrepreneurs who need simple websites and automations. Avoid spam promo groups and broad AI builder groups.'},
+  {match:['vet inc','vetinc','veterinary','vet clinic'], text:'Veterinary clinic owners, practice managers, veterinarians, veterinary nurses, pet business owners in Canada and USA. Avoid general pet-owner groups unless the message is consumer-facing.'},
+  {match:['empty slot','slot'], text:'Veterinary clinics, practice managers, animal hospitals, pet care businesses, local veterinary staffing and appointment availability communities.'},
+  {match:['sales sparring','sales'], text:'Small business owners, sales professionals, founders, entrepreneurs, service providers, Canadian business networking groups.'}
+];
+const FINDER_BASE_SEARCHES=[
+  'small business owners','business networking','entrepreneurs','local business owners','business support','founders','service business owners','marketing for small business'
+];
+const FINDER_LOCATION_TERMS=['Canada','Alberta','Calgary','Edmonton','British Columbia','Saskatchewan','Ontario'];
+const FINDER_AVOID_TERMS=['free ads','post your ads','mlm','crypto','forex','giveaway','spam','dropshipping only','buy sell trade'];
+const FINDER_SAFE_TERMS=['business owners','networking','entrepreneurs','professionals','clinic owners','practice managers','contractors','local businesses','community'];
 const CATEGORY_MAP = {
   fitness:{keywords:['fitness','gym','workout','exercise','yoga','pilates','crossfit','running','marathon','bodybuilding','weightlifting','cardio','zumba','barre','personal trainer','health coach'],searches:['fitness business','fitness professionals','gym owners','yoga business','personal training business','health and fitness entrepreneurs','fitness marketing']},
   yoga:{keywords:['yoga','meditation','mindfulness','wellness','yogi','asana','chakra','spiritual'],searches:['yoga teachers','yoga studio owners','yoga business','wellness entrepreneurs','meditation business','holistic health business']},
-  nutrition:{keywords:['nutrition','diet','meal prep','healthy eating','dietitian','meal plan','supplements','vitamins','protein','organic food','keto','vegan','plant based'],searches:['nutrition business','meal prep business','health food business','dietitian entrepreneurs','supplement business','organic food business']},
   marketing:{keywords:['marketing','seo','advertising','social media','ppc','google ads','facebook ads','content marketing','email marketing','digital marketing','agency','branding','copywriting'],searches:['digital marketing agency owners','social media marketing business','SEO professionals','marketing agency growth','freelance marketers','digital marketing entrepreneurs','advertising agency owners']},
-  ecommerce:{keywords:['ecommerce','e-commerce','shopify','dropshipping','amazon fba','online store','etsy','ebay','product sourcing','inventory','fulfillment'],searches:['ecommerce business owners','shopify business owners','amazon fba business','dropshipping business','etsy business','ecommerce entrepreneurs','online retail business']},
-  saas:{keywords:['saas','software','startup','tech startup','app development','web app','subscription','b2b','enterprise','platform','crm','erp'],searches:['SaaS founders','software startup business','B2B software business','tech startup entrepreneurs','indie hackers','micro saas business','startup founders']},
   consulting:{keywords:['consulting','coach','mentoring','advisory','freelance','contractor','professional services','b2b services'],searches:['business coaches','consulting business owners','freelance business owners','coaching business growth','professional services business','b2b consulting']},
-  realestate:{keywords:['real estate','realtor','property','housing','rental','airbnb','flipping','mortgage','investment property'],searches:['real estate business owners','realtor business networking','airbnb business','real estate investors network','property management business']},
-  finance:{keywords:['finance','accounting','bookkeeping','tax','financial planning','investing','crypto','forex','trading','fintech'],searches:['accounting business owners','bookkeeping business','financial advisor business','crypto business','fintech startup business','tax business owners']},
-  fashion:{keywords:['fashion','clothing','apparel','streetwear','boutique','tshirt','accessories','jewelry','handmade','crafts','etsy seller','artisan'],searches:['fashion business owners','clothing business owners','jewelry business','handmade business owners','etsy business community','boutique business owners','accessories business']},
-  art:{keywords:['art','painting','illustration','design','graphic design','creative','photography','photographer','fine art','print'],searches:['art business owners','creative business owners','photography business owners','etsy artists','selling art online','graphic design business']},
-  beauty:{keywords:['beauty','cosmetics','skincare','makeup','salon','spa','hair','nails','barber','beauty products'],searches:['beauty business owners','salon business owners','skincare business','cosmetics business','spa business owners','beauty entrepreneurs']},
-  food:{keywords:['food','restaurant','cafe','coffee','bakery','catering','food truck','baking','cooking','recipe','artisan food','craft food'],searches:['restaurant business owners','food business owners','coffee shop business','food truck business','catering business owners','bakery business owners']},
-  hospitality:{keywords:['hotel','hospitality','tourism','travel','event planning','catering','venue','wedding'],searches:['hotel business owners','event planning business','tourism business owners','wedding business networking','hospitality business owners']},
-  home:{keywords:['home','furniture','decor','interior design','garden','landscaping','renovation','construction','contractor','cleaning'],searches:['interior design business','home renovation business','landscaping business owners','construction business owners','cleaning business owners','furniture business']},
-  parenting:{keywords:['baby','kids','children','parenting','mom','toddler','pregnancy','family','childcare','toys','kids clothing'],searches:['mom business owners','parenting business','kids product business','baby product business','family business networking']},
   pets:{keywords:['pet','dog','cat','animal','veterinary','pet food','pet supplies','grooming'],searches:['pet business owners','dog business owners','pet supply business','veterinary business','pet grooming business']},
-  education:{keywords:['education','course','training','teaching','tutoring','online course','ebook','workshop','certification','learning'],searches:['online course business owners','education business owners','training business owners','tutoring business','ebook publishing business']},
-  automotive:{keywords:['car','auto','automotive','vehicle','mechanic','car parts','detailing','dealership'],searches:['auto repair business owners','car dealership business','auto detailing business','automotive business networking']},
-  outdoor:{keywords:['outdoor','camping','hiking','fishing','hunting','skiing','biking','cycling','climbing','adventure'],searches:['outdoor business owners','camping business','cycling business owners','adventure tourism business']},
-  tech:{keywords:['tech','technology','app','software','hardware','gadget','electronics','iot','ai','blockchain','gaming'],searches:['tech startup founders','app development business','gaming business owners','hardware startup business','AI business networking']}
+  tech:{keywords:['tech','technology','app','software','hardware','gadget','electronics','iot','ai','automation','blockchain','gaming'],searches:['tech startup founders','app development business','SaaS founders','AI business networking','small business automation']},
+  home:{keywords:['home','furniture','decor','interior design','garden','landscaping','renovation','construction','contractor','cleaning'],searches:['home renovation business','landscaping business owners','construction business owners','cleaning business owners','contractor business networking']},
+  realestate:{keywords:['real estate','realtor','property','housing','rental','airbnb','mortgage'],searches:['real estate business owners','realtor business networking','real estate investors network','property management business']}
 };
 
-function matchCategories(text){
-  const scores={};
-  Object.entries(CATEGORY_MAP).forEach(([name,cat])=>{
-    let score=0;
-    cat.keywords.forEach(kw=>{ if(text.includes(kw)) score += kw.length>6?3:2; });
-    if(score>0) scores[name]=score;
-  });
-  return Object.entries(scores).map(([name,score])=>({name,score,searches:CATEGORY_MAP[name].searches})).sort((a,b)=>b.score-a.score).slice(0,4);
+function finderStorageKey(){ return 'group_finder_candidates'; }
+async function loadGroupCandidates(){
+  if (!sb || !user) return;
+  const { data, error } = await sb.from('amplr_data').select('value').eq('user_id',user.id).eq('key',finderStorageKey()).maybeSingle();
+  if (error && !isNoTable(error)) { console.warn('candidate load failed', error); return; }
+  const raw=data?.value?.candidates || data?.value || [];
+  groupCandidatesCache = Array.isArray(raw) ? raw.filter(c=>c && c.identity_key) : [];
 }
-
-function runFinder(){
-  const input = document.getElementById('finderInput').value.trim().toLowerCase();
-  const el = document.getElementById('finderResults');
-  if (!input || input.length<4) { toast('Describe your niche in more detail','error'); return; }
-  const matched = matchCategories(input);
-  if (!matched.length) {
-    el.innerHTML = '<div style="color:var(--text-3);font-size:12px;padding:12px;">No matches. Try describing your product, audience, or industry.</div>';
-    return;
-  }
-  const groups=[];
-  matched.forEach(cat=>{
-    cat.searches.forEach(s=>{
-      groups.push({
-        name:s.replace(/\b\w/g,c=>c.toUpperCase()),
-        category:cat.name,
-        url:'https://www.facebook.com/search/groups/?q='+encodeURIComponent(s)
-      });
+async function saveGroupCandidates(){
+  if (!sb || !user) return;
+  const payload={ candidates:groupCandidatesCache, updated_at:new Date().toISOString() };
+  const { error } = await sb.from('amplr_data').upsert({ user_id:user.id, key:finderStorageKey(), value:payload }, { onConflict:'user_id,key' });
+  if (error) throw error;
+}
+function candidatesForSelectedIdentity(){ return groupCandidatesCache.filter(c => c.identity_key === currentIdentityKey()); }
+function normalizeCandidateKey(text){ return (text||'').toLowerCase().replace(/https?:\/\/(www\.)?facebook\.com\/search\/groups\/\?q=/,'').replace(/[^a-z0-9]+/g,' ').trim(); }
+function candidateStatusLabel(status){ return GROUP_FINDER_STATUS[status] || GROUP_FINDER_STATUS.candidate; }
+function seedFinderFromChannel(){
+  const identity=getSelectedIdentity();
+  const name=(identity?.name || '').toLowerCase();
+  const preset=CHANNEL_PROFILE_PRESETS.find(p=>p.match.some(m=>name.includes(m)));
+  const input=document.getElementById('finderInput');
+  if (!input) return;
+  input.value=preset?.text || `${identity?.name || 'This channel'} target audience, local business owners, relevant professional communities, location, industry, customer type. Avoid spam and promo-only groups.`;
+}
+function deriveFinderTerms(text, identity){
+  const clean=(text || '').toLowerCase();
+  const identityName=(identity?.name || '').toLowerCase();
+  const terms=[];
+  const add=t=>{ t=(t||'').replace(/\s+/g,' ').trim(); if(t.length>2 && !terms.includes(t)) terms.push(t); };
+  const preset=CHANNEL_PROFILE_PRESETS.find(p=>p.match.some(m=>identityName.includes(m) || clean.includes(m)));
+  if (preset) preset.text.split(/[,.]/).forEach(part=>add(part));
+  text.split(/[,;\n]/).forEach(part=>add(part));
+  Object.entries(CATEGORY_MAP).forEach(([name,cat])=>{
+    let hit=0; cat.keywords.forEach(kw=>{ if(clean.includes(kw)) hit++; });
+    if(hit) cat.searches.slice(0,5).forEach(add);
+  });
+  FINDER_BASE_SEARCHES.forEach(add);
+  if (identityName.includes('wildrose')) ['Alberta small business owners','Calgary business owners','Edmonton business networking','Canadian entrepreneurs','contractors Alberta','veterinary clinic owners Canada','local service business owners'].forEach(add);
+  if (identityName.includes('vet')) ['veterinary practice management','veterinarians Canada','vet clinic owners','veterinary nurses','pet business owners Canada'].forEach(add);
+  return terms.slice(0,30);
+}
+function scoreFinderCandidate(query, identity){
+  const q=query.toLowerCase();
+  const identityName=(identity?.name || '').toLowerCase();
+  let score=50;
+  const reasons=[];
+  FINDER_SAFE_TERMS.forEach(t=>{ if(q.includes(t)) { score+=8; reasons.push(`buyer/pro audience: ${t}`); } });
+  FINDER_LOCATION_TERMS.forEach(t=>{ if(q.includes(t.toLowerCase())) { score+=6; reasons.push(`location fit: ${t}`); } });
+  if(identityName.includes('wildrose') && /(small business|contractor|calgary|edmonton|alberta|entrepreneur|local business|service business|vet clinic)/.test(q)){ score+=15; reasons.push('Wildrose buyer fit'); }
+  if(identityName.includes('vet') && /(vet|veterinary|clinic|practice|pet business|animal)/.test(q)){ score+=15; reasons.push('Vet Inc audience fit'); }
+  FINDER_AVOID_TERMS.forEach(t=>{ if(q.includes(t)) { score-=25; reasons.push(`risk term: ${t}`); } });
+  if(/\b(ai|automation|developer|coding)\b/.test(q) && identityName.includes('wildrose')) { score-=8; reasons.push('builder-heavy, not buyer-heavy'); }
+  score=Math.max(0, Math.min(100, score));
+  const status=score>=75?'safe':score>=50?'candidate':'unsafe';
+  return { score, status, reasons:reasons.slice(0,4) };
+}
+function makeFinderCandidate(query, identity){
+  const scoring=scoreFinderCandidate(query, identity);
+  const googleQuery=`site:facebook.com/groups ${query}`;
+  return {
+    id:'cand_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,8),
+    identity_name:identity?.name || null,
+    identity_key:identityKey(identity) || legacyIdentityKey(),
+    identity_type:identity?.type || null,
+    query,
+    title:query.replace(/\b\w/g,c=>c.toUpperCase()),
+    facebook_search_url:'https://www.facebook.com/search/groups/?q='+encodeURIComponent(query),
+    web_search_url:'https://www.google.com/search?q='+encodeURIComponent(googleQuery),
+    status:scoring.status,
+    score:scoring.score,
+    reasons:scoring.reasons,
+    notes:'Open search, inspect group rules/activity, then move to requested/joined if safe.',
+    created_at:new Date().toISOString(),
+    updated_at:new Date().toISOString()
+  };
+}
+async function runFinder(){
+  const identity=getSelectedIdentity();
+  if (!identity) { toast('Sync/select a posting identity first','error'); return; }
+  const inputEl=document.getElementById('finderInput');
+  const current=(inputEl?.value || '').trim();
+  if (!current || current.length<4) seedFinderFromChannel();
+  const terms=deriveFinderTerms((inputEl?.value || '').trim(), identity);
+  if (!terms.length) { toast('Describe the audience/niche first','error'); return; }
+  const existingKeys=new Set(groupCandidatesCache.filter(c=>c.identity_key===identityKey(identity)).map(c=>normalizeCandidateKey(c.query || c.title)));
+  const newCandidates=[];
+  terms.forEach(term=>{
+    const variants=[term, ...FINDER_LOCATION_TERMS.slice(0,4).map(loc=>`${loc} ${term}`)];
+    variants.forEach(v=>{
+      const key=normalizeCandidateKey(v);
+      if (newCandidates.length>=24 || existingKeys.has(key)) return;
+      existingKeys.add(key);
+      newCandidates.push(makeFinderCandidate(v, identity));
     });
   });
-  const seen=new Set();
-  const unique = groups.filter(g=>!seen.has(g.name)&&(seen.add(g.name),true)).slice(0,12);
-  el.innerHTML = unique.map(g=>`
-    <a class="finder-result" href="${g.url}" target="_blank">
-      <div class="job-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div>
-      <div class="job-body"><div class="job-msg">${esc(g.name)}</div><div class="cat">${esc(g.category)}</div></div>
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-    </a>`).join('');
+  groupCandidatesCache=[...newCandidates, ...groupCandidatesCache].slice(0,300);
+  try { await saveGroupCandidates(); } catch(e) { toast('Could not save candidates: '+e.message,'error'); return; }
+  renderFinderCandidates();
+  toast(`Generated ${newCandidates.length} candidates for ${identity.name}`,'success');
+}
+async function updateCandidateStatus(id, status){
+  if (!SAFE_JOIN_STATUSES.includes(status)) return;
+  const c=groupCandidatesCache.find(x=>x.id===id);
+  if (!c) return;
+  c.status=status; c.updated_at=new Date().toISOString();
+  try { await saveGroupCandidates(); renderFinderCandidates(); }
+  catch(e){ toast('Could not update candidate: '+e.message,'error'); }
+}
+async function removeCandidate(id){
+  groupCandidatesCache=groupCandidatesCache.filter(c=>c.id!==id);
+  try { await saveGroupCandidates(); renderFinderCandidates(); toast('Candidate removed','info'); }
+  catch(e){ toast('Could not remove candidate: '+e.message,'error'); }
+}
+function renderFinderCandidates(){
+  const el=document.getElementById('finderResults');
+  if (!el) return;
+  const candidates=candidatesForSelectedIdentity().sort((a,b)=>(b.score||0)-(a.score||0) || String(b.updated_at).localeCompare(String(a.updated_at)));
+  const identity=getSelectedIdentity();
+  if (!identity) { el.innerHTML=emptyState('No channel selected','Sync posting identities, then generate group candidates.'); return; }
+  if (!candidates.length) {
+    el.innerHTML=emptyState(`No candidates for ${identity.name}`,'Use the channel profile, then generate candidates. Review search results manually before requesting to join.');
+    return;
+  }
+  const counts=SAFE_JOIN_STATUSES.map(s=>`${candidateStatusLabel(s)}: ${candidates.filter(c=>c.status===s).length}`).join(' · ');
+  el.innerHTML=`<div class="result-meta" style="margin-bottom:10px;">${esc(counts)}</div>` + candidates.map(c=>{
+    const scoreColor=(c.score||0)>=75?'#4ecca3':(c.score||0)>=50?'#facc15':'#ef4444';
+    const reasons=(c.reasons||[]).map(esc).join(' · ') || 'Needs manual review';
+    return `<div class="job" style="display:block;">
+      <div style="display:flex;gap:10px;align-items:flex-start;">
+        <div class="job-icon" style="color:${scoreColor};font-weight:700;">${Math.round(c.score||0)}</div>
+        <div class="job-body">
+          <div class="job-msg">${esc(c.title || c.query)} <span class="warning-chip">${esc(candidateStatusLabel(c.status))}</span></div>
+          <div class="job-meta">${reasons}</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+            <a class="btn btn-ghost" style="padding:6px 10px;text-decoration:none;" href="${esc(c.facebook_search_url)}" target="_blank">Facebook search</a>
+            <a class="btn btn-ghost" style="padding:6px 10px;text-decoration:none;" href="${esc(c.web_search_url)}" target="_blank">Web search</a>
+            <button class="btn btn-ghost" style="padding:6px 10px;" onclick="updateCandidateStatus('${c.id}','safe')">Safe</button>
+            <button class="btn btn-ghost" style="padding:6px 10px;" onclick="updateCandidateStatus('${c.id}','requested')">Requested</button>
+            <button class="btn btn-primary" style="padding:6px 10px;" onclick="updateCandidateStatus('${c.id}','joined')">Joined</button>
+            <button class="btn btn-ghost" style="padding:6px 10px;" onclick="updateCandidateStatus('${c.id}','unsafe')">Unsafe</button>
+            <button class="btn btn-ghost" style="padding:6px 10px;" onclick="removeCandidate('${c.id}')">Remove</button>
+          </div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 /* ============================================================
