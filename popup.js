@@ -207,12 +207,12 @@ function markStep(step, label) {
   checkOnboardComplete();
 }
 
-// Optional: Background apps setting. Chrome does not expose this preference to
-// extensions, so we only open a settings search and do not fake a verified state.
+// Optional: open the real Amplr extension details page. The old Chrome Settings
+// search for "background apps" often lands on a no-results screen in current Chrome.
 function openBackgroundSetting() {
-  chrome.tabs.create({ url: 'chrome://settings/?search=continue%20running%20background%20apps' });
+  chrome.tabs.create({ url: `chrome://extensions/?id=${chrome.runtime.id}` });
   const status = document.getElementById('onboardStatus');
-  if (status) status.textContent = 'Chrome does not let extensions verify this setting. Facebook login is the only required setup step.';
+  if (status) status.textContent = 'Opened Amplr extension details. Use Reload there if Chrome is running an old worker.';
 }
 
 // Step 2: Facebook login check
