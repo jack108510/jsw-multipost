@@ -292,38 +292,77 @@
     return false;
   }
 
+  function isForbiddenIdentityName(name) {
+    return /^(see all profiles?|settings(?: & privacy)?|help(?: & support)?|report a problem|give feedback|meta verified|meta business suite|display & accessibility|privacy|terms|advertising|ad choices|cookies|more|log out)$/i.test(cleanIdentityName(name || ''));
+  }
+
+  function identityUrlAllowed(url) {
+    if (!url) return true;
+    try {
+      const u = new URL(url, location.href);
+      if (!/facebook\.com$/i.test(u.hostname.replace(/^www\./, ''))) return false;
+      return !/(\/settings|\/help|\/privacy|\/policies|\/business|\/ads|\/ad_|\/groups\/|\/marketplace|\/events)/i.test(u.pathname);
+    } catch (_) { return true; }
+  }
+
+  function extractIdentityName(el, label='') {
+    const rawLabel = normalizeText(label || '');
+    const switchMatch = rawLabel.match(/^(?:Switch to|Continue as|Use Facebook as)\s+(.+?)(?:\s+(?:profile|page))?$/i);
+    if (switchMatch) return switchMatch[1];
+
+    const imgAlt = el.querySelector?.('img[alt]')?.getAttribute('alt') || el.closest?.('div')?.querySelector?.('img[alt]')?.getAttribute('alt') || '';
+    const cleanAlt = cleanIdentityName(imgAlt);
+    if (cleanAlt && !isForbiddenIdentityName(cleanAlt) && !/^(profile picture|photo)$/i.test(cleanAlt)) return cleanAlt;
+
+    const lines = (el.innerText || el.textContent || '')
+      .split('\n')
+      .map(cleanIdentityName)
+      .filter(Boolean)
+      .filter(line => !/^facebook identity$/i.test(line))
+      .filter(line => !/^https?:\/\//i.test(line))
+      .filter(line => !isForbiddenIdentityName(line));
+    return lines[0] || cleanIdentityName(rawLabel);
+  }
+
   function scrapeIdentityMenu() {
     const found = new Map();
     const add = (name, extra={}) => {
       name = cleanIdentityName(name);
-      if (!name || name.length < 2 || /^(see all|settings|help|log out|give feedback|meta verified)$/i.test(name)) return;
-      const key = (extra.url || name).toLowerCase();
+      if (!name || name.length < 2 || isForbiddenIdentityName(name)) return;
+      if (/https?:\/\//i.test(name)) return;
+      if (!identityUrlAllowed(extra.url)) return;
+      const key = name.toLowerCase();
       if (!found.has(key)) found.set(key, {
         id: key,
         name,
-        type: extra.type || (/page/i.test(extra.label || '') ? 'page' : 'facebook identity'),
+        type: extra.type || (/page|business/i.test(extra.label || '') ? 'page' : 'facebook identity'),
         url: extra.url || null,
         avatar_url: extra.avatar_url || null,
         is_active: !!extra.is_active
       });
     };
 
-    const menuRoots = [...document.querySelectorAll('[role="dialog"], [role="menu"], [aria-label*="Account"], body')];
+    const menuRoots = [...document.querySelectorAll('[role="dialog"], [role="menu"], [aria-label*="Account"], [aria-label*="profile"]')];
     const root = menuRoots.find(r => /Switch to|Continue as|See all profiles|Your profile|Vet Inc|Empty Slot/i.test(r.textContent || '')) || document.body;
+    const candidates = [...root.querySelectorAll('[role="button"], a[href], [aria-label]')].filter(visible);
 
-    root.querySelectorAll('[aria-label], [role="button"], a[href], span[dir="auto"]').forEach(el => {
-      const label = el.getAttribute('aria-label') || el.textContent || '';
-      if (!/Switch to|Continue as|Use Facebook as/i.test(label) && el.tagName !== 'A' && el.getAttribute('role') !== 'button') return;
-      let name = label;
-      if (!/Switch to|Continue as|Use Facebook as/i.test(label)) {
-        const imgAlt = el.querySelector?.('img[alt]')?.getAttribute('alt') || el.closest?.('div')?.querySelector?.('img[alt]')?.getAttribute('alt');
-        const text = normalizeText(el.textContent || '');
-        name = imgAlt || text;
-      }
+    for (const el of candidates) {
+      const label = el.getAttribute('aria-label') || '';
+      const text = normalizeText(el.innerText || el.textContent || '');
+      const combined = normalizeText(`${label} ${text}`);
+      if (/^See all profiles/i.test(combined)) break;
+      if (isForbiddenIdentityName(combined)) continue;
+
+      const hasSwitcherVerb = /Switch to|Continue as|Use Facebook as/i.test(combined);
+      const hasAvatar = !!(el.querySelector?.('img[src]') || el.closest?.('div')?.querySelector?.('img[src]'));
+      const looksLikeIdentityRow = hasSwitcherVerb || (hasAvatar && /facebook identity|profile|page/i.test(combined));
+      if (!looksLikeIdentityRow) continue;
+
+      const name = extractIdentityName(el, label || text);
       const img = el.querySelector?.('img[src]') || el.closest?.('div')?.querySelector?.('img[src]');
       const url = el.href || el.closest?.('a[href]')?.href || null;
-      add(name, { label, url, avatar_url: img?.src || null, type: /Page|business/i.test(label) ? 'page' : undefined });
-    });
+      add(name, { label: combined, url, avatar_url: img?.src || null, type: /page|business/i.test(combined) ? 'page' : undefined });
+    }
 
     const active = currentIdentityName();
     if (active) add(active, { is_active: true });
