@@ -946,6 +946,7 @@ window.addEventListener('hashchange', ()=>{
    POSTING IDENTITIES
    ============================================================ */
 function identityKey(i){ return i?.id || i?.url || i?.name || ''; }
+function legacyIdentityKey(){ return '__legacy__'; }
 function getSelectedIdentityKey(){
   return localStorage.getItem('amplr_selected_identity') || identityKey(postingIdentitiesCache[0]) || '';
 }
@@ -953,9 +954,22 @@ function getSelectedIdentity(){
   const key=getSelectedIdentityKey();
   return postingIdentitiesCache.find(i=>identityKey(i)===key) || postingIdentitiesCache[0] || null;
 }
+function currentIdentityKey(){ return identityKey(getSelectedIdentity()) || legacyIdentityKey(); }
+function currentIdentityName(){ return getSelectedIdentity()?.name || null; }
+function currentIdentityType(){ return getSelectedIdentity()?.type || null; }
+function groupMatchesSelectedIdentity(g){
+  const selectedKey=currentIdentityKey();
+  const groupKey=g?.identity_key || legacyIdentityKey();
+  return groupKey === selectedKey;
+}
+function groupsForSelectedIdentity(){ return groupsCache.filter(groupMatchesSelectedIdentity); }
+function identityLabelForGroup(g){ return g?.identity_name || (g?.identity_key === legacyIdentityKey() ? 'Legacy / unscoped' : null); }
 function setSelectedIdentity(key){
   if (key) localStorage.setItem('amplr_selected_identity', key);
   renderIdentitySelectors();
+  renderGroupsList();
+  renderComposeGroups();
+  updateRiskPanels();
 }
 async function loadPostingIdentities(){
   if (!user) return;
@@ -1000,7 +1014,7 @@ function renderPostingIdentities(){
     return `<div class="job">
       <div class="job-icon">${i.avatar_url?`<img src="${esc(i.avatar_url)}" style="width:22px;height:22px;border-radius:999px;object-fit:cover;">`:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0113 0"/></svg>'}</div>
       <div class="job-body"><div class="job-msg">${esc(i.name || 'Unnamed identity')} ${i.is_active?'<span class="warning-chip">active</span>':''}</div><div class="job-meta">${esc(i.type || 'facebook identity')}${i.url?' · '+esc(i.url):''}</div></div>
-      <button class="btn ${key===selectedKey?'btn-primary':'btn-ghost'}" style="padding:6px 10px;" onclick="setSelectedIdentity(${jsArg(key)}); renderPostingIdentities(); renderComposeGroups();">${key===selectedKey?'Selected':'Use'}</button>
+      <button class="btn ${key===selectedKey?'btn-primary':'btn-ghost'}" style="padding:6px 10px;" onclick="setSelectedIdentity(${jsArg(key)}); renderPostingIdentities();">${key===selectedKey?'Selected':'Use'}</button>
     </div>`;
   }).join('');
   renderIdentitySelectors();
@@ -1060,10 +1074,10 @@ async function syncGroupsForSelectedIdentity(){
   const { data, error } = await sb.from('jsw_post_jobs').insert({
     user_id:user.id,
     message:'__import_groups__',
-    groups:[],
     delay:0,
     ai_enabled:false,
     ai_prompt: identity.name || null,
+    groups:[{ identity_name: identity.name || null, identity_key: identityKey(identity) || legacyIdentityKey(), identity_type: identity.type || null }],
     status:'pending'
   }).select();
   if (error) { toast('Could not start group sync: '+error.message,'error'); return; }
@@ -1093,7 +1107,8 @@ async function loadGroups(){
   const { data, error } = await sb.from('jsw_groups').select('*').order('created_at',{ascending:false});
   if (error) { if (!isNoTable(error)) toast('Failed to load groups: '+error.message,'error'); return; }
   groupsCache = data || [];
-  document.getElementById('navGroupCount').textContent = groupsCache.length;
+  const countEl = document.getElementById('navGroupCount');
+  if (countEl) countEl.textContent = groupsForSelectedIdentity().length;
 }
 
 function isNoTable(e){ return e && (e.code==='42P01' || (e.message||'').includes('relation') || (e.message||'').includes('does not exist')); }
@@ -1106,7 +1121,14 @@ async function addGroup(){
   url = url.replace(/\/$/,'');
   const name = url.split('/').pop() || url;
   const identity=getSelectedIdentity();
-  const { error } = await sb.from('jsw_groups').insert({ user_id:user.id, group_url:url, group_name:name });
+  const { error } = await sb.from('jsw_groups').upsert({
+    user_id:user.id,
+    group_url:url,
+    group_name:name,
+    identity_name:identity?.name || null,
+    identity_key:identityKey(identity) || legacyIdentityKey(),
+    identity_type:identity?.type || null
+  }, { onConflict:'user_id,identity_key,group_url' });
   if (error) { toast('Error: '+error.message,'error'); return; }
   input.value='';
   await loadGroups();
@@ -1125,15 +1147,20 @@ async function removeGroup(id){
 
 function renderGroupsList(){
   const el = document.getElementById('groupsList');
-  if (!groupsCache.length) {
-    el.innerHTML = emptyState('No groups yet','Add a Facebook group URL to get started.');
+  const visibleGroups = groupsForSelectedIdentity();
+  const countEl = document.getElementById('navGroupCount');
+  if (countEl) countEl.textContent = visibleGroups.length;
+  if (!el) return;
+  if (!visibleGroups.length) {
+    const identityName = currentIdentityName() || 'this identity';
+    el.innerHTML = emptyState(`No groups for ${identityName}`,'Choose an identity above, then Sync Groups or add a Facebook group URL.');
     return;
   }
-  el.innerHTML = groupsCache.map(g=>`
+  el.innerHTML = visibleGroups.map(g=>`
     <div class="job">
       <div class="job-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div>
       <div class="job-body"><div class="job-msg">${esc(g.group_name||g.group_url)}</div>
-      <div class="job-meta"><a href="${esc(g.group_url)}" target="_blank" style="color:var(--accent);">${esc(g.group_url)}</a></div></div>
+      <div class="job-meta">${identityLabelForGroup(g)?esc(identityLabelForGroup(g))+' · ':''}<a href="${esc(g.group_url)}" target="_blank" style="color:var(--accent);">${esc(g.group_url)}</a></div></div>
       <button class="btn btn-ghost" style="padding:6px 10px;" onclick="removeGroup('${g.id}')">Remove</button>
     </div>`).join('');
 }
@@ -1141,11 +1168,13 @@ function renderGroupsList(){
 function renderComposeGroups(){
   renderIdentitySelectors();
   const el = document.getElementById('composeGroupSelect');
-  if (!groupsCache.length) {
-    el.innerHTML = '<span style="color:var(--text-3);font-size:12px;">No groups saved. Add some in the Groups tab.</span>';
+  const visibleGroups = groupsForSelectedIdentity();
+  if (!visibleGroups.length) {
+    const identityName = currentIdentityName() || 'this identity';
+    el.innerHTML = `<span style="color:var(--text-3);font-size:12px;">No groups saved for ${esc(identityName)}. Sync or add groups in the Groups tab.</span>`;
     return;
   }
-  el.innerHTML = groupsCache.map(g=>`<div class="chip" data-id="${g.id}" onclick="toggleGroupChip(this)">
+  el.innerHTML = visibleGroups.map(g=>`<div class="chip" data-id="${g.id}" onclick="toggleGroupChip(this)">
     <span>${esc(g.group_name||g.group_url.split('/').pop())}</span></div>`).join('');
   updateRiskPanels();
 }
@@ -1157,7 +1186,7 @@ function toggleGroupChip(el){
 function getSelectedGroups(){
   const selected = [...document.querySelectorAll('#composeGroupSelect .chip.selected')];
   const identity=getSelectedIdentity();
-  return selected.map(c=>groupsCache.find(g=>g.id===c.dataset.id)).filter(Boolean).map(g=>({url:g.group_url,name:g.group_name,identity_name:identity?.name || null,identity_key:identityKey(identity) || null,identity_type:identity?.type || null}));
+  return selected.map(c=>groupsCache.find(g=>g.id===c.dataset.id)).filter(Boolean).map(g=>({url:g.group_url,name:g.group_name,identity_name:identity?.name || null,identity_key:identityKey(identity) || legacyIdentityKey(),identity_type:identity?.type || null}));
 }
 
 /* ============================================================
@@ -1213,7 +1242,7 @@ function updateRiskPanels(){
   renderRiskBox('composeRiskBox', buildRiskWarnings({message:composeMessage, groups:composeGroups, delay:composeDelay, mode:'now'}));
 
   const schedMessage=document.getElementById('schedMessage')?.value || '';
-  const schedGroups=groupsCache.map(g=>({url:g.group_url,name:g.group_name}));
+  const schedGroups=groupsForSelectedIdentity().map(g=>({url:g.group_url,name:g.group_name}));
   renderRiskBox('scheduleRiskBox', buildRiskWarnings({message:schedMessage, groups:schedGroups, delay:settingsCache.default_delay || 30, mode:'schedule'}));
 }
 
@@ -1601,7 +1630,7 @@ async function addSchedule(){
   const message = document.getElementById('schedMessage').value.trim();
   if (!message) { toast('Write a message','error'); return; }
   const identity=getSelectedIdentity();
-  const groups = groupsCache.map(g=>({url:g.group_url,name:g.group_name,identity_name:identity?.name || null,identity_key:identityKey(identity) || null,identity_type:identity?.type || null}));
+  const groups = groupsForSelectedIdentity().map(g=>({url:g.group_url,name:g.group_name,identity_name:identity?.name || null,identity_key:identityKey(identity) || legacyIdentityKey(),identity_type:identity?.type || null}));
   if (!groups.length) { toast('Add groups first in the Groups tab','error'); return; }
 
   const frequency = document.getElementById('schedFreq').value;

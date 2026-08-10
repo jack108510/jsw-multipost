@@ -629,7 +629,12 @@ async function executeDashJob(job) {
     if (!claimed) return;
     extLog('info', 'Running import_groups job ' + job.id);
     try {
-      await importFacebookGroupsForJob(job.id, job.ai_prompt || null);
+      const identityMeta = Array.isArray(job.groups) ? job.groups[0] : null;
+      await importFacebookGroupsForJob(job.id, {
+        name: job.ai_prompt || identityMeta?.identity_name || null,
+        key: identityMeta?.identity_key || null,
+        type: identityMeta?.identity_type || null
+      });
     } catch (e) {
       await sbUpdateJob(job.id, {
         status: 'failed',
@@ -699,12 +704,12 @@ async function executeDashJob(job) {
   let groupCooldownMap = {};
   try {
     const inList = groupUrls.map(u => encodeURIComponent(u)).join(',');
-    const gcRes = await fetch(`${SB_URL}/rest/v1/jsw_groups?user_id=eq.${dashSession.userId}&group_url=in.(${inList})&select=group_url,last_posted_at,ban_risk`, {
+    const gcRes = await fetch(`${SB_URL}/rest/v1/jsw_groups?user_id=eq.${dashSession.userId}&group_url=in.(${inList})&select=group_url,identity_key,last_posted_at,ban_risk`, {
       headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${dashSession.accessToken}` }
     });
     const gcData = await gcRes.json();
     if (Array.isArray(gcData)) {
-      gcData.forEach(g => { groupCooldownMap[g.group_url] = g; });
+      gcData.forEach(g => { groupCooldownMap[`${g.identity_key || '__legacy__'}::${g.group_url}`] = g; });
     }
   } catch (e) {
     extLog('warn', 'Failed to pre-fetch group cooldown data: ' + e.message);
@@ -714,12 +719,13 @@ async function executeDashJob(job) {
     const target = groupTargets[i] || { url: groupUrls[i] };
     const groupUrl = target.url;
     const identityName = target.identity_name || job.identity_name || null;
+    const identityKey = target.identity_key || job.identity_key || (identityName || '__legacy__');
     let finalText = job.message;
 
     // ── Cooldown awareness — warning only, never blocks posting ──
     let cooldownWarning = null;
     try {
-      const gd = groupCooldownMap[groupUrl];
+      const gd = groupCooldownMap[`${identityKey}::${groupUrl}`] || groupCooldownMap[`__legacy__::${groupUrl}`];
       const lastPosted = gd?.last_posted_at;
       if (lastPosted && cooldownDays > 0) {
         const daysSince = (Date.now() - new Date(lastPosted).getTime()) / (1000 * 60 * 60 * 24);
@@ -770,6 +776,7 @@ async function executeDashJob(job) {
           group_url: groupUrl,
           group_name: target.name || target.group_name || null,
           identity_name: identityName || response?.activeIdentity || null,
+          identity_key: identityKey || null,
           status: 'posted',
           post_url: postUrl,
           evidence_found: evidenceFound,
@@ -781,7 +788,7 @@ async function executeDashJob(job) {
         });
         broadcastDashStatus(`Posted ${i + 1}/${groupUrls.length}`, '#4ecca3');
         // Update last_posted_at for cooldown tracking
-        fetch(`${SB_URL}/rest/v1/jsw_groups?user_id=eq.${dashSession.userId}&group_url=eq.${encodeURIComponent(groupUrl)}`, {
+        fetch(`${SB_URL}/rest/v1/jsw_groups?user_id=eq.${dashSession.userId}&identity_key=eq.${encodeURIComponent(identityKey || '__legacy__')}&group_url=eq.${encodeURIComponent(groupUrl)}`, {
           method: 'PATCH',
           headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${dashSession.accessToken}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
           body: JSON.stringify({ last_posted_at: postedAt })
@@ -811,6 +818,7 @@ async function executeDashJob(job) {
           group_url: groupUrl,
           group_name: target.name || target.group_name || null,
           identity_name: identityName || null,
+          identity_key: identityKey || null,
           status: 'failed',
           error: lastError,
           warnings: cooldownWarning ? [cooldownWarning] : [],
@@ -829,6 +837,7 @@ async function executeDashJob(job) {
         group_url: groupUrl,
         group_name: target.name || target.group_name || null,
         identity_name: identityName || null,
+        identity_key: identityKey || null,
         status: 'failed',
         error: e.message,
         warnings: cooldownWarning ? [cooldownWarning] : [],
@@ -1116,7 +1125,10 @@ async function upsertAmplrData(session, key, value) {
 // scrapes name + URL, saves to jsw_groups via Supabase REST.
 // ============================================================
 // Job-aware version: updates job progress and result in jsw_post_jobs
-async function importFacebookGroupsForJob(jobId, identityName = null) {
+async function importFacebookGroupsForJob(jobId, identityMeta = null) {
+  const identityName = typeof identityMeta === 'string' ? identityMeta : (identityMeta?.name || null);
+  const identityKey = (typeof identityMeta === 'object' && identityMeta?.key) ? identityMeta.key : (identityName || '__legacy__');
+  const identityType = (typeof identityMeta === 'object' && identityMeta?.type) ? identityMeta.type : null;
   const session = await getStoredSession();
   if (!session || !session.userId) {
     await sbUpdateJob(jobId, { status: 'failed', result: { error: 'Not signed in' }, completed_at: new Date().toISOString() });
@@ -1226,10 +1238,17 @@ async function importFacebookGroupsForJob(jobId, identityName = null) {
 
     await updateProgress(`Saving ${groups.length} groups...`);
 
-    const rows = groups.map(g => ({ user_id: session.userId, group_url: g.url, group_name: g.name || null }));
+    const rows = groups.map(g => ({
+      user_id: session.userId,
+      group_url: g.url,
+      group_name: g.name || null,
+      identity_name: identityName || null,
+      identity_key: identityKey || '__legacy__',
+      identity_type: identityType || null
+    }));
     const CHUNK = 50;
     for (let i = 0; i < rows.length; i += CHUNK) {
-      const saveRes = await fetch(`${SB_URL}/rest/v1/jsw_groups?on_conflict=user_id,group_url`, {
+      const saveRes = await fetch(`${SB_URL}/rest/v1/jsw_groups?on_conflict=user_id,identity_key,group_url`, {
         method: 'POST',
         headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}`, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' },
         body: JSON.stringify(rows.slice(i, i + CHUNK))
@@ -1238,7 +1257,7 @@ async function importFacebookGroupsForJob(jobId, identityName = null) {
     }
 
     extLog('info', `Imported ${groups.length} groups via job ${jobId}`);
-    await sbUpdateJob(jobId, { status: 'done', result: { count: groups.length, identity_name: identityName || null, text: `Imported ${groups.length} groups${identityName ? ' for ' + identityName : ''}` }, completed_at: new Date().toISOString() });
+    await sbUpdateJob(jobId, { status: 'done', result: { count: groups.length, identity_name: identityName || null, identity_key: identityKey || '__legacy__', identity_type: identityType || null, text: `Imported ${groups.length} groups${identityName ? ' for ' + identityName : ''}` }, completed_at: new Date().toISOString() });
     chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_DONE', count: groups.length, groups }).catch(() => {});
 
   } catch (e) {
@@ -1359,20 +1378,23 @@ async function importFacebookGroups() {
       return;
     }
 
-    // Save to Supabase — upsert by (user_id, group_url)
+    // Save to Supabase — upsert by (user_id, identity_key, group_url)
     chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_PROGRESS', text: `Saving ${groups.length} groups...` });
 
     const rows = groups.map(g => ({
       user_id:    session.userId,
       group_url:  g.url,
-      group_name: g.name || null
+      group_name: g.name || null,
+      identity_name: null,
+      identity_key: '__legacy__',
+      identity_type: null
     }));
 
     // Batch in chunks of 50
     const CHUNK = 50;
     for (let i = 0; i < rows.length; i += CHUNK) {
       const chunk = rows.slice(i, i + CHUNK);
-      const saveRes = await fetch(`${SB_URL}/rest/v1/jsw_groups?on_conflict=user_id,group_url`, {
+      const saveRes = await fetch(`${SB_URL}/rest/v1/jsw_groups?on_conflict=user_id,identity_key,group_url`, {
         method: 'POST',
         headers: {
           'apikey': SB_ANON_KEY,

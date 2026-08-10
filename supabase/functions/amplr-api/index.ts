@@ -257,11 +257,16 @@ async function listGroups(req: Request, auth: AuthResult): Promise<Response> {
   const url = new URL(req.url);
   const limit  = Math.min(Number(url.searchParams.get('limit') ?? 50), 200);
   const offset = Number(url.searchParams.get('offset') ?? 0);
+  const identityKey = url.searchParams.get('identity_key');
 
-  const { data, error, count } = await auth.supabase
+  let query = auth.supabase
     .from('jsw_groups')
     .select('*', { count: 'exact' })
-    .eq('user_id', auth.userId)
+    .eq('user_id', auth.userId);
+
+  if (identityKey) query = query.eq('identity_key', identityKey);
+
+  const { data, error, count } = await query
     .order('created_at', { ascending: false })
     .range(offset, offset + limit - 1);
 

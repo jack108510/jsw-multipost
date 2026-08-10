@@ -11,11 +11,15 @@ create extension if not exists "pgcrypto";
 -- TABLE: jsw_groups
 -- ============================================================
 create table if not exists public.jsw_groups (
-  id          uuid primary key default gen_random_uuid(),
-  user_id     uuid not null references auth.users(id) on delete cascade,
-  group_url   text not null,
-  group_name  text,
-  created_at  timestamptz not null default now()
+  id            uuid primary key default gen_random_uuid(),
+  user_id       uuid not null references auth.users(id) on delete cascade,
+  group_url     text not null,
+  group_name    text,
+  identity_name text,
+  identity_key  text not null default '__legacy__',
+  identity_type text,
+  created_at    timestamptz not null default now(),
+  constraint jsw_groups_user_identity_url_unique unique (user_id, identity_key, group_url)
 );
 alter table public.jsw_groups enable row level security;
 drop policy if exists "jsw_groups_select_own" on public.jsw_groups;
