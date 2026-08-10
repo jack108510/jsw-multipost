@@ -981,6 +981,46 @@ async function sbUpdateJob(jobId, patch) {
 // Opens Facebook, asks content script to scrape the profile/Page switcher,
 // and stores results in amplr_data.key = posting_identities.
 // ============================================================
+function normalizeIdentityNameForMerge(name) {
+  return String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function mergePostingIdentities(...lists) {
+  const merged = new Map();
+  for (const list of lists) {
+    for (const item of (Array.isArray(list) ? list : [])) {
+      const name = String(item?.name || '').trim().replace(/\s+/g, ' ');
+      if (!name) continue;
+      const key = normalizeIdentityNameForMerge(name);
+      const prev = merged.get(key) || {};
+      merged.set(key, {
+        ...prev,
+        ...item,
+        id: prev.id || item.id || item.url || key,
+        name,
+        type: item.type || prev.type || 'facebook identity',
+        url: item.url || prev.url || null,
+        avatar_url: item.avatar_url || prev.avatar_url || null,
+        is_active: !!(prev.is_active || item.is_active)
+      });
+    }
+  }
+  return [...merged.values()];
+}
+
+async function sendTabMessageWithRetry(tabId, message, attempts = 5) {
+  let lastError;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await chrome.tabs.sendMessage(tabId, message);
+    } catch (e) {
+      lastError = e;
+      await sleep(1000);
+    }
+  }
+  throw lastError;
+}
+
 async function syncFacebookIdentitiesForJob(jobId) {
   const session = await getStoredSession();
   if (!session || !session.userId) {
@@ -995,31 +1035,57 @@ async function syncFacebookIdentitiesForJob(jobId) {
     await sleep(5000);
 
     await sbUpdateJob(jobId, { result: { text: 'Reading Facebook profile/Page switcher...' } });
-    const response = await chrome.tabs.sendMessage(tab.id, { type: 'SYNC_FACEBOOK_IDENTITIES' });
-    if (!response?.success) throw new Error(response?.error || 'Identity sync failed');
+    const switcherResponse = await sendTabMessageWithRetry(tab.id, { type: 'SYNC_FACEBOOK_IDENTITIES' });
+    if (!switcherResponse?.success) throw new Error(switcherResponse?.error || 'Identity sync failed');
 
-    const identities = (response.identities || []).map((i, idx) => ({
+    await sbUpdateJob(jobId, { result: { text: 'Reading managed Facebook Pages...' } });
+    await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/pages/?category=your_pages' });
+    await sleep(6500);
+    let pagesResponse = { success: false, pages: [] };
+    try {
+      pagesResponse = await sendTabMessageWithRetry(tab.id, { type: 'SCRAPE_FACEBOOK_MANAGED_PAGES' });
+    } catch (e) {
+      extLog('warn', 'Managed Pages scrape skipped: ' + e.message);
+    }
+    if (pagesResponse && !pagesResponse.success) {
+      extLog('warn', 'Managed Pages scrape failed: ' + (pagesResponse.error || 'unknown'));
+    }
+
+    const combined = mergePostingIdentities(switcherResponse.identities || [], pagesResponse?.pages || []);
+    const identities = combined.map((i, idx) => ({
       id: i.id || i.url || i.name || `identity-${idx + 1}`,
       name: i.name || `Identity ${idx + 1}`,
       type: i.type || 'facebook identity',
       url: i.url || null,
       avatar_url: i.avatar_url || null,
       is_active: !!i.is_active,
+      source: i.source || null,
       synced_at: new Date().toISOString()
     }));
     if (!identities.length) throw new Error('No Facebook identities found');
 
     await upsertAmplrData(session, 'posting_identities', {
       identities,
-      active_identity: response.active_identity || identities.find(i => i.is_active)?.name || null,
-      synced_at: new Date().toISOString()
+      active_identity: switcherResponse.active_identity || identities.find(i => i.is_active)?.name || null,
+      synced_at: new Date().toISOString(),
+      sources: {
+        switcher_count: (switcherResponse.identities || []).length,
+        managed_pages_count: (pagesResponse?.pages || []).length
+      }
     });
 
     await chrome.tabs.remove(tab.id);
     tab = null;
     await sbUpdateJob(jobId, {
       status: 'done',
-      result: { count: identities.length, identities, active_identity: response.active_identity || null, text: `Synced ${identities.length} posting identities` },
+      result: {
+        count: identities.length,
+        identities,
+        active_identity: switcherResponse.active_identity || null,
+        switcher_count: (switcherResponse.identities || []).length,
+        managed_pages_count: (pagesResponse?.pages || []).length,
+        text: `Synced ${identities.length} posting identities`
+      },
       completed_at: new Date().toISOString()
     });
     extLog('info', `Synced ${identities.length} posting identities`);

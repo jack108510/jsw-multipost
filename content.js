@@ -475,6 +475,73 @@
     return [...found.values()].map(i => ({ ...i, is_active: i.name === active || i.is_active }));
   }
 
+
+  function scrapeManagedPages(root=document) {
+    const found = new Map();
+    const pageUrl = location.href;
+    const add = (name, extra={}) => {
+      name = cleanIdentityName(name);
+      if (!name || name.length < 2 || isForbiddenIdentityName(name)) return;
+      if (/^(pages?|your pages?|followed pages?|discover|inbox|insights|notifications?|messages?|switch now|meta business suite)$/i.test(name)) return;
+      if (/https?:\/\//i.test(name)) return;
+      const key = name.toLowerCase();
+      const prev = found.get(key) || {};
+      found.set(key, {
+        ...prev,
+        id: prev.id || extra.id || key,
+        name,
+        type: 'page',
+        url: extra.url || prev.url || null,
+        avatar_url: extra.avatar_url || prev.avatar_url || null,
+        is_active: !!(prev.is_active || extra.is_active),
+        source: 'pages_manager'
+      });
+    };
+
+    const title = normalizeText(root.querySelector?.('[role="main"]')?.textContent || root.body?.textContent || '');
+    const looksLikePagesManager = /Pages .* manages|Your Pages|category=your_pages|Switch Now/i.test(`${title} ${pageUrl}`);
+    if (!looksLikePagesManager) return [];
+
+    const main = root.querySelector?.('[role="main"]') || root.body || root;
+
+    // Primary path: the main list cards read like:
+    // Page Name \n N Notifications \n Messages \n Switch Now
+    for (const card of [...main.querySelectorAll('[role="article"], [role="listitem"], div')].filter(visible)) {
+      const raw = card.innerText || card.textContent || '';
+      const text = normalizeText(raw);
+      if (!/\b(Messages|Notifications?|Switch Now)\b/i.test(text)) continue;
+      const lines = raw.split('\n').map(cleanIdentityName).filter(Boolean)
+        .filter(line => !/^(messages?|notifications?|switch now)$/i.test(line))
+        .filter(line => !/^\d+\s+notifications?$/i.test(line))
+        .filter(line => !/^Pages\s+.+\s+manages$/i.test(line))
+        .filter(line => !isForbiddenIdentityName(line));
+      const name = lines[0];
+      if (!name) continue;
+      const img = card.querySelector?.('img[src]');
+      const url = card.querySelector?.('a[href*="facebook.com"]')?.href || null;
+      add(name, { url, avatar_url: img?.src || null });
+    }
+
+    // Secondary path: left sidebar under "Your Pages" often lists all managed Pages,
+    // even when cards are virtualized or Facebook changes card markup.
+    for (const el of [...root.querySelectorAll('a[href], [role="link"], [role="button"], span[dir="auto"]')].filter(visible)) {
+      const label = el.getAttribute('aria-label') || '';
+      const raw = el.innerText || el.textContent || label;
+      const lines = raw.split('\n').map(cleanIdentityName).filter(Boolean)
+        .filter(line => !/^(your pages?|pages?|meta business suite|inbox|insights|discover|followed pages?)$/i.test(line))
+        .filter(line => !isForbiddenIdentityName(line));
+      const name = lines[0];
+      if (!name) continue;
+      const href = el.href || el.closest?.('a[href]')?.href || null;
+      const combined = normalizeText(`${label} ${raw} ${href || ''}`);
+      if (!/pages|profile\.php|Switch Now|Notifications?|Messages|category=your_pages/i.test(combined) && !el.closest?.('[aria-label*="Your Pages"]')) continue;
+      const img = el.querySelector?.('img[src]') || el.closest?.('div')?.querySelector?.('img[src]');
+      add(name, { url: href, avatar_url: img?.src || null });
+    }
+
+    return [...found.values()];
+  }
+
   async function syncFacebookIdentities() {
     log('Syncing Facebook identities...');
     const activeBefore = currentIdentityName();
@@ -616,7 +683,7 @@
 
   // ============ MESSAGE LISTENER ============
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (!['POST_TO_PAGE','SYNC_FACEBOOK_IDENTITIES','SWITCH_FACEBOOK_IDENTITY'].includes(msg.type)) return;
+    if (!['POST_TO_PAGE','SYNC_FACEBOOK_IDENTITIES','SWITCH_FACEBOOK_IDENTITY','SCRAPE_FACEBOOK_MANAGED_PAGES'].includes(msg.type)) return;
 
     if (msg.type === 'SWITCH_FACEBOOK_IDENTITY') {
       log('Received identity switch command');
@@ -640,6 +707,20 @@
           sendResponse({ success: true, ...result });
         } catch (error) {
           log('IDENTITY SYNC ERROR:', error.message);
+          sendResponse({ success: false, error: error.message });
+        }
+      })();
+      return true;
+    }
+
+    if (msg.type === 'SCRAPE_FACEBOOK_MANAGED_PAGES') {
+      log('Received managed Pages scrape command');
+      (async () => {
+        try {
+          const pages = scrapeManagedPages();
+          sendResponse({ success: true, pages, pageUrl: location.href });
+        } catch (error) {
+          log('MANAGED PAGES SCRAPE ERROR:', error.message);
           sendResponse({ success: false, error: error.message });
         }
       })();
