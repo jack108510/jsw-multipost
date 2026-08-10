@@ -14,10 +14,21 @@ function showView(name) {
 }
 
 // ── Session load ──
-chrome.storage.local.get(['jsw_session', 'amplr_onboarding_done'], (data) => {
-  const session = data.jsw_session;
+chrome.storage.local.get(['jsw_session', 'amplr_onboarding_done'], async (data) => {
+  let session = data.jsw_session;
   const onboardDone = data.amplr_onboarding_done;
+
   if (session?.userId) {
+    session = await ensureFreshSession(session);
+    if (!session?.userId) {
+      await chrome.storage.local.remove(['jsw_session', 'amplr_onboarding_done']);
+      showView('loginView');
+      const err = $('loginError');
+      if (err) err.textContent = 'Session expired. Sign in again to bring the extension online.';
+      chrome.runtime.sendMessage({ type: 'PAIRING_DISCONNECTED' }).catch(() => {});
+      return;
+    }
+
     // MV3 background workers can be suspended or lose alarms. If the user opens
     // the popup while already connected, explicitly re-kick the background
     // heartbeat/polling path instead of waiting for a fresh login.
@@ -32,6 +43,37 @@ chrome.storage.local.get(['jsw_session', 'amplr_onboarding_done'], (data) => {
     showView('loginView');
   }
 });
+
+async function ensureFreshSession(session) {
+  const expiresAtMs = Number(session?.expiresAt || 0) * 1000;
+  const needsRefresh = !expiresAtMs || Date.now() > expiresAtMs - 5 * 60 * 1000;
+  if (!needsRefresh) return session;
+  if (!session?.refreshToken) return null;
+
+  try {
+    const res = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: 'POST',
+      headers: { 'apikey': SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: session.refreshToken })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.access_token) return null;
+
+    const refreshed = {
+      ...session,
+      userId: data.user?.id || session.userId,
+      email: data.user?.email || session.email,
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token || session.refreshToken,
+      expiresAt: data.expires_at,
+      refreshedAt: Date.now()
+    };
+    await chrome.storage.local.set({ jsw_session: refreshed });
+    return refreshed;
+  } catch(e) {
+    return null;
+  }
+}
 
 // ── Connected view ──
 function showConnectedView(session) {

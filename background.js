@@ -325,9 +325,9 @@ async function extLog(level, message) {
 chrome.runtime.onMessage.addListener((msg) => {
   if (msg.type === 'PAIRING_CONNECTED') {
     dashSession = msg.pairing;
-    startDashPolling();
+    startDashPolling().catch(e => console.warn('[JSW] start polling failed:', e.message));
     writeHeartbeat();
-    extLog('info', 'Session connected, polling started for ' + dashSession.userId);
+    extLog('info', `Session connected, polling started for ${dashSession.userId} on v${EXT_VERSION}`);
   } else if (msg.type === 'PAIRING_DISCONNECTED') {
     const previousSession = dashSession;
     stopDashPolling();
@@ -347,30 +347,36 @@ async function loadSessionAndResume() {
   const session = await getStoredSession();
   if (session && session.userId) {
     dashSession = session;
-    startDashPolling();
-    extLog('info', 'Resumed polling for user ' + dashSession.userId);
+    await startDashPolling();
+    extLog('info', `Resumed polling for user ${dashSession.userId} on v${EXT_VERSION}`);
+  } else {
+    extLog('warn', `No valid stored session on startup for v${EXT_VERSION}`);
   }
 }
 
-function startDashPolling() {
+async function startDashPolling() {
+  if (!dashSession?.userId) return;
+
   // Reset alarms before creating them so repeated popup opens do not leave stale schedules.
-  chrome.alarms.clear('poll-jobs');
-  chrome.alarms.clear('amplr_heartbeat');
-  chrome.alarms.clear('check-post-results');
+  await chrome.alarms.clear('poll-jobs');
+  await chrome.alarms.clear('amplr_heartbeat');
+  await chrome.alarms.clear('check-post-results');
+
+  // Write first so the dashboard flips online immediately after reload/sign-in.
+  try { await writeHeartbeat(); } catch (e) { console.warn('[JSW] heartbeat write failed during startup:', e.message); }
 
   // Poll immediately, then via alarms (MV3 service workers can sleep between events).
   pollPendingJobs();
   pollGroupLookups();
-  chrome.alarms.create('poll-jobs', { periodInMinutes: 0.5 }); // every 30s
-  writeHeartbeat();
-  chrome.alarms.create('amplr_heartbeat', { periodInMinutes: 0.5 }); // every 30s
-  chrome.alarms.create('check-post-results', { periodInMinutes: 360 }); // every 6h
+  await chrome.alarms.create('poll-jobs', { periodInMinutes: 0.5 }); // every 30s
+  await chrome.alarms.create('amplr_heartbeat', { periodInMinutes: 0.5 }); // every 30s
+  await chrome.alarms.create('check-post-results', { periodInMinutes: 360 }); // every 6h
 }
 
-function stopDashPolling() {
-  chrome.alarms.clear('poll-jobs');
-  chrome.alarms.clear('amplr_heartbeat');
-  chrome.alarms.clear('check-post-results');
+async function stopDashPolling() {
+  await chrome.alarms.clear('poll-jobs');
+  await chrome.alarms.clear('amplr_heartbeat');
+  await chrome.alarms.clear('check-post-results');
 }
 
 // Heartbeat and poll-jobs alarm handler
