@@ -146,8 +146,9 @@ a{color:inherit; text-decoration:none;}
 /* ============================================================
    APP SHELL
    ============================================================ */
-#app{display:none; height:100vh; }
-#app.active{display:grid; grid-template-columns:240px 1fr;}
+#app{display:none; min-height:100vh; height:100dvh; }
+#app.active{display:grid; grid-template-columns:minmax(196px,240px) minmax(0,1fr);}
+#app, .main, .content, .card, .job, .topbar{min-width:0;}
 
 /* Sidebar */
 .sidebar{
@@ -202,15 +203,15 @@ a{color:inherit; text-decoration:none;}
 /* Main */
 .main{overflow-y:auto; position:relative;}
 .topbar{
-  position:sticky; top:0; z-index:20; display:flex; align-items:center; justify-content:space-between;
-  padding:16px 32px; background:rgba(8,8,8,0.7); backdrop-filter:blur(16px);
+  position:sticky; top:0; z-index:20; display:flex; align-items:center; justify-content:space-between; gap:12px;
+  padding:16px clamp(14px,3vw,32px); background:rgba(8,8,8,0.7); backdrop-filter:blur(16px);
   -webkit-backdrop-filter:blur(16px); border-bottom:1px solid var(--border);
 }
 .page-title{font-size:20px; font-weight:700; letter-spacing:-0.4px;}
 .page-title em{font-family:'Instrument Serif',serif; font-style:italic; font-weight:400;}
-.topbar-right{display:flex; align-items:center; gap:10px;}
+.topbar-right{display:flex; align-items:center; justify-content:flex-end; gap:10px; flex-wrap:wrap; min-width:0;}
 
-.content{padding:32px; max-width:1100px;}
+.content{padding:clamp(14px,3vw,32px); max-width:1180px; width:100%;}
 
 /* Cards */
 .card{
@@ -228,7 +229,7 @@ a{color:inherit; text-decoration:none;}
 .card .desc{font-size:12px; color:var(--text-3); margin-bottom:16px;}
 
 /* Stat cards */
-.stats-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-bottom:28px;}
+.stats-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(145px,1fr)); gap:clamp(10px,2vw,16px); margin-bottom:28px;}
 .stat{
   background:var(--card); border:1px solid var(--border); border-radius:var(--radius);
   padding:18px 20px; position:relative; overflow:hidden;
@@ -244,15 +245,15 @@ a{color:inherit; text-decoration:none;}
 .stat-trend{font-size:11px; color:var(--green); margin-top:4px;}
 
 /* Grid layouts */
-.grid-2{display:grid; grid-template-columns:1fr 1fr; gap:16px;}
-.grid-3{display:grid; grid-template-columns:repeat(3,1fr); gap:16px;}
+.grid-2{display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,340px),1fr)); gap:clamp(10px,2vw,16px);}
+.grid-3{display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr)); gap:clamp(10px,2vw,16px);}
 .section-title{font-size:15px; font-weight:700; margin-bottom:14px; display:flex; align-items:center; gap:8px;}
 
 /* Jobs list */
 .job{
   display:flex; align-items:center; gap:14px; padding:14px 16px;
   background:var(--card); border:1px solid var(--border); border-radius:10px; margin-bottom:8px;
-  transition:all .2s;
+  transition:all .2s; min-width:0;
 }
 .job:hover{border-color:var(--border-2); transform:translateX(2px);}
 .job-icon{
@@ -260,7 +261,7 @@ a{color:inherit; text-decoration:none;}
   display:flex; align-items:center; justify-content:center; flex-shrink:0; color:var(--text-2);
 }
 .job-body{flex:1; min-width:0;}
-.job-msg{font-size:13px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+.job-msg{font-size:13px; font-weight:600; overflow-wrap:anywhere; word-break:break-word;}
 .job-meta{font-size:11px; color:var(--text-3); margin-top:2px;}
 
 .badge{
@@ -349,7 +350,11 @@ input[type="range"]::-webkit-slider-thumb{
 .badge.warning{color:#facc15;background:rgba(234,179,8,.08);border-color:rgba(234,179,8,.35);}
 .badge.warning .dot{background:#eab308;}
 
-.finder-input-row{display:flex; gap:8px; margin-bottom:14px;}
+.finder-input-row{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px;}
+.action-row{display:flex; flex-wrap:wrap; gap:8px;}
+.action-row > input,.action-row > select,.action-row > textarea{flex:1 1 220px; min-width:0;}
+.action-row > .btn,.action-grid > .btn{flex:1 1 150px;}
+.action-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr)); gap:8px;}
 .finder-result{
   display:flex; align-items:center; gap:12px; padding:12px;
   background:var(--card-2); border:1px solid var(--border); border-radius:10px;
@@ -411,7 +416,7 @@ input[type="range"]::-webkit-slider-thumb{
 .pairing-steps{font-size:12px; color:var(--text-2); line-height:1.7;}
 .pairing-steps ol{padding-left:18px;}
 
-.quick-actions{display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-top:16px;}
+.quick-actions{display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr)); gap:12px; margin-top:16px;}
 .quick-action{
   padding:16px; background:var(--card-2); border:1px solid var(--border);
   border-radius:10px; text-align:left; transition:all .2s;
@@ -423,13 +428,52 @@ input[type="range"]::-webkit-slider-thumb{
 .quick-action p{font-size:11px; color:var(--text-3);}
 
 /* Responsive */
+@media(max-width:1100px){
+  #app.active{grid-template-columns:200px minmax(0,1fr);}
+  .sidebar{padding:16px 10px;}
+  .nav-item{gap:8px; padding:9px 8px; font-size:12px;}
+  .sb-logo{padding:8px; margin-bottom:18px;}
+  .card{padding:16px;}
+  .stat{padding:15px 16px;}
+  .stat-value{font-size:24px;}
+}
 @media(max-width:900px){
+  body{overflow:auto;}
+  #app{height:auto; min-height:100dvh;}
   #app.active{grid-template-columns:1fr;}
   .sidebar{display:none;}
-  .stats-grid{grid-template-columns:repeat(2,1fr);}
-  .grid-2,.grid-3,.quick-actions{grid-template-columns:1fr;}
+  .topbar{position:sticky; align-items:flex-start; flex-direction:column; padding:14px;}
+  .topbar-right{width:100%; justify-content:flex-start;}
+  .topbar-right .btn{flex:1 1 150px;}
+  .stats-grid{grid-template-columns:repeat(auto-fit,minmax(135px,1fr));}
   #authScreen{flex-direction:column;}
+  .auth-left{padding:28px 18px;}
   .auth-right{display:none;}
+}
+@media(max-width:640px){
+  body{font-size:13px;}
+  .content{padding:12px;}
+  .page-title{font-size:18px;}
+  .card{padding:14px; border-radius:12px;}
+  .btn{width:100%; min-height:42px; padding:10px 12px; white-space:normal; text-align:center;}
+  .action-row{flex-direction:column;}
+  .action-row > input,.action-row > select,.action-row > textarea,.action-row > .btn{flex:0 0 auto; width:100%;}
+  .action-grid{grid-template-columns:1fr;}
+  .field{margin-bottom:12px;}
+  .field input,.field textarea,.field select{font-size:16px; padding:11px 12px;}
+  .job{align-items:flex-start; gap:10px; padding:12px;}
+  .job:hover{transform:none;}
+  .job-icon{width:32px; height:32px;}
+  .result-top,.kv,.pairing-display{align-items:flex-start; flex-direction:column; gap:8px;}
+  .pairing-code{font-size:32px; letter-spacing:5px;}
+  .warning-chip{margin-left:0; margin-top:4px; width:max-content; max-width:100%;}
+  #toasts{left:12px; right:12px; bottom:12px;}
+  .toast{min-width:0; width:100%;}
+}
+@media(max-width:420px){
+  .stats-grid{grid-template-columns:1fr;}
+  .auth-headline{font-size:32px;}
+  .topbar-right{gap:8px;}
 }
 
 .page{display:none; animation:fadeIn .3s ease;}
@@ -585,7 +629,7 @@ input[type="range"]::-webkit-slider-thumb{
               <div class="field">
                 <label>Paraphrase Instruction</label>
                 <input type="text" id="rewriteInstruction" placeholder="e.g. Paraphrase naturally, shorten it, or make it less salesy." style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;">
-                <div style="display:flex;gap:8px;margin-top:8px;">
+                <div class="action-row" style="margin-top:8px;">
                   <button class="btn btn-ghost" id="rewriteBtn" onclick="rewriteComposeMessage()">Paraphrase with Ollama</button>
                   <button class="btn btn-ghost" onclick="restorePreviousRewrite()">Undo paraphrase</button>
                 </div>
@@ -659,11 +703,11 @@ input[type="range"]::-webkit-slider-thumb{
                 <label>Group identity</label>
                 <select id="groupIdentitySelect" onchange="setSelectedIdentity(this.value); renderGroupsList(); renderComposeIdentitySelect();" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;"></select>
               </div>
-              <div style="display:flex; gap:8px; margin-bottom:10px;">
-                <input type="text" id="newGroupUrl" placeholder="facebook.com/groups/123" style="flex:1;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;">
+              <div class="action-row" style="margin-bottom:10px;">
+                <input type="text" id="newGroupUrl" placeholder="facebook.com/groups/123" style="background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;">
                 <button class="btn btn-primary" onclick="addGroup()">Add</button>
               </div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">
+              <div class="action-grid" style="margin-bottom:14px;">
                 <button class="btn btn-ghost" id="syncSelectedGroupsBtn" onclick="syncGroupsForSelectedIdentity()">Sync Selected Channel</button>
                 <button class="btn btn-primary" id="syncAllGroupsBtn" onclick="syncGroupsForAllIdentities()">Sync All Channels</button>
               </div>
@@ -682,7 +726,7 @@ input[type="range"]::-webkit-slider-thumb{
                 <label>Audience / niche</label>
                 <textarea id="finderInput" rows="3" placeholder="e.g. Wildrose: Alberta small businesses, contractors, vet clinics, local service businesses" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;resize:vertical;"></textarea>
               </div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+              <div class="action-grid" style="margin-bottom:10px;">
                 <button class="btn btn-primary" id="finderBtn" onclick="runFinder()">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                   Generate Candidates
