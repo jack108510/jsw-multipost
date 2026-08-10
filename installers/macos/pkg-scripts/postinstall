@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONSOLE_USER="$(stat -f '%Su' /dev/console)"
+USER_HOME="$(dscl . -read /Users/$CONSOLE_USER NFSHomeDirectory | awk '{print $2}')"
+REPO_ZIP="https://github.com/jack108510/jsw-multipost/archive/refs/heads/main.zip"
+INSTALL_DIR="$USER_HOME/Applications/Amplr"
+EXT_DIR="$INSTALL_DIR/extension"
+TMP_DIR="$(mktemp -d)"
+CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
+cleanup() { rm -rf "$TMP_DIR"; }
+trap cleanup EXIT
+
+if [[ ! -x "$CHROME" ]]; then
+  osascript -e 'display dialog "Google Chrome was not found. Install Chrome first, then run Amplr Installer again." buttons {"OK"} default button "OK" with icon caution' || true
+  exit 1
+fi
+
+mkdir -p "$INSTALL_DIR"
+chown -R "$CONSOLE_USER" "$USER_HOME/Applications" 2>/dev/null || true
+
+curl -L "$REPO_ZIP" -o "$TMP_DIR/amplr.zip"
+unzip -q "$TMP_DIR/amplr.zip" -d "$TMP_DIR"
+SRC_DIR="$(find "$TMP_DIR" -maxdepth 1 -type d -name 'jsw-multipost-*' | head -n 1)"
+rm -rf "$EXT_DIR"
+cp -R "$SRC_DIR" "$EXT_DIR"
+chmod +x "$EXT_DIR/scripts/amplr-runner.sh" "$EXT_DIR/scripts/install-amplr-runner.sh"
+chown -R "$CONSOLE_USER" "$INSTALL_DIR"
+
+sudo -u "$CONSOLE_USER" "$EXT_DIR/scripts/install-amplr-runner.sh" "$EXT_DIR"
+sudo -u "$CONSOLE_USER" open -a "Google Chrome" --args --profile-directory=Default --load-extension="$EXT_DIR" --no-first-run
+
+osascript -e 'display notification "Amplr installed. Open the extension and sign in." with title "Amplr"' || true
+exit 0

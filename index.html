@@ -1616,25 +1616,21 @@ footer {
   <div class="container">
     <div class="reveal" style="text-align:center;">
       <span class="section-label">Install</span>
-      <h2 class="section-title">Up and running in <em>60 seconds</em>.</h2>
+      <h2 class="section-title">One click. No developer mode.</h2>
+      <p style="max-width:680px;margin:14px auto 0;color:var(--text-3);line-height:1.8;">Download the installer for your computer. It installs Amplr, starts Chrome with the extension loaded, and adds a background runner so scheduled posts keep working.</p>
     </div>
-    <div class="reveal" style="max-width:580px;margin:48px auto 0;background:var(--bg3);border:1px solid var(--border);border-radius:20px;padding:32px;">
-      <div style="display:flex;gap:16px;padding:14px 0;border-bottom:1px solid var(--border);">
-        <span style="flex-shrink:0;width:28px;height:28px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;">1</span>
-        <div style="padding-top:4px;">Clone or download from <a href="https://github.com/jack108510/jsw-multipost" target="_blank" style="color:var(--accent2);">GitHub</a></div>
+    <div class="reveal" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:18px;max-width:880px;margin:42px auto 0;">
+      <a href="installers/windows/Install-Amplr.cmd" download class="btn btn-primary" style="justify-content:center;padding:18px 22px;">Download for Windows</a>
+      <a href="installers/macos/Amplr-Installer.pkg" download class="btn btn-primary" style="justify-content:center;padding:18px 22px;">Download for Mac</a>
+      <a href="installers/linux/install-amplr.sh" download class="btn btn-secondary" style="justify-content:center;padding:18px 22px;">Linux installer</a>
+    </div>
+    <div class="reveal" style="max-width:760px;margin:28px auto 0;background:var(--bg3);border:1px solid var(--border);border-radius:20px;padding:24px;">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;color:var(--text-3);font-size:14px;line-height:1.7;">
+        <div><strong style="color:var(--text);">1. Double click</strong><br>Run the installer you downloaded.</div>
+        <div><strong style="color:var(--text);">2. Sign in</strong><br>Open Amplr in Chrome and sign into the dashboard.</div>
+        <div><strong style="color:var(--text);">3. Keep awake</strong><br>Leave the computer on and logged into Facebook for scheduled posts.</div>
       </div>
-      <div style="display:flex;gap:16px;padding:14px 0;border-bottom:1px solid var(--border);">
-        <span style="flex-shrink:0;width:28px;height:28px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;">2</span>
-        <div style="padding-top:4px;">Open <code style="background:var(--bg);padding:3px 8px;border-radius:4px;font-size:13px;color:var(--accent2);border:1px solid var(--border);">chrome://extensions</code></div>
-      </div>
-      <div style="display:flex;gap:16px;padding:14px 0;border-bottom:1px solid var(--border);">
-        <span style="flex-shrink:0;width:28px;height:28px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;">3</span>
-        <div style="padding-top:4px;">Enable <strong>Developer mode</strong> (top right)</div>
-      </div>
-      <div style="display:flex;gap:16px;padding:14px 0;">
-        <span style="flex-shrink:0;width:28px;height:28px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;">4</span>
-        <div style="padding-top:4px;">Click <strong>Load unpacked</strong> → select folder</div>
-      </div>
+      <p style="margin:18px 0 0;color:var(--text-3);font-size:13px;line-height:1.7;">Amplr uses your own logged-in Chrome browser. If the computer is off, asleep, offline, or logged out of Facebook, scheduled jobs cannot run.</p>
     </div>
   </div>
 </section>
@@ -1644,7 +1640,7 @@ footer {
   <div class="container reveal">
     <h2>Stop posting <em>one at a time.</em></h2>
     <p>Free. Open source. Yours.</p>
-    <a href="https://github.com/jack108510/jsw-multipost" target="_blank" class="btn btn-primary" style="font-size:16px;padding:16px 36px;">
+    <a href="#install" class="btn btn-primary" style="font-size:16px;padding:16px 36px;">
       Get Amplr
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M13 6l6 6-6 6"/></svg>
     </a>
