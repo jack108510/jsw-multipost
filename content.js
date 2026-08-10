@@ -375,6 +375,60 @@
     return null;
   }
 
+  function identityMenuRoot() {
+    const roots = [...document.querySelectorAll('[role="dialog"], [role="menu"], [aria-label*="Account"], [aria-label*="profile"]')].filter(visible);
+    return roots.find(r => /Switch to|Continue as|See all profiles|See your profile|View your profile|Quick switch profiles/i.test(r.textContent || '')) || document.body;
+  }
+
+  function findSeeAllProfilesButton(root=identityMenuRoot()) {
+    return [...root.querySelectorAll('[role="button"], a[href], [aria-label]')]
+      .filter(visible)
+      .find(el => {
+        const label = el.getAttribute('aria-label') || '';
+        const text = normalizeText(el.innerText || el.textContent || '');
+        return /^See all profiles\b/i.test(cleanIdentityName(label)) || /^See all profiles\b/i.test(cleanIdentityName(text));
+      }) || null;
+  }
+
+  async function expandAllProfilesIfPresent() {
+    const button = findSeeAllProfilesButton();
+    if (!button) return false;
+    button.click();
+    await sleep(1800);
+    return true;
+  }
+
+  function mergeIdentityLists(...lists) {
+    const merged = new Map();
+    for (const list of lists) {
+      for (const identity of (Array.isArray(list) ? list : [])) {
+        const name = cleanIdentityName(identity?.name || '');
+        if (!name || isForbiddenIdentityName(name)) continue;
+        const key = name.toLowerCase();
+        const prev = merged.get(key) || {};
+        merged.set(key, {
+          ...prev,
+          ...identity,
+          id: prev.id || identity.id || key,
+          name,
+          is_active: !!(prev.is_active || identity.is_active)
+        });
+      }
+    }
+    return [...merged.values()];
+  }
+
+  function findIdentityTarget(expectedName) {
+    const candidates = [...document.querySelectorAll('[aria-label], [role="button"], a[href], span[dir="auto"]')].filter(visible);
+    return candidates.find(el => {
+      const label = el.getAttribute('aria-label') || '';
+      const text = el.innerText || el.textContent || '';
+      const name = extractIdentityName(el, label || text);
+      const combined = cleanIdentityName(`${label} ${text}`);
+      return (identityMatches(name, expectedName) || identityMatches(combined, expectedName)) && !isForbiddenIdentityName(name);
+    }) || null;
+  }
+
   function scrapeIdentityMenu() {
     const found = new Map();
     const add = (name, extra={}) => {
@@ -393,23 +447,24 @@
       });
     };
 
-    const menuRoots = [...document.querySelectorAll('[role="dialog"], [role="menu"], [aria-label*="Account"], [aria-label*="profile"]')];
-    const root = menuRoots.find(r => /Switch to|Continue as|See all profiles|Your profile|Vet Inc|Empty Slot/i.test(r.textContent || '')) || document.body;
-    const candidates = [...root.querySelectorAll('[role="button"], a[href], [aria-label]')].filter(visible);
+    const root = identityMenuRoot();
+    const candidates = [...root.querySelectorAll('[role="button"], a[href], [aria-label], div')].filter(visible);
 
     for (const el of candidates) {
       const label = el.getAttribute('aria-label') || '';
-      const text = normalizeText(el.innerText || el.textContent || '');
+      const rawText = el.innerText || el.textContent || '';
+      const text = normalizeText(rawText);
       const combined = normalizeText(`${label} ${text}`);
-      if (/^See all profiles/i.test(combined)) break;
+      if (/^See all profiles$/i.test(cleanIdentityName(combined))) continue;
       if (isForbiddenIdentityName(combined) || /quick switch profiles/i.test(combined)) continue;
 
+      const name = extractIdentityName(el, label || rawText);
+      if (!name || isForbiddenIdentityName(name)) continue;
       const hasSwitcherVerb = /Switch to|Continue as|Use Facebook as/i.test(combined);
       const hasAvatar = !!(el.querySelector?.('img[src]') || el.closest?.('div')?.querySelector?.('img[src]'));
-      const looksLikeIdentityRow = hasSwitcherVerb || (hasAvatar && /facebook identity|profile|page/i.test(combined));
+      const looksLikeIdentityRow = hasSwitcherVerb || /facebook identity|profile|page|active/i.test(combined) || hasAvatar;
       if (!looksLikeIdentityRow) continue;
 
-      const name = extractIdentityName(el, label || text);
       const img = el.querySelector?.('img[src]') || el.closest?.('div')?.querySelector?.('img[src]');
       const url = el.href || el.closest?.('a[href]')?.href || null;
       add(name, { label: combined, url, avatar_url: img?.src || null, type: /page|business/i.test(combined) ? 'page' : undefined });
@@ -427,11 +482,14 @@
     if (!opened) throw new Error('Could not open Facebook profile switcher');
     await sleep(1000);
     const activeAfterOpen = activeIdentityFromMenu() || currentIdentityName() || activeBefore;
-    let identities = scrapeIdentityMenu();
+    const quickIdentities = scrapeIdentityMenu();
+    const expanded = await expandAllProfilesIfPresent();
+    if (expanded) await sleep(800);
+    let identities = mergeIdentityLists(quickIdentities, expanded ? scrapeIdentityMenu() : []);
     if (activeAfterOpen && !identities.some(i => identityMatches(i.name, activeAfterOpen))) identities.unshift({ id: activeAfterOpen.toLowerCase(), name: activeAfterOpen, type: 'facebook identity', is_active: true });
     if (!identities.length && activeAfterOpen) identities = [{ id: activeAfterOpen.toLowerCase(), name: activeAfterOpen, type: 'facebook identity', is_active: true }];
     if (!identities.length) throw new Error('No Facebook identities found in switcher');
-    return { identities, active_identity: identities.find(i => i.is_active)?.name || activeAfterOpen || activeBefore || null, pageUrl: location.href };
+    return { identities, active_identity: identities.find(i => i.is_active)?.name || activeAfterOpen || activeBefore || null, expanded_profiles: expanded, pageUrl: location.href };
   }
 
   function identityMatches(actual, expected) {
@@ -450,11 +508,14 @@
     if (!opened) throw new Error('Could not open Facebook profile switcher to change identity');
     await sleep(1000);
 
-    const candidates = [...document.querySelectorAll('[aria-label], [role="button"], a[href], span[dir="auto"]')].filter(visible);
-    const target = candidates.find(el => {
-      const label = cleanIdentityName(el.getAttribute('aria-label') || el.textContent || '');
-      return identityMatches(label, expectedName) && /Switch to|Continue as|Use Facebook as|.+/i.test(label);
-    });
+    let target = findIdentityTarget(expectedName);
+    if (!target) {
+      const expanded = await expandAllProfilesIfPresent();
+      if (expanded) {
+        await sleep(800);
+        target = findIdentityTarget(expectedName);
+      }
+    }
     if (!target) throw new Error(`Could not find Facebook identity "${expectedName}" in switcher`);
     target.click();
     await sleep(6000);
