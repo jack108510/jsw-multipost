@@ -1476,9 +1476,13 @@ function identityInitials(name=''){
   const parts=String(name||'').trim().split(/\s+/).filter(Boolean);
   return (parts.length ? parts.slice(0,2).map(p=>p[0]).join('') : '?').toUpperCase();
 }
+function identityImageUrl(identity){
+  return identity?.avatar_url || identity?.picture_url || identity?.profile_picture_url || identity?.photo_url || identity?.image_url || null;
+}
 function identityAvatarHtml(identity, sizeClass=''){
   const name=identity?.name || 'Identity';
-  return `<div class="identity-avatar ${sizeClass}">${identity?.avatar_url?`<img src="${esc(identity.avatar_url)}" alt="${esc(name)}" onerror="this.remove();this.parentElement.textContent='${esc(identityInitials(name))}'">`:esc(identityInitials(name))}</div>`;
+  const imageUrl=identityImageUrl(identity);
+  return `<div class="identity-avatar ${sizeClass}">${imageUrl?`<img src="${esc(imageUrl)}" alt="${esc(name)}" loading="lazy" referrerpolicy="no-referrer" onerror="this.remove();this.parentElement.textContent='${esc(identityInitials(name))}'">`:esc(identityInitials(name))}</div>`;
 }
 function selectedIdentityPillHtml(){
   const identity=getSelectedIdentity();

@@ -435,6 +435,8 @@
           ...identity,
           id: prev.id || identity.id || key,
           name,
+          url: identity.url || prev.url || null,
+          avatar_url: identity.avatar_url || identity.picture_url || identity.profile_picture_url || identity.photo_url || identity.image_url || prev.avatar_url || prev.picture_url || prev.profile_picture_url || prev.photo_url || prev.image_url || null,
           is_active: !!(prev.is_active || identity.is_active)
         });
       }
