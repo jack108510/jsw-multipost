@@ -833,6 +833,16 @@ async function executeDashJob(job) {
     const identityUrl = target.identity_url || job.identity_url || storedIdentity?.url || null;
     let finalText = job.message;
 
+    if (!identityName || isForbiddenPostingIdentityName(identityName)) {
+      const warning = {
+        type: 'identity_required',
+        message: 'Skipped because no valid Facebook posting identity was attached to this job. Resync/select a profile before posting.'
+      };
+      perGroupResults.push(skippedResult(target, 'identity_required', warning));
+      broadcastDashStatus(`Identity required ${i + 1}/${groupUrls.length}`, '#eab308');
+      continue;
+    }
+
     // ── Cooldown awareness — warning only, never blocks posting ──
     let cooldownWarning = null;
     try {
@@ -1167,12 +1177,36 @@ function normalizeIdentityNameForMerge(name) {
   return String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+
+function isForbiddenPostingIdentityName(name) {
+  const cleaned = String(name || '').trim().replace(/\s+/g, ' ');
+  if (!cleaned) return true;
+  if (/^(quick switch profiles?|see all profiles?|see all pages?|settings(?: & privacy)?|help(?: & support)?|report a problem|give feedback|meta verified|meta business suite|display & accessibility|privacy|terms|privacy policy|advertising|ad choices|cookies|more|active|log out)$/i.test(cleaned)) return true;
+  if (/^(?:[A-Z]\s*){1,3}$/i.test(cleaned.replace(/\./g, ''))) return true;
+  if (/^(facebook|meta|pages?|profiles?|home|watch|marketplace|groups?|notifications?|menu)$/i.test(cleaned)) return true;
+  if (/^https?:\/\//i.test(cleaned)) return true;
+  return false;
+}
+
+function postingIdentityUrlAllowed(url) {
+  if (!url) return true;
+  try {
+    const u = new URL(url, 'https://www.facebook.com');
+    if (!/facebook\.com$/i.test(u.hostname.replace(/^www\./, ''))) return false;
+    return !/(\/settings|\/help|\/privacy|\/policies|\/business|\/ads|\/ad_|\/groups\/|\/marketplace|\/events)/i.test(u.pathname);
+  } catch (_) { return true; }
+}
+
+function isValidPostingIdentityRecord(item) {
+  return !!item && !isForbiddenPostingIdentityName(item.name) && postingIdentityUrlAllowed(item.url || '');
+}
+
 function mergePostingIdentities(...lists) {
   const merged = new Map();
   for (const list of lists) {
     for (const item of (Array.isArray(list) ? list : [])) {
       const name = String(item?.name || '').trim().replace(/\s+/g, ' ');
-      if (!name) continue;
+      if (!name || isForbiddenPostingIdentityName(name) || !postingIdentityUrlAllowed(item?.url || '')) continue;
       const key = normalizeIdentityNameForMerge(name);
       const prev = merged.get(key) || {};
       merged.set(key, {
@@ -1233,10 +1267,19 @@ async function syncFacebookIdentitiesForJob(jobId) {
       extLog('warn', 'Managed Pages scrape failed: ' + (pagesResponse.error || 'unknown'));
     }
 
+    // Do not preserve stale junk identities from older scraper versions. Merge
+    // only valid existing rows, and require current scrape evidence for a row to
+    // survive unless it has a strong Facebook URL/avatar signal.
     const existingStored = await getPostingIdentityByNameOrKey(null, '__load_all__');
-    const existingIdentities = Array.isArray(existingStored?.__all) ? existingStored.__all : [];
-    const combined = mergePostingIdentities(existingIdentities, switcherResponse.identities || [], pagesResponse?.pages || []);
-    const identities = combined.map((i, idx) => ({
+    const existingIdentities = (Array.isArray(existingStored?.__all) ? existingStored.__all : []).filter(isValidPostingIdentityRecord);
+    const scrapedIdentities = [...(switcherResponse.identities || []), ...(pagesResponse?.pages || [])].filter(isValidPostingIdentityRecord);
+    const scrapedNames = new Set(scrapedIdentities.map(i => normalizeIdentityNameForMerge(i.name)));
+    const keepExisting = existingIdentities.filter(i => {
+      const key = normalizeIdentityNameForMerge(i.name);
+      return scrapedNames.has(key) || (!!i.url && !!(i.avatar_url || i.picture_url || i.profile_picture_url || i.photo_url || i.image_url));
+    });
+    const combined = mergePostingIdentities(keepExisting, scrapedIdentities);
+    const identities = combined.filter(isValidPostingIdentityRecord).map((i, idx) => ({
       id: i.id || i.url || i.name || `identity-${idx + 1}`,
       name: i.name || `Identity ${idx + 1}`,
       type: i.type || 'facebook identity',

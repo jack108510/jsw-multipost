@@ -1,4 +1,4 @@
-// ============ Amplr Content Script v5 ============
+// ============ Amplr Content Script v6 ============
 // Based on verified FB DOM research.
 // Key insight: clicking the composer opens a [role="dialog"] modal.
 // All textbox + Post button searches are scoped INSIDE that dialog.
@@ -817,17 +817,17 @@
     const active = currentIdentityName();
     const composerIdentity = extractComposerIdentity(dialog);
     if (!expectedName) {
-      return {
-        active_identity: active || composerIdentity || null,
-        composer_identity: composerIdentity || null,
-        verified: true
-      };
+      const err = new Error('Posting identity is required; refusing to post from the current Facebook account by default.');
+      err.code = 'identity_required';
+      err.identity_active = active || null;
+      err.composer_identity = composerIdentity || null;
+      throw err;
     }
 
-    const dialogText = normalizeText(dialog?.innerText || dialog?.textContent || '').toLowerCase();
-    const verified =
-      identityMatches(composerIdentity, expectedName) ||
-      dialogText.includes(cleanIdentityName(expectedName).toLowerCase());
+    // Hard safety gate: require a direct composer-level identity value to match.
+    // Do NOT pass just because the expected company name appears somewhere in
+    // dialog text; group rules, previews, or pasted content can contain that name.
+    const verified = identityMatches(composerIdentity, expectedName);
 
     if (!verified) {
       const err = new Error(`Composer identity is not confirmed as ${expectedName}. Active: ${active || 'unknown'}; composer: ${composerIdentity || 'unknown'}`);
@@ -840,7 +840,7 @@
 
     return {
       active_identity: active || composerIdentity || expectedName,
-      composer_identity: composerIdentity || expectedName,
+      composer_identity: composerIdentity,
       verified: true
     };
   }
