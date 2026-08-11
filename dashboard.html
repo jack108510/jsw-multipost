@@ -277,6 +277,31 @@ a{color:inherit; text-decoration:none;}
 .badge.done .dot{background:var(--green);}
 .badge.failed{background:rgba(239,68,68,0.12); color:var(--red);}
 .badge.failed .dot{background:var(--red);}
+.badge.paused,.badge.cancelled{background:rgba(161,161,170,0.12); color:var(--text-2);}
+.badge.paused .dot,.badge.cancelled .dot{background:var(--text-3);}
+
+/* Operations dashboard */
+.ops-hero{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(260px,.8fr);gap:16px;margin-bottom:16px;}
+.ops-health{padding:18px;border-radius:var(--radius);border:1px solid var(--border);background:linear-gradient(135deg,rgba(99,102,241,.12),rgba(236,72,153,.08));}
+.ops-health h3{font-size:18px;margin-bottom:6px;}
+.ops-health.good{border-color:rgba(34,197,94,.32);background:linear-gradient(135deg,rgba(34,197,94,.11),rgba(99,102,241,.07));}
+.ops-health.warn{border-color:rgba(234,179,8,.38);background:linear-gradient(135deg,rgba(234,179,8,.10),rgba(99,102,241,.06));}
+.ops-health.danger{border-color:rgba(239,68,68,.38);background:linear-gradient(135deg,rgba(239,68,68,.11),rgba(99,102,241,.06));}
+.ops-card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:12px;margin-bottom:16px;}
+.ops-campaign{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:16px;}
+.ops-campaign-top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;}
+.ops-campaign h4{font-size:14px;}
+.ops-metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+.ops-metric{padding:9px;background:var(--card-2);border:1px solid var(--border);border-radius:9px;text-align:center;}
+.ops-metric strong{display:block;font-size:18px;}
+.ops-metric span{display:block;font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.35px;}
+.ops-alert{display:flex;gap:10px;align-items:flex-start;padding:12px;background:var(--card-2);border:1px solid var(--border);border-radius:10px;margin-bottom:8px;font-size:12px;}
+.ops-alert.danger{border-color:rgba(239,68,68,.35);background:rgba(239,68,68,.07);}
+.ops-alert.warn{border-color:rgba(234,179,8,.35);background:rgba(234,179,8,.07);}
+.ops-alert.good{border-color:rgba(34,197,94,.30);background:rgba(34,197,94,.06);}
+.ops-alert strong{display:block;color:var(--text);font-size:12px;}
+.ops-alert p{color:var(--text-2);font-size:11px;margin-top:2px;}
+.ops-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;}
 
 /* Waiting indicator (live status during post) */
 .waiting-box{
@@ -428,6 +453,7 @@ input[type="range"]::-webkit-slider-thumb{
 .quick-action p{font-size:11px; color:var(--text-3);}
 
 /* Responsive */
+@media(max-width:900px){.ops-hero{grid-template-columns:1fr;}.ops-metrics{grid-template-columns:repeat(2,1fr);}}
 @media(max-width:1100px){
   #app.active{grid-template-columns:200px minmax(0,1fr);}
   .sidebar{padding:16px 10px;}
@@ -553,7 +579,11 @@ input[type="range"]::-webkit-slider-thumb{
 
     <div class="nav-section">
       <div class="nav-label">Workspace</div>
-      <a class="nav-item active" data-route="compose" onclick="navigate('compose')">
+      <a class="nav-item active" data-route="ops" onclick="navigate('ops')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-7"/></svg>
+        Ops <span class="nav-badge" id="navOpsAlerts">0</span>
+      </a>
+      <a class="nav-item" data-route="compose" onclick="navigate('compose')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
         Compose
       </a>
@@ -593,7 +623,7 @@ input[type="range"]::-webkit-slider-thumb{
   <!-- Main -->
   <main class="main">
     <div class="topbar">
-      <div class="page-title" id="pageTitle">Compose</div>
+      <div class="page-title" id="pageTitle">Ops</div>
       <div class="topbar-right">
         <button class="btn btn-ghost" onclick="navigate('compose')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -607,8 +637,47 @@ input[type="range"]::-webkit-slider-thumb{
       <!-- Setup error placeholder -->
       <div id="setupErrorBox"></div>
 
+      <!-- ================= OPS ================= -->
+      <section class="page active" id="page-ops">
+        <div class="ops-hero">
+          <div class="ops-health" id="opsHealthBox">
+            <h3>Campaign operations</h3>
+            <div class="desc" id="opsHealthText">Loading live status...</div>
+            <div class="ops-actions">
+              <button class="btn btn-primary" onclick="loadOpsDashboard()">Refresh Ops</button>
+              <button class="btn btn-ghost" onclick="navigate('schedule')">Manage Schedules</button>
+              <button class="btn btn-ghost" onclick="navigate('history')">View History</button>
+            </div>
+          </div>
+          <div class="card">
+            <h3>Runner / extension</h3>
+            <div class="desc">Heartbeat and posting queue health.</div>
+            <div id="opsRunnerStatus"></div>
+          </div>
+        </div>
+        <div class="stats-grid">
+          <div class="stat"><div class="stat-label">Today Scheduled</div><div class="stat-value" id="opsTodayScheduled">—</div><div class="stat-trend" id="opsTodayScheduledSub">queued groups</div></div>
+          <div class="stat"><div class="stat-label">Today Posted</div><div class="stat-value" id="opsTodayPosted">—</div><div class="stat-trend">successful group posts</div></div>
+          <div class="stat"><div class="stat-label">Failures</div><div class="stat-value" id="opsTodayFailed">—</div><div class="stat-trend" style="color:var(--red);">failed / blocked</div></div>
+          <div class="stat"><div class="stat-label">Skipped</div><div class="stat-value" id="opsTodaySkipped">—</div><div class="stat-trend" style="color:var(--yellow);">cooldown / safety</div></div>
+        </div>
+        <div class="ops-card-grid" id="opsCampaignCards"></div>
+        <div class="grid-2">
+          <div class="card">
+            <h3>Today and next queue</h3>
+            <div class="desc">Scheduled, processing, paused, and recent completed jobs.</div>
+            <div id="opsQueueList"></div>
+          </div>
+          <div class="card">
+            <h3>Safety alerts</h3>
+            <div class="desc">Anything that needs attention before scaling.</div>
+            <div id="opsAlertsList"></div>
+          </div>
+        </div>
+      </section>
+
       <!-- ================= COMPOSE ================= -->
-      <section class="page active" id="page-compose">
+      <section class="page" id="page-compose">
         <div class="card" style="margin-bottom:16px;">
           <h3>Start here</h3>
           <div class="desc">Simple flow: connect the extension, add groups, test one post, then schedule.</div>
@@ -945,7 +1014,7 @@ async function onAuthSuccess(s){
   await checkSchema();
   // Load everything
   await Promise.all([loadSettings(), loadGroups(), loadGroupCandidates(), loadPostingIdentities(), loadOverview(), checkExtensionStatus()]);
-  navigate(location.hash.slice(1) && PAGE_TITLES[location.hash.slice(1)] ? location.hash.slice(1) : 'compose');
+  navigate(location.hash.slice(1) && PAGE_TITLES[location.hash.slice(1)] ? location.hash.slice(1) : 'ops');
   // Start global job watcher
   startGlobalJobWatcher();
 }
@@ -980,7 +1049,7 @@ async function checkSchema(){
 /* ============================================================
    NAVIGATION
    ============================================================ */
-const PAGE_TITLES = {compose:'Compose',groups:'Groups',schedule:'Schedule',history:'History',settings:'Settings'};
+const PAGE_TITLES = {ops:'Ops',compose:'Compose',groups:'Groups',schedule:'Schedule',history:'History',settings:'Settings'};
 
 function navigate(route){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
@@ -988,6 +1057,7 @@ function navigate(route){
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.route===route));
   document.getElementById('pageTitle').innerHTML = PAGE_TITLES[route].replace(/(\w+)$/, '<em class="serif">$1</em>');
 
+  if (route==='ops') loadOpsDashboard();
   if (route==='compose') renderComposeGroups();
   if (route==='groups') { renderIdentitySelectors(); renderGroupsList(); renderFinderCandidates(); }
   if (route==='schedule') renderSchedules();
@@ -1556,7 +1626,8 @@ function startGlobalJobWatcher(){
     if (latest.status==='pending') setExtensionStatus('idle','Waiting for extension','Job pending');
     else if (latest.status==='processing') setExtensionStatus('processing','Posting in progress','Extension active');
     else setExtensionStatus('idle','Extension idle','No active jobs');
-  }, 5000);
+    if (document.getElementById('page-ops')?.classList.contains('active')) loadOpsDashboard();
+  }, 15000);
 }
 
 function setExtensionStatus(dotClass, text, sub){
@@ -1887,6 +1958,150 @@ function renderFinderCandidates(){
   }).join('');
 }
 
+
+/* ============================================================
+   OPERATIONS DASHBOARD
+   ============================================================ */
+function safeDate(v){ const d=new Date(v||0); return Number.isFinite(d.getTime()) ? d : null; }
+function startOfLocalDay(d=new Date()){ return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+function endOfLocalDay(d=new Date()){ return new Date(d.getFullYear(), d.getMonth(), d.getDate()+1); }
+function isSameLocalDay(value, day=new Date()){
+  const d=safeDate(value); if(!d) return false;
+  return d >= startOfLocalDay(day) && d < endOfLocalDay(day);
+}
+function resultItems(j){
+  const r=normalizeResult(j);
+  const arr = r.results || r.group_results || r.targets || [];
+  return Array.isArray(arr) ? arr : [];
+}
+function resultCounts(j){
+  const r=normalizeResult(j);
+  const items=resultItems(j);
+  const countStatus=(names)=>items.filter(x=>names.includes(String(x?.status||'').toLowerCase())).length;
+  const posted = Number.isFinite(r.success_count) ? r.success_count : (Number.isFinite(r.posted_count) ? r.posted_count : countStatus(['posted','success','done']));
+  const failed = Number.isFinite(r.failed_count) ? r.failed_count : (Number.isFinite(r.failure_count) ? r.failure_count : countStatus(['failed','error']));
+  const skipped = Number.isFinite(r.skipped_count) ? r.skipped_count : countStatus(['skipped']);
+  return { posted, failed, skipped };
+}
+function campaignNameForJob(j){
+  const text=JSON.stringify({message:j.message,groups:j.groups,result:j.result,error:j.error}, null, 0).toLowerCase();
+  if(/wildrose|\$5\.99|5\.99|ai adoption|basic website|small business automation/.test(text)) return 'Wildrose';
+  if(/empty slot|emptyslot|last-minute vet|vet appointment|cancelled vet|pet owner|clinic openings/.test(text)) return 'Empty Slot';
+  const g=(j.groups||[])[0]||{};
+  return g.identity_name || identityLabelForKey(g.identity_key || legacyIdentityKey()) || 'Unscoped';
+}
+function groupCount(j){ return Array.isArray(j.groups) ? j.groups.length : 0; }
+function jobScheduledOrTouchedToday(j){
+  return isSameLocalDay(j.scheduled_for) || isSameLocalDay(j.started_at) || isSameLocalDay(j.completed_at) || isSameLocalDay(j.created_at);
+}
+function jobTimeLabel(j){
+  const value=j.scheduled_for || j.started_at || j.completed_at || j.created_at;
+  const d=safeDate(value);
+  return d ? d.toLocaleString([], {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'}) : '—';
+}
+function hasDefenseSignal(j){
+  const txt=JSON.stringify({error:j.error,result:j.result}, null, 0).toLowerCase();
+  return /facebook_defense|checkpoint|temporarily blocked|action blocked|security check|unusual activity|account restricted|rate limit|identity_not_verified|composer/.test(txt);
+}
+function campaignCardHtml(name, jobs){
+  const today=jobs.filter(jobScheduledOrTouchedToday);
+  const pending=jobs.filter(j=>j.status==='pending').length;
+  const processing=jobs.filter(j=>j.status==='processing').length;
+  const scheduledGroups=today.filter(j=>['pending','processing'].includes(j.status)).reduce((n,j)=>n+groupCount(j),0);
+  const counts=today.reduce((a,j)=>{ const c=resultCounts(j); a.posted+=c.posted; a.failed+=c.failed; a.skipped+=c.skipped; return a; }, {posted:0,failed:0,skipped:0});
+  const badge=processing ? resultBadge('processing') : pending ? resultBadge('pending') : resultBadge('done');
+  return `<div class="ops-campaign">
+    <div class="ops-campaign-top"><h4>${esc(name)}</h4>${badge}</div>
+    <div class="ops-metrics">
+      <div class="ops-metric"><strong>${scheduledGroups}</strong><span>queued</span></div>
+      <div class="ops-metric"><strong>${counts.posted}</strong><span>posted</span></div>
+      <div class="ops-metric"><strong>${counts.failed}</strong><span>failed</span></div>
+      <div class="ops-metric"><strong>${counts.skipped}</strong><span>skipped</span></div>
+    </div>
+  </div>`;
+}
+function opsJobRow(j){
+  const name=campaignNameForJob(j);
+  const msg=(j.message||'').replace(/__\w+__/g,'system job').slice(0,84);
+  const c=resultCounts(j);
+  const counts=[c.posted?`${c.posted} posted`:null,c.failed?`${c.failed} failed`:null,c.skipped?`${c.skipped} skipped`:null].filter(Boolean).join(' · ');
+  const actions=[];
+  if (j.status==='pending') actions.push(`<button class="btn btn-ghost" style="padding:5px 9px;" onclick="pauseOpsJob('${j.id}')">Pause</button>`);
+  if (j.status==='paused') actions.push(`<button class="btn btn-primary" style="padding:5px 9px;" onclick="resumeOpsJob('${j.id}')">Resume</button>`);
+  return `<div class="job">
+    <div class="job-icon">${esc(name[0]||'A')}</div>
+    <div class="job-body"><div class="job-msg">${esc(name)} · ${esc(msg || 'Scheduled job')}</div><div class="job-meta">${esc(jobTimeLabel(j))} · ${groupCount(j)} group(s) · ${esc(j.repeat_time || 'one-time')} ${counts?' · '+esc(counts):''}${j.error?' · '+esc(j.error):''}</div></div>
+    ${resultBadge(j.status, collectWarnings(j).length)}
+    ${actions.join('')}
+  </div>`;
+}
+function opsAlertHtml(kind,title,body){
+  return `<div class="ops-alert ${esc(kind)}"><div>${kind==='danger'?'⚠':kind==='warn'?'!':'✓'}</div><div><strong>${esc(title)}</strong><p>${esc(body)}</p></div></div>`;
+}
+function updateOpsBadge(n){ const el=document.getElementById('navOpsAlerts'); if(el) el.textContent=String(n||0); }
+async function loadOpsDashboard(){
+  if (!user) return;
+  const [jobsRes, settingsRes] = await Promise.all([
+    sb.from('jsw_post_jobs').select('*').eq('user_id',user.id).order('created_at',{ascending:false}).limit(120),
+    sb.from('jsw_settings').select('*').eq('user_id',user.id).maybeSingle()
+  ]);
+  const jobs=jobsRes.data || [];
+  const settings=settingsRes.data || settingsCache || {};
+  if (settingsRes.data) settingsCache=settingsRes.data;
+  const activeStatuses=['pending','processing','paused'];
+  const relevant=jobs.filter(j=>activeStatuses.includes(j.status) || jobScheduledOrTouchedToday(j)).sort((a,b)=>{
+    const ad=safeDate(a.scheduled_for||a.started_at||a.created_at)?.getTime()||0;
+    const bd=safeDate(b.scheduled_for||b.started_at||b.created_at)?.getTime()||0;
+    return ad-bd;
+  });
+  const today=relevant.filter(jobScheduledOrTouchedToday);
+  const todayScheduled=today.filter(j=>['pending','processing'].includes(j.status));
+  const totals=today.reduce((a,j)=>{ const c=resultCounts(j); a.posted+=c.posted; a.failed+=c.failed; a.skipped+=c.skipped; return a; }, {posted:0,failed:0,skipped:0});
+  const scheduledGroups=todayScheduled.reduce((n,j)=>n+groupCount(j),0);
+  document.getElementById('opsTodayScheduled').textContent=todayScheduled.length;
+  document.getElementById('opsTodayScheduledSub').textContent=`${scheduledGroups} queued group${scheduledGroups===1?'':'s'}`;
+  document.getElementById('opsTodayPosted').textContent=totals.posted;
+  document.getElementById('opsTodayFailed').textContent=totals.failed;
+  document.getElementById('opsTodaySkipped').textContent=totals.skipped;
+  const campaigns={};
+  relevant.forEach(j=>{ const name=campaignNameForJob(j); (campaigns[name] ||= []).push(j); });
+  document.getElementById('opsCampaignCards').innerHTML = Object.keys(campaigns).length ? Object.entries(campaigns).map(([name,rows])=>campaignCardHtml(name,rows)).join('') : emptyState('No campaigns in queue','Create a schedule and it will appear here.');
+  document.getElementById('opsQueueList').innerHTML = relevant.length ? relevant.slice(0,24).map(opsJobRow).join('') : emptyState('No active queue','No scheduled or recently touched jobs found.');
+  const alerts=[];
+  const heartbeat=settings.ext_heartbeat ? safeDate(settings.ext_heartbeat) : null;
+  const heartbeatAge=heartbeat ? Date.now()-heartbeat.getTime() : Infinity;
+  if (!heartbeat) alerts.push(['danger','Extension heartbeat missing','Pair or restart the Chrome extension before relying on schedules.']);
+  else if (heartbeatAge>10*60*1000) alerts.push(['danger','Extension heartbeat stale',`Last heartbeat was ${Math.round(heartbeatAge/60000)} minutes ago. Check the runner/Chrome.`]);
+  else if (heartbeatAge>3*60*1000) alerts.push(['warn','Extension heartbeat delayed',`Last heartbeat was ${Math.round(heartbeatAge/60000)} minutes ago. Watch before scaling.`]);
+  const processingOld=jobs.filter(j=>j.status==='processing' && safeDate(j.started_at) && Date.now()-safeDate(j.started_at).getTime()>45*60*1000);
+  if (processingOld.length) alerts.push(['danger','Stuck processing jobs',`${processingOld.length} job(s) have been processing longer than 45 minutes.`]);
+  const defense=jobs.filter(hasDefenseSignal).slice(0,5);
+  if (defense.length) alerts.push(['danger','Facebook defense signal detected',`${defense.length} recent job(s) mention checkpoint/block/identity/composer issues. Review before scaling.`]);
+  const failedToday=today.filter(j=>j.status==='failed' || resultCounts(j).failed>0);
+  if (failedToday.length) alerts.push(['warn','Failures today',`${failedToday.length} job(s) failed or have failed group results today.`]);
+  const paused=jobs.filter(j=>j.status==='paused');
+  if (paused.length) alerts.push(['warn','Paused schedules',`${paused.length} job(s) are paused and will not run until resumed.`]);
+  if (!todayScheduled.length) alerts.push(['warn','Nothing else scheduled today','No remaining pending scheduled jobs for today.']);
+  if (!alerts.length) alerts.push(['good','Ops clean','Runner heartbeat is fresh and no obvious safety alerts were found.']);
+  document.getElementById('opsAlertsList').innerHTML=alerts.map(a=>opsAlertHtml(...a)).join('');
+  updateOpsBadge(alerts.filter(a=>a[0]!=='good').length);
+  const health=document.getElementById('opsHealthBox');
+  const worst=alerts.some(a=>a[0]==='danger')?'danger':alerts.some(a=>a[0]==='warn')?'warn':'good';
+  health.className='ops-health '+worst;
+  document.getElementById('opsHealthText').textContent = worst==='good' ? 'Healthy: schedules, safety checks, and extension heartbeat look normal.' : worst==='warn' ? 'Watchlist: Amplr can run, but there are items to review.' : 'Needs attention: resolve safety or runner issues before scaling.';
+  document.getElementById('opsRunnerStatus').innerHTML = `<div class="kv"><span>Extension heartbeat</span><strong>${heartbeat ? heartbeat.toLocaleString() : 'Missing'}</strong></div><div class="kv"><span>Heartbeat age</span><strong>${Number.isFinite(heartbeatAge) ? Math.round(heartbeatAge/1000)+'s' : '—'}</strong></div><div class="kv"><span>Active jobs</span><strong>${jobs.filter(j=>j.status==='processing').length}</strong></div><div class="kv"><span>Pending schedules</span><strong>${jobs.filter(j=>j.status==='pending' && j.scheduled_for).length}</strong></div>`;
+}
+async function pauseOpsJob(id){
+  const { error } = await sb.from('jsw_post_jobs').update({status:'paused'}).eq('id',id).eq('user_id',user.id).eq('status','pending');
+  if (error) { toast('Could not pause: '+error.message,'error'); return; }
+  toast('Schedule paused','info'); await loadOpsDashboard(); await renderSchedules();
+}
+async function resumeOpsJob(id){
+  const { error } = await sb.from('jsw_post_jobs').update({status:'pending'}).eq('id',id).eq('user_id',user.id).eq('status','paused');
+  if (error) { toast('Could not resume: '+error.message,'error'); return; }
+  toast('Schedule resumed','success'); await loadOpsDashboard(); await renderSchedules();
+}
+
 /* ============================================================
    SCHEDULES
    ============================================================ */
@@ -1952,7 +2167,7 @@ async function renderSchedules(){
   const { data, error } = await sb.from('jsw_post_jobs')
     .select('*')
     .eq('user_id',user.id)
-    .eq('status','pending')
+    .in('status',['pending','paused'])
     .not('scheduled_for','is',null)
     .order('scheduled_for',{ascending:true});
   const el = document.getElementById('schedulesList');
@@ -1970,6 +2185,7 @@ async function renderSchedules(){
       <div class="job-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
       <div class="job-body"><div class="job-msg">${esc((s.message||'').substring(0,50))}...</div>
       <div class="job-meta">Next: ${esc(nextFire)} · ${esc(type)} · ${(s.groups||[]).length} group(s) · anti-bot on</div></div>
+      ${s.status==='pending'?`<button class="btn btn-ghost" style="padding:6px 10px;" onclick="pauseOpsJob('${s.id}')">Pause</button>`:`<button class="btn btn-primary" style="padding:6px 10px;" onclick="resumeOpsJob('${s.id}')">Resume</button>`}
       <button class="btn btn-ghost" style="padding:6px 10px;" onclick="removeSchedule('${s.id}')">Cancel</button>
     </div>`;
   }).join('');
