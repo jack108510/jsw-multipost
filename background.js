@@ -23,6 +23,12 @@ function randInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+function randomAntiBotDelaySeconds(requestedFloor = 0) {
+  const floor = Math.max(Number(requestedFloor) || 0, ANTI_BOT.minDelaySeconds);
+  const ceiling = Math.max(floor, ANTI_BOT.maxDelaySeconds);
+  return randInt(floor, ceiling);
+}
+
 // ============ HANDLE MESSAGES FROM POPUP ============
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'START_POSTING') {
@@ -104,12 +110,13 @@ async function runPostingQueue({ message, imageUrl, groups, delay, settings }, s
     }
 
     if (i < groups.length - 1) {
+      const waitSeconds = randomAntiBotDelaySeconds(delay || settings?.delay || 0);
       sendProgress({
-        text: `Waiting ${delay}s before next...`,
+        text: `Anti-bot wait ${waitSeconds}s before next...`,
         progress: (((i + 1) / groups.length) * 100).toFixed(0),
         done: false
       }, sender);
-      await sleep(delay * 1000);
+      await sleep(waitSeconds * 1000);
     }
   }
 
@@ -965,6 +972,16 @@ async function executeDashJob(job) {
           }
         }
 
+      } else if (response?.error_code === 'not_group_member') {
+        lastError = response?.error || 'Not accepted into group';
+        const warning = {
+          type: 'not_group_member_skip',
+          message: lastError
+        };
+        perGroupResults.push(skippedResult(target, 'not_group_member', warning));
+        jobWarnings.push(warning);
+        extLog('warn', `Skipped ${i + 1}/${groupUrls.length} → ${groupUrl}: not accepted/member`);
+        broadcastDashStatus(`Skipped not-joined group ${i + 1}/${groupUrls.length}`, '#eab308');
       } else {
         lastError = response?.error || 'Unknown error';
         const defenseTriggered = isFacebookDefenseError(lastError) || response?.error_code === 'facebook_defense';
@@ -1031,7 +1048,7 @@ async function executeDashJob(job) {
     }
 
     if (i < groupUrls.length - 1) {
-      const waitSeconds = randInt(Math.max(job.delay || 30, ANTI_BOT.minDelaySeconds), Math.max(job.delay || 30, ANTI_BOT.maxDelaySeconds));
+      const waitSeconds = randomAntiBotDelaySeconds(job.delay || 0);
       broadcastDashStatus(`Anti-bot wait ${waitSeconds}s...`, '#6a6a8a');
       await sleep(waitSeconds * 1000);
     }

@@ -21,14 +21,18 @@ assert(/minDelaySeconds:\s*90/.test(background), 'worker minimum randomized dela
 assert(/maxDelaySeconds:\s*210/.test(background), 'worker maximum randomized delay missing');
 assert(/scheduleJitterMinutes:\s*75/.test(background), 'recurring schedule jitter missing');
 assert(/dailyUserPostCap:\s*24/.test(background), 'daily user post cap missing');
+assert(/randomAntiBotDelaySeconds/.test(background), 'shared randomized delay helper missing');
 assert(/cooldown_skip/.test(background), 'cooldown skip result missing');
 assert(/ban_risk_skip/.test(background), 'ban-risk skip missing');
+assert(/not_group_member_skip/.test(background), 'not-accepted group skip missing');
 assert(/facebook_defense_stop/.test(background), 'batch stop on Facebook defense missing');
 assert(/Anti-bot wait \$\{waitSeconds\}s/.test(background), 'randomized wait status missing');
 assert(/detectFacebookDefenseSignal/.test(content), 'content-script defense detector missing');
+assert(/assertAcceptedGroupBeforePosting/.test(content), 'accepted-group gate missing');
+assert(/not_group_member/.test(content), 'not-accepted group error code missing');
 assert(/temporarily blocked/.test(content) && /confirm your identity/.test(content), 'Facebook block/checkpoint terms missing');
 assert(/ANTI_BOT_RULES/.test(dashboard), 'dashboard anti-bot rules missing');
 assert(/Anti-bot defense active/.test(dashboard), 'dashboard anti-bot UI copy missing');
-assert(manifest.version === '2.2.9', `manifest version expected 2.2.9, got ${manifest.version}`);
+assert(manifest.version === '2.2.14', `manifest version expected 2.2.14, got ${manifest.version}`);
 
 console.log('anti-bot defense tests passed');

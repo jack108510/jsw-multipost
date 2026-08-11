@@ -61,6 +61,56 @@
     });
   }
 
+  function visibleText(el) {
+    return normalizeText([el?.innerText, el?.textContent, el?.getAttribute?.('aria-label')].filter(Boolean).join(' '));
+  }
+
+  function findVisibleComposerTriggerNow() {
+    const selectors = [
+      "div[role='button'][aria-label^=\"What's on your mind\"]",
+      "div[role='button'][aria-label*=\"What's on your mind\"]",
+      'div[role="button"][aria-label*="Write something"]',
+      'div[role="button"][aria-label*="Write a post"]',
+      'a[href*="/composer/?"]'
+    ];
+    for (const sel of selectors) {
+      const el = document.querySelector(sel);
+      if (visible(el)) return el;
+    }
+    const main = document.querySelector('[role="main"]') || document.body;
+    return [...main.querySelectorAll('div[role="button"]')].find(b =>
+      visible(b) && /what's on your mind|write (a post|something)/i.test(b.textContent || '')
+    ) || null;
+  }
+
+  function detectGroupMembershipBlock() {
+    if (!/facebook\.com\/groups\//i.test(location.href)) return null;
+    const main = document.querySelector('[role="main"]') || document.body;
+    const controls = [...main.querySelectorAll('div[role="button"], button, a[role="button"], a[href]')].filter(visible);
+    const joinControl = controls.find(el => {
+      const t = visibleText(el).toLowerCase();
+      if (/\b(joined|member)\b/i.test(t)) return false;
+      return /^(join|join group|request to join|answer questions|pending|cancel request)$/i.test(t)
+        || /\b(join group|request to join|answer questions|membership pending|request pending)\b/i.test(t);
+    });
+    if (joinControl) return { reason: visibleText(joinControl) || 'join_required' };
+    const pageText = normalizeText(main.innerText || main.textContent || '').toLowerCase();
+    if (/you(?:'re| are) not a member|join this group to|only members can|request to join|membership pending/.test(pageText)) {
+      return { reason: 'membership_required' };
+    }
+    return null;
+  }
+
+  function assertAcceptedGroupBeforePosting() {
+    const block = detectGroupMembershipBlock();
+    if (block && !findVisibleComposerTriggerNow()) {
+      const err = new Error(`Skipped because this profile/Page is not accepted into the group yet (${block.reason}).`);
+      err.code = 'not_group_member';
+      err.group_url = location.href;
+      throw err;
+    }
+  }
+
   // ============ FIND THE DIALOG (opens after clicking trigger) ============
   async function findDialog() {
     log('Waiting for composer dialog to open...');
@@ -859,6 +909,7 @@
       await sleep(7000);
     }
     assertNoFacebookDefenseSignal();
+    assertAcceptedGroupBeforePosting();
 
     // 1. Find trigger
     const trigger = await findTrigger();
