@@ -323,7 +323,10 @@
         .filter(Boolean);
       if (imageCandidates.length) return imageCandidates[0];
 
-      const svgImages = [root.matches?.('image') ? root : null, ...root.querySelectorAll?.('image[href], image[xlink\:href]') || []].filter(Boolean);
+      // SVG <image> elements can hold profile photos, but CSS namespace-style
+      // selectors such as image[xlink\:href] throw in Chrome. Query the element
+      // type only, then read href/xlink:href manually.
+      const svgImages = [root.matches?.('image') ? root : null, ...root.querySelectorAll?.('image') || []].filter(Boolean);
       for (const svgImage of svgImages) {
         const href = tryUrl(svgImage?.href?.baseVal || svgImage?.getAttribute?.('href') || svgImage?.getAttribute?.('xlink:href'));
         if (href) return href;
