@@ -624,6 +624,17 @@ input[type="range"]::-webkit-slider-thumb{
             <div class="card">
               <h3>Message</h3>
               <div class="desc">This is what gets posted to each group.</div>
+
+              <div class="field" id="wildroseFeaturePostWrap" style="display:none;">
+                <label>Wildrose feature post</label>
+                <select id="wildroseFeaturePostSelect" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;"></select>
+                <div class="action-row" style="margin-top:8px;">
+                  <button class="btn btn-primary" onclick="loadWildroseFeaturePost()">Load Feature Post</button>
+                  <button class="btn btn-ghost" onclick="cycleWildroseFeaturePost()">Next Variation</button>
+                </div>
+                <div class="desc">Use a different post for each thing Wildrose sells. Keep batches small and rotate features instead of reposting the same pitch.</div>
+              </div>
+
               <div class="field"><textarea id="composeMessage" rows="6" placeholder="Write your post..." style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:14px;resize:vertical;"></textarea></div>
 
               <div class="field">
@@ -885,6 +896,272 @@ let groupCandidatesCache=[];
 let postingIdentitiesCache=[];
 let settingsCache={};
 let rewriteHistory=[];
+let wildroseFeaturePostIndexes={};
+
+const WILDROSE_FEATURE_POSTS = [
+  {
+    key:'basic-site',
+    label:'Basic Site — $5.99/mo info website',
+    posts:[
+`A lot of small businesses don’t need a big agency website.
+
+They need a clean page that says what they do, where they work, how to contact them, and why someone should trust them.
+
+That’s the Wildrose Basic Site.
+
+$5.99/month.
+No setup fee.
+No contract.
+Hosting and SSL included.
+Content updates included.
+First draft usually within 48 hours.
+
+It’s built for simple info sites: trades, local services, solo operators, small shops, and businesses still relying on just a Facebook page.
+
+If you want to see what the $5.99/month site looks like, comment “site” and I’ll send an example.`,
+`If your business only needs a clean basic website, don’t pay for a giant rebuild.
+
+Wildrose Basic Site is for the essentials:
+
+- mobile-friendly design
+- services
+- contact info
+- photos
+- hosting included
+- SSL included
+- content updates included
+
+It starts at $5.99/month with no setup fee and no contract.
+
+This is not for booking systems, payments, dashboards, or custom software. That gets quoted separately.
+
+It’s for small businesses that need to look professional online without getting dragged through an agency process.`
+    ]
+  },
+  {
+    key:'business-site',
+    label:'Business Site — booking, payments, dashboards',
+    posts:[
+`Some businesses need more than a basic website.
+
+If your site needs booking, payments, custom forms, dashboards, portals, or multi-page functionality, that’s a Wildrose Business Site.
+
+I scope it upfront and give you a straight quote instead of pretending every business fits into the same $5.99/month box.
+
+Good fit for:
+- online booking
+- Stripe payments
+- quote intake forms
+- client or staff portals
+- dashboards
+- custom multi-page builds
+
+Hosting and SSL are included.
+
+If you’ve been trying to duct-tape your business together with forms, spreadsheets, and messages, this is probably the better fit.`,
+`Basic websites are fine until the business needs the site to actually do something.
+
+That’s where I quote Business Sites.
+
+Booking, payments, portals, dashboards, quote intake, custom workflows, multi-page builds.
+
+I’m Jack from Wildrose Automations in Edmonton. I build and deploy it directly, so there’s no agency markup and no project manager between you and the person doing the work.
+
+If you need something beyond a simple info page, send me the workflow and I’ll give you a straight answer on scope and price.`
+    ]
+  },
+  {
+    key:'ai-adoption-plan',
+    label:'Free AI Adoption Plan — lead magnet',
+    posts:[
+`I’m offering a free AI adoption plan for small businesses.
+
+Not a chatbot pitch. Not “replace your staff with AI” nonsense.
+
+I’ll look at your business, website, and manual workflows, then send back a practical plan covering:
+
+- where AI could actually help
+- what tools are worth using
+- what to avoid
+- what to set up first
+- ideas for leads, quote intake, reviews, admin, or staff workflows
+
+I’m Jack from Wildrose Automations in Edmonton. I build websites, automations, portals, and small business apps.
+
+If you want the free plan, comment “AI plan” or send your business name and website.`,
+`Most small businesses do not need ten AI subscriptions.
+
+They need to know which parts of the business are actually worth automating, and which tools are a waste of money.
+
+Wildrose is doing free AI adoption plans right now.
+
+You send the basics: business, website, industry, biggest manual task, current tools.
+
+I send back a plain-English 30-day plan for what to use, what to avoid, and what to set up first.
+
+Good fit for quote intake, follow-ups, reviews, admin, CRM cleanup, staff prompts, and website AI.`
+    ]
+  },
+  {
+    key:'app-development',
+    label:'App Development — custom web/mobile apps',
+    posts:[
+`I also build custom web and mobile apps through Wildrose.
+
+This is for when a normal website is not enough.
+
+Examples of what I mean:
+- customer portals
+- internal dashboards
+- databases and APIs
+- marketplace-style apps
+- staff tools
+- web apps tied to real business workflows
+
+Pricing starts at $199+, scoped upfront.
+Optional maintenance is available if you want hosting, updates, and support handled after launch.
+
+A few live Wildrose builds: Vet INC, Sales Sparring, Empty Slot, and Swift Line Locating.
+
+If you have an app idea but do not know what it should cost, send the rough version and I’ll tell you if it’s simple, expensive, or not worth building yet.`,
+`Some business problems do not need another spreadsheet.
+
+They need a small app.
+
+Wildrose builds custom apps when the workflow is too specific for off-the-shelf software:
+
+- dashboards
+- portals
+- internal tools
+- databases
+- API-connected apps
+- mobile or web apps
+
+I scope it upfront so you know what is being built before anything starts.
+
+If you’re currently running an important part of the business through spreadsheets, texts, and manual copying, that’s usually where a small app starts to make sense.`
+    ]
+  },
+  {
+    key:'automation-ai',
+    label:'Automation & AI — workflows while you sleep',
+    posts:[
+`Wildrose also builds small business automations.
+
+Not vague “AI transformation.” Actual workflow cleanup.
+
+Things like:
+- quote intake
+- lead routing
+- review requests
+- follow-up reminders
+- CRM updates
+- staff prompts
+- simple reporting
+- customer message drafts
+
+The point is to remove repeated manual work without creating a fragile mess nobody understands.
+
+If there’s a task you or your staff repeat every week, tell me what it is. I’ll tell you if it’s worth automating or if you should leave it alone.`,
+`A good automation should feel boring.
+
+Lead comes in, gets organized.
+Customer asks for a quote, the right info gets collected.
+Review request goes out at the right time.
+Staff know what to do next.
+
+That’s the kind of automation I build at Wildrose.
+
+No hype platforms, no risky black-box setup, no “AI can do everything” pitch.
+
+Just small workflows that save time for businesses that are already busy.`
+    ]
+  },
+  {
+    key:'portals-dashboards',
+    label:'Portals & Dashboards — staff/client tools',
+    posts:[
+`If your team is running operations out of spreadsheets and message threads, a simple portal might be cleaner.
+
+Wildrose builds portals and dashboards for small businesses that need one place to track work.
+
+Examples:
+- leads
+- jobs
+- appointments
+- customer notes
+- staff tasks
+- quotes
+- basic reporting
+
+This is quoted as a Business Site or app build depending on complexity.
+
+The goal is not to build some massive system. It’s to replace the messy part of the workflow with one clean screen people actually use.`,
+`A portal is useful when the business keeps asking, “Where is that info?”
+
+Lead status, notes, bookings, customer requests, staff tasks, job progress.
+
+If it’s scattered across texts, paper, email, and spreadsheets, Wildrose can turn it into a simple dashboard.
+
+Not enterprise software. Just a clean working tool for the actual process.`
+    ]
+  },
+  {
+    key:'booking-payments',
+    label:'Booking & Payments — scheduling/Stripe',
+    posts:[
+`If customers need to book or pay online, a basic website is not enough.
+
+Wildrose can build booking and payment flows into a Business Site:
+
+- appointment booking
+- quote requests
+- Stripe payments
+- service pages
+- confirmation emails
+- simple admin view
+
+This is quoted upfront because every business handles scheduling and payments differently.
+
+If your current process is “message us and we’ll figure it out,” there may be a cleaner version.`,
+`Booking and payments are where a website starts becoming a business tool.
+
+For some businesses, a basic info site is enough.
+
+For others, the site needs to collect requests, take payment, schedule appointments, and reduce back-and-forth.
+
+Wildrose builds that as a quoted Business Site.
+
+Send the current process and I’ll tell you what can be simplified.`
+    ]
+  },
+  {
+    key:'maintenance-hosting',
+    label:'Maintenance, Hosting & Updates — ongoing support',
+    posts:[
+`One thing I include with Wildrose sites: the boring technical stuff.
+
+Hosting.
+SSL.
+Content updates.
+Small edits.
+Keeping the site online.
+
+For Basic Sites, that’s included in the $5.99/month plan.
+
+The idea is simple: if your hours change, your service list changes, or you need a photo swapped, you message me instead of trying to remember a website login from three years ago.
+
+Not glamorous, but it’s usually the part small business owners actually care about.`,
+`A website is only useful if it stays current.
+
+That’s why Wildrose Basic Sites include hosting, SSL, and content updates.
+
+Need to change hours, services, photos, phone number, or wording? Message me.
+
+No setup fee. No contract. Starts at $5.99/month for simple info sites.`
+    ]
+  }
+];
 
 try {
   sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -1085,8 +1362,55 @@ function renderIdentitySelectors(){
     const selected=getSelectedIdentity();
     hint.textContent = selected ? `Amplr will verify Facebook is posting as ${selected.name}.` : 'Sync identities in Settings before posting as a Page.';
   }
+  renderWildroseFeaturePostPicker();
 }
 function renderComposeIdentitySelect(){ renderIdentitySelectors(); }
+
+function selectedIdentityIsWildrose(){
+  const identity=getSelectedIdentity();
+  return /wildrose/i.test(identity?.name || '');
+}
+
+function renderWildroseFeaturePostPicker(){
+  const wrap=document.getElementById('wildroseFeaturePostWrap');
+  const select=document.getElementById('wildroseFeaturePostSelect');
+  if (!wrap || !select) return;
+  const show=selectedIdentityIsWildrose();
+  wrap.style.display = show ? 'block' : 'none';
+  if (!show) return;
+  if (select.dataset.loaded === 'true') return;
+  select.innerHTML = WILDROSE_FEATURE_POSTS.map((feature, idx)=>`<option value="${idx}">${esc(feature.label)}</option>`).join('');
+  select.dataset.loaded = 'true';
+}
+
+function currentWildroseFeature(){
+  const select=document.getElementById('wildroseFeaturePostSelect');
+  const idx=parseInt(select?.value ?? '0', 10) || 0;
+  return WILDROSE_FEATURE_POSTS[idx] || WILDROSE_FEATURE_POSTS[0];
+}
+
+function selectedWildroseFeatureIndex(){
+  const select=document.getElementById('wildroseFeaturePostSelect');
+  return parseInt(select?.value ?? '0', 10) || 0;
+}
+
+function loadWildroseFeaturePost(){
+  const feature=currentWildroseFeature();
+  if (!feature) return;
+  const variation=wildroseFeaturePostIndexes[feature.key] || 0;
+  const post=feature.posts[variation % feature.posts.length];
+  const messageEl=document.getElementById('composeMessage');
+  if (!messageEl) return;
+  messageEl.value=post;
+  wildroseFeaturePostIndexes[feature.key]=(variation + 1) % feature.posts.length;
+  updateRiskPanels();
+  toast(`Loaded ${feature.label} (${(variation % feature.posts.length) + 1}/${feature.posts.length})`,'success');
+}
+
+function cycleWildroseFeaturePost(){
+  loadWildroseFeaturePost();
+}
+
 function renderPostingIdentities(){
   const el=document.getElementById('postingIdentitiesList');
   if (!el) return;
