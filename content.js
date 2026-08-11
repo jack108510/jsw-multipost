@@ -264,6 +264,33 @@
     return !!(el && el.offsetParent !== null);
   }
 
+  function imageUrlFromBackground(backgroundImage) {
+    const match = String(backgroundImage || '').match(/url\(["']?([^"')]+)["']?\)/i);
+    return match?.[1] || null;
+  }
+
+  function extractAvatarUrl(el) {
+    const roots = [el, el?.closest?.('a[href], [role="button"], div'), el?.closest?.('div')].filter(Boolean);
+    for (const root of roots) {
+      const img = root.matches?.('img[src]') ? root : root.querySelector?.('img[src]');
+      const src = img?.currentSrc || img?.src || img?.getAttribute?.('src');
+      if (src) return src;
+
+      const svgImage = root.matches?.('image') ? root : root.querySelector?.('image[href], image[xlink\:href]');
+      const href = svgImage?.href?.baseVal || svgImage?.getAttribute?.('href') || svgImage?.getAttribute?.('xlink:href');
+      if (href) return href;
+
+      const bgNodes = [root, ...root.querySelectorAll?.('[style*="background"]') || []];
+      for (const node of bgNodes) {
+        const inlineBg = imageUrlFromBackground(node.style?.backgroundImage || node.style?.background || '');
+        if (inlineBg) return inlineBg;
+        const computedBg = imageUrlFromBackground(window.getComputedStyle?.(node)?.backgroundImage || '');
+        if (computedBg) return computedBg;
+      }
+    }
+    return null;
+  }
+
   function currentIdentityName() {
     const candidates = [];
     const push = (value) => {
@@ -510,13 +537,13 @@
       const name = extractIdentityName(el, label || rawText);
       if (!name || isForbiddenIdentityName(name)) continue;
       const hasSwitcherVerb = /Switch to|Continue as|Use Facebook as/i.test(combined);
-      const hasAvatar = !!(el.querySelector?.('img[src]') || el.closest?.('div')?.querySelector?.('img[src]'));
+      const avatarUrl = extractAvatarUrl(el);
+      const hasAvatar = !!avatarUrl;
       const looksLikeIdentityRow = hasSwitcherVerb || /facebook identity|profile|page|active/i.test(combined) || hasAvatar;
       if (!looksLikeIdentityRow) continue;
 
-      const img = el.querySelector?.('img[src]') || el.closest?.('div')?.querySelector?.('img[src]');
       const url = el.href || el.closest?.('a[href]')?.href || null;
-      add(name, { label: combined, url, avatar_url: img?.src || null, type: /page|business/i.test(combined) ? 'page' : undefined });
+      add(name, { label: combined, url, avatar_url: avatarUrl, type: /page|business/i.test(combined) ? 'page' : undefined });
     }
 
     const active = activeIdentityFromMenu(root) || currentIdentityName();
@@ -572,9 +599,8 @@
         .filter(line => !isForbiddenIdentityName(line));
       const name = lines[0];
       if (!name) continue;
-      const img = card.querySelector?.('img[src]');
       const url = card.querySelector?.('a[href*="/profile.php"], a[href*="facebook.com/profile.php"]')?.href || null;
-      add(name, { url, avatar_url: img?.src || null });
+      add(name, { url, avatar_url: extractAvatarUrl(card) });
     }
 
     // Secondary path: real Page links from the Pages manager. Avoid buttons,
@@ -596,8 +622,7 @@
         .filter(line => !isForbiddenIdentityName(line));
       const name = candidates[0];
       if (!name) continue;
-      const img = a.querySelector?.('img[src]');
-      add(name, { url: href, avatar_url: img?.src || null });
+      add(name, { url: href, avatar_url: extractAvatarUrl(a) });
     }
 
     return [...found.values()];

@@ -1251,7 +1251,7 @@ function renderPostingIdentities(){
     const key=identityKey(i);
     const count=groupCountForIdentityKey(key);
     return `<div class="job">
-      <div class="job-icon">${i.avatar_url?`<img src="${esc(i.avatar_url)}" style="width:22px;height:22px;border-radius:999px;object-fit:cover;">`:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0113 0"/></svg>'}</div>
+      <div class="job-icon">${identityImageUrl(i)?`<img src="${esc(identityImageUrl(i))}" style="width:22px;height:22px;border-radius:999px;object-fit:cover;" referrerpolicy="no-referrer">`:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0113 0"/></svg>'}</div>
       <div class="job-body"><div class="job-msg">${esc(i.name || 'Unnamed identity')} ${i.is_active?'<span class="warning-chip">active</span>':''}</div><div class="job-meta">${count} group${count===1?'':'s'} · ${esc(i.type || 'facebook identity')}${i.url?' · '+esc(i.url):''}</div></div>
       <button class="btn btn-ghost" style="padding:6px 10px;" onclick="setSelectedIdentity(${jsArg(key)}); syncGroupsForSelectedIdentity();">Sync</button>
       <button class="btn ${key===selectedKey?'btn-primary':'btn-ghost'}" style="padding:6px 10px;" onclick="setSelectedIdentity(${jsArg(key)}); renderPostingIdentities();">${key===selectedKey?'Selected':'Use'}</button>
@@ -1438,7 +1438,7 @@ function renderGroupsList(){
       const key=identityKey(identity);
       return `<div class="job" style="display:block;">
         <div style="display:flex;align-items:center;gap:12px;">
-          <div class="job-icon">${identity.avatar_url?`<img src="${esc(identity.avatar_url)}" style="width:22px;height:22px;border-radius:999px;object-fit:cover;">`:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0113 0"/></svg>'}</div>
+          <div class="job-icon">${identityImageUrl(identity)?`<img src="${esc(identityImageUrl(identity))}" style="width:22px;height:22px;border-radius:999px;object-fit:cover;" referrerpolicy="no-referrer">`:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0113 0"/></svg>'}</div>
           <div class="job-body"><div class="job-msg">${esc(identity.name || 'Unnamed channel')}</div><div class="job-meta">0 groups · ${esc(identity.type || 'facebook identity')}</div></div>
           <button class="btn btn-ghost" style="padding:6px 10px;" onclick="setSelectedIdentity(${jsArg(key)}); syncGroupsForSelectedIdentity();">Sync</button>
         </div>
@@ -1457,7 +1457,7 @@ function renderGroupsList(){
       </div>`).join('') : `<div class="result-meta" style="margin-top:10px;">No groups synced for this channel yet.</div>`;
     return `<div class="job" style="display:block;${selected?'border-color:rgba(78,204,163,.45);':''}">
       <div style="display:flex;align-items:center;gap:12px;">
-        <div class="job-icon">${bucket.identity?.avatar_url?`<img src="${esc(bucket.identity.avatar_url)}" style="width:22px;height:22px;border-radius:999px;object-fit:cover;">`:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0113 0"/></svg>'}</div>
+        <div class="job-icon">${identityImageUrl(bucket.identity)?`<img src="${esc(identityImageUrl(bucket.identity))}" style="width:22px;height:22px;border-radius:999px;object-fit:cover;" referrerpolicy="no-referrer">`:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0113 0"/></svg>'}</div>
         <div class="job-body"><div class="job-msg">${esc(bucket.label)} ${selected?'<span class="warning-chip">selected</span>':''}${bucket.isLegacy?'<span class="warning-chip">needs channel</span>':''}</div><div class="job-meta">${bucket.groups.length} group${bucket.groups.length===1?'':'s'}${bucket.identity?.type?' · '+esc(bucket.identity.type):''}</div></div>
         ${bucket.identity?`<button class="btn btn-ghost" style="padding:6px 10px;" onclick="setSelectedIdentity(${jsArg(bucket.key)}); syncGroupsForSelectedIdentity();">Sync</button>`:''}
         ${bucket.identity?`<button class="btn ${selected?'btn-primary':'btn-ghost'}" style="padding:6px 10px;" onclick="setSelectedIdentity(${jsArg(bucket.key)}); renderPostingIdentities();">${selected?'Selected':'Use'}</button>`:''}
