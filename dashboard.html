@@ -673,8 +673,8 @@ input[type="range"]::-webkit-slider-thumb{
               <h3>Delay Between Posts</h3>
               <div class="desc">Seconds to wait between each group post.</div>
               <div style="display:flex; align-items:center; gap:12px;">
-                <input type="range" id="composeDelay" min="5" max="120" value="30">
-                <span id="composeDelayVal" style="font-family:'Instrument Serif',serif; font-size:22px; min-width:50px; text-align:right;">30s</span>
+                <input type="range" id="composeDelay" min="90" max="210" value="120">
+                <span id="composeDelayVal" style="font-family:'Instrument Serif',serif; font-size:22px; min-width:50px; text-align:right;">120s</span>
               </div>
             </div>
             <button class="btn btn-primary btn-block" id="postNowBtn" style="margin-top:16px; padding:14px;" onclick="createPostJob()">
@@ -776,6 +776,9 @@ input[type="range"]::-webkit-slider-thumb{
                 <label class="switch"><input type="checkbox" id="schedAi"><span class="slider"></span></label>
               </div>
               <div id="scheduleRiskBox" style="display:none;margin:12px 0;padding:12px;border:1px solid rgba(234,179,8,.45);border-radius:10px;background:rgba(234,179,8,.08);font-size:12px;color:var(--text-2);"></div>
+              <div style="margin:12px 0;padding:12px;border:1px solid rgba(78,204,163,.28);border-radius:10px;background:rgba(78,204,163,.06);font-size:12px;color:var(--text-2);">
+                <strong style="color:var(--text);">Anti-bot defense active</strong> · max 8 groups/job, 2-day hard group cooldown, 90-210s randomized spacing, recurring schedule jitter, and stop-on-Facebook-block/checkpoint.
+              </div>
               <button class="btn btn-primary btn-block" onclick="addSchedule()">Create Schedule</button>
             </div>
           </div>
@@ -1362,18 +1365,26 @@ document.addEventListener('change', e=>{
   if (['schedFreq','schedDay','schedAi'].includes(e.target.id)) updateRiskPanels();
 });
 
+const ANTI_BOT_RULES = {
+  maxGroupsPerJob: 8,
+  hardCooldownDays: 2,
+  minDelaySeconds: 90,
+  maxDelaySeconds: 210,
+  scheduleJitterMinutes: 75
+};
+
 function buildRiskWarnings({ message='', groups=[], delay=30, scheduledFor=null, mode='now' } = {}){
   const warnings=[];
   const text=(message||'').trim();
   const groupCount=groups.length || 0;
-  if (groupCount >= 15) warnings.push(`High risk: ${groupCount} groups selected. Large batches can look spammy to Facebook and group admins.`);
-  else if (groupCount >= 8) warnings.push(`Moderate risk: ${groupCount} groups selected. Watch for duplicate-looking posts across groups.`);
-  if (delay < 15 && groupCount > 1) warnings.push(`Short delay: ${delay}s between posts may look automated. You can proceed, but slower is safer.`);
+  if (groupCount > ANTI_BOT_RULES.maxGroupsPerJob) warnings.push(`Anti-bot cap: ${groupCount} groups selected; the extension will only process ${ANTI_BOT_RULES.maxGroupsPerJob} and skip the rest.`);
+  else if (groupCount >= 6) warnings.push(`Moderate risk: ${groupCount} groups selected. Anti-bot spacing/cooldowns will still apply.`);
+  if (delay < ANTI_BOT_RULES.minDelaySeconds && groupCount > 1) warnings.push(`Delay floor: ${delay}s is below the anti-bot floor. The extension will enforce ${ANTI_BOT_RULES.minDelaySeconds}-${ANTI_BOT_RULES.maxDelaySeconds}s randomized spacing.`);
   if (text.length < 80) warnings.push('Short message: very brief promo copy can look spammy. Consider adding context or value.');
   if (/\b(buy now|limited time|act now|guaranteed|free money|click here)\b/i.test(text)) warnings.push('Sales-heavy wording detected. Softer copy usually performs better in Facebook groups.');
   if ((text.match(/https?:\/\//g)||[]).length > 1) warnings.push('Multiple links detected. Facebook/group admins may treat link-heavy posts as spam.');
   if (mode === 'schedule') {
-    warnings.push('Scheduled posts only run while Chrome is open, the extension is paired, and Facebook is logged in. If Chrome wakes late, the job may run late.');
+    warnings.push(`Scheduled posts only run while Chrome is open, the extension is paired, and Facebook is logged in. Recurring runs get up to ${ANTI_BOT_RULES.scheduleJitterMinutes} minutes of forward jitter.`);
     if (scheduledFor && scheduledFor < new Date()) warnings.push('This scheduled time is already past. Amplr will queue the next valid time instead of blocking you.');
   }
   return warnings;
@@ -1923,7 +1934,7 @@ async function addSchedule(){
     user_id:user.id,
     message,
     groups,
-    delay: settingsCache.default_delay || 30,
+    delay: Math.max(settingsCache.default_delay || 120, ANTI_BOT_RULES.minDelaySeconds),
     ai_enabled: document.getElementById('schedAi').checked,
     ai_prompt: settingsCache.ai_prompt || null,
     status: 'pending',
@@ -1958,7 +1969,7 @@ async function renderSchedules(){
     <div class="job">
       <div class="job-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>
       <div class="job-body"><div class="job-msg">${esc((s.message||'').substring(0,50))}...</div>
-      <div class="job-meta">Next: ${esc(nextFire)} · ${esc(type)} · ${(s.groups||[]).length} group(s)</div></div>
+      <div class="job-meta">Next: ${esc(nextFire)} · ${esc(type)} · ${(s.groups||[]).length} group(s) · anti-bot on</div></div>
       <button class="btn btn-ghost" style="padding:6px 10px;" onclick="removeSchedule('${s.id}')">Cancel</button>
     </div>`;
   }).join('');

@@ -5,6 +5,24 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const EXT_VERSION = chrome.runtime.getManifest?.().version || 'unknown';
 const CONNECTION_STATUS_KEY = 'extension_status';
 
+// Software-level anti-bot safety controls. These reduce automated-looking
+// posting patterns and stop when Facebook shows block/checkpoint signals.
+// They are safeguards, not stealth/captcha-bypass logic.
+const ANTI_BOT = {
+  maxGroupsPerJob: 8,
+  hardCooldownDays: 2,
+  minDelaySeconds: 90,
+  maxDelaySeconds: 210,
+  scheduleJitterMinutes: 75,
+  skipBanRisk: new Set(['medium', 'high']),
+  dailyUserPostCap: 24
+};
+
+function randInt(min, max) {
+  min = Math.ceil(min); max = Math.floor(max);
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
 // ============ HANDLE MESSAGES FROM POPUP ============
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'START_POSTING') {
@@ -529,6 +547,39 @@ function broadcastDashStatus(text, color) {
   chrome.runtime.sendMessage({ type: 'DASH_JOB_STATUS', text, color }).catch(() => {});
 }
 
+function isFacebookDefenseError(value) {
+  const text = String(value || '').toLowerCase();
+  return /checkpoint|confirm your identity|temporarily blocked|action blocked|try again later|we limit how often|unusual activity|security check|account restricted/.test(text);
+}
+
+function skippedResult(target, reason, warning, extra = {}) {
+  return {
+    group_url: target.url,
+    group_name: target.name || target.group_name || null,
+    identity_name: target.identity_name || null,
+    identity_key: target.identity_key || null,
+    status: 'skipped',
+    skip_reason: reason,
+    warnings: warning ? [warning] : [],
+    skipped_at: new Date().toISOString(),
+    ...extra
+  };
+}
+
+async function countRecentPostedResults(session, sinceIso) {
+  try {
+    const res = await fetch(`${SB_URL}/rest/v1/jsw_post_results?user_id=eq.${encodeURIComponent(session.userId)}&posted_at=gte.${encodeURIComponent(sinceIso)}&select=id`, {
+      headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}` }
+    });
+    if (!res.ok) return null;
+    const rows = await res.json();
+    return Array.isArray(rows) ? rows.length : null;
+  } catch (e) {
+    extLog('warn', 'recent post cap check failed: ' + e.message);
+    return null;
+  }
+}
+
 // Fetch pending jobs for this paired user via REST API
 async function pollPendingJobs() {
   const session = await getStoredSession();
@@ -578,6 +629,9 @@ async function requeueRepeatingJob(job, session) {
       next.setDate(next.getDate() + 1);
       if (days.includes(next.getDay())) break;
     }
+    // Add forward-only jitter after the base repeat day is selected so
+    // recurring schedules do not fire at the exact same minute every run.
+    next.setMinutes(next.getMinutes() + randInt(0, ANTI_BOT.scheduleJitterMinutes));
     await fetch(`${SB_URL}/rest/v1/jsw_post_jobs`, {
       method: 'POST',
       headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
@@ -586,7 +640,7 @@ async function requeueRepeatingJob(job, session) {
         message: job.message,
         image_url: job.image_url || null,
         groups: job.groups,
-        delay: job.delay || 30,
+        delay: Math.max(job.delay || 30, ANTI_BOT.minDelaySeconds),
         ai_enabled: job.ai_enabled,
         ai_prompt: job.ai_prompt || null,
         first_comment: job.first_comment || null,
@@ -696,7 +750,11 @@ async function executeDashJob(job) {
   if (!Array.isArray(groups)) {
     try { groups = JSON.parse(groups); } catch (e) { groups = []; }
   }
-  const groupTargets = groups.map(g => typeof g === 'string' ? { url:g } : g).filter(g => g && g.url);
+  let groupTargets = groups.map(g => typeof g === 'string' ? { url:g } : g).filter(g => g && g.url);
+  const cappedTargets = groupTargets.slice(ANTI_BOT.maxGroupsPerJob);
+  if (cappedTargets.length) {
+    groupTargets = groupTargets.slice(0, ANTI_BOT.maxGroupsPerJob);
+  }
   const groupUrls = groupTargets.map(g => g.url);
 
   extLog('info', 'Job ' + job.id + ' — ' + groupUrls.length + ' groups');
@@ -729,10 +787,26 @@ async function executeDashJob(job) {
 
   let successCount = 0;
   let lastError = null;
-  const perGroupResults = [];
+  const perGroupResults = cappedTargets.map(t => skippedResult(t, 'max_groups_per_job', {
+    type: 'max_groups_per_job',
+    max_groups_per_job: ANTI_BOT.maxGroupsPerJob,
+    message: `Skipped because anti-bot defense limits one job to ${ANTI_BOT.maxGroupsPerJob} groups.`
+  }));
 
-  // Load cooldown setting (default 2 days) — fetch once before the loop
-  const cooldownDays = dashSession?.cooldown_days ?? 2;
+  if (cappedTargets.length) {
+    jobWarnings.push({
+      type: 'max_groups_per_job',
+      skipped_count: cappedTargets.length,
+      max_groups_per_job: ANTI_BOT.maxGroupsPerJob,
+      message: `Anti-bot defense limited this job to ${ANTI_BOT.maxGroupsPerJob} groups and skipped ${cappedTargets.length}.`
+    });
+  }
+
+  // Load cooldown setting, but never allow less than the hard anti-bot floor.
+  const cooldownDays = Math.max(dashSession?.cooldown_days ?? ANTI_BOT.hardCooldownDays, ANTI_BOT.hardCooldownDays);
+
+  const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  let recentPostedCount = await countRecentPostedResults(dashSession, since24h);
 
   // Pre-fetch all group cooldown data in one query (avoids N+1 per group)
   let groupCooldownMap = {};
@@ -763,19 +837,42 @@ async function executeDashJob(job) {
     try {
       const gd = groupCooldownMap[`${identityKey}::${groupUrl}`] || groupCooldownMap[`__legacy__::${groupUrl}`];
       const lastPosted = gd?.last_posted_at;
+      const banRisk = String(gd?.ban_risk || 'low').toLowerCase();
+      if (ANTI_BOT.skipBanRisk.has(banRisk)) {
+        cooldownWarning = {
+          type: 'ban_risk_skip',
+          ban_risk: banRisk,
+          message: `Skipped because this group is marked ${banRisk} risk.`
+        };
+        perGroupResults.push(skippedResult(target, 'ban_risk', cooldownWarning));
+        broadcastDashStatus(`Skipped risk group ${i + 1}/${groupUrls.length}`, '#eab308');
+        continue;
+      }
       if (lastPosted && cooldownDays > 0) {
         const daysSince = (Date.now() - new Date(lastPosted).getTime()) / (1000 * 60 * 60 * 24);
         if (daysSince < cooldownDays) {
           cooldownWarning = {
-            type: 'cooldown_warning',
+            type: 'cooldown_skip',
             days_since_last_post: Number(daysSince.toFixed(2)),
             cooldown_days: cooldownDays,
-            message: `Posted to this group ${daysSince.toFixed(1)} days ago. Continuing because Amplr warns but does not block.`
+            message: `Skipped because this group was posted to ${daysSince.toFixed(1)} days ago. Hard cooldown is ${cooldownDays} days.`
           };
-          extLog('warn', `${groupUrl} — cooldown warning only (${daysSince.toFixed(1)} days since last post)`);
-          chrome.runtime.sendMessage({ type: 'DASH_STATUS', text: `Risk warning: recent post to ${groupUrl.split('/').filter(Boolean).pop()}` }).catch(() => {});
-          broadcastDashStatus(`Risk warning ${i + 1}/${groupUrls.length}`, '#eab308');
+          extLog('warn', `${groupUrl} — anti-bot cooldown skip (${daysSince.toFixed(1)} days since last post)`);
+          perGroupResults.push(skippedResult(target, 'cooldown', cooldownWarning));
+          broadcastDashStatus(`Cooldown skip ${i + 1}/${groupUrls.length}`, '#eab308');
+          continue;
         }
+      }
+      if (recentPostedCount !== null && recentPostedCount >= ANTI_BOT.dailyUserPostCap) {
+        cooldownWarning = {
+          type: 'daily_post_cap',
+          daily_user_post_cap: ANTI_BOT.dailyUserPostCap,
+          recent_posted_count: recentPostedCount,
+          message: `Skipped because anti-bot defense hit the ${ANTI_BOT.dailyUserPostCap}/24h posting cap.`
+        };
+        perGroupResults.push(skippedResult(target, 'daily_post_cap', cooldownWarning));
+        broadcastDashStatus(`Daily cap skip ${i + 1}/${groupUrls.length}`, '#eab308');
+        continue;
       }
     } catch (e) {
       extLog('warn', 'Cooldown warning check error: ' + e.message);
@@ -837,6 +934,8 @@ async function executeDashJob(job) {
           body: JSON.stringify({ last_posted_at: postedAt })
         }).catch(e => extLog('warn', 'last_posted_at update error: ' + e.message));
 
+        if (recentPostedCount !== null) recentPostedCount++;
+
         // Record post result for ban detection
         fetch(`${SB_URL}/rest/v1/jsw_post_results`, {
           method: 'POST',
@@ -857,6 +956,7 @@ async function executeDashJob(job) {
 
       } else {
         lastError = response?.error || 'Unknown error';
+        const defenseTriggered = isFacebookDefenseError(lastError) || response?.error_code === 'facebook_defense';
         perGroupResults.push({
           group_url: groupUrl,
           group_name: target.name || target.group_name || null,
@@ -875,6 +975,11 @@ async function executeDashJob(job) {
         });
         extLog('error', `Failed ${i + 1}/${groupUrls.length} → ${groupUrl}: ${lastError}`);
         broadcastDashStatus(`Failed ${i + 1}/${groupUrls.length}`, '#e94560');
+        if (defenseTriggered) {
+          jobWarnings.push({ type: 'facebook_defense_stop', message: `Stopped batch after Facebook defense signal: ${lastError}` });
+          lastError = `Stopped after Facebook defense signal: ${lastError}`;
+          break;
+        }
       }
 
       await sleep(1000);
@@ -884,6 +989,7 @@ async function executeDashJob(job) {
       }
     } catch (e) {
       lastError = e.message;
+      const defenseTriggered = isFacebookDefenseError(lastError) || e.code === 'facebook_defense';
       perGroupResults.push({
         group_url: groupUrl,
         group_name: target.name || target.group_name || null,
@@ -906,11 +1012,17 @@ async function executeDashJob(job) {
         try { await chrome.tabs.remove(tab.id); } catch (_) {}
         tab = null;
       }
+      if (defenseTriggered) {
+        jobWarnings.push({ type: 'facebook_defense_stop', message: `Stopped batch after Facebook defense signal: ${lastError}` });
+        lastError = `Stopped after Facebook defense signal: ${lastError}`;
+        break;
+      }
     }
 
     if (i < groupUrls.length - 1) {
-      broadcastDashStatus(`Waiting ${job.delay || 30}s...`, '#6a6a8a');
-      await sleep((job.delay || 30) * 1000);
+      const waitSeconds = randInt(Math.max(job.delay || 30, ANTI_BOT.minDelaySeconds), Math.max(job.delay || 30, ANTI_BOT.maxDelaySeconds));
+      broadcastDashStatus(`Anti-bot wait ${waitSeconds}s...`, '#6a6a8a');
+      await sleep(waitSeconds * 1000);
     }
   }
 

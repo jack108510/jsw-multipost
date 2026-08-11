@@ -618,6 +618,31 @@
     return { identities, active_identity: identities.find(i => i.is_active)?.name || activeAfterOpen || activeBefore || null, expanded_profiles: expanded, pageUrl: location.href };
   }
 
+  function detectFacebookDefenseSignal() {
+    const text = normalizeText(document.body?.innerText || document.body?.textContent || '').toLowerCase();
+    const patterns = [
+      'temporarily blocked',
+      'action blocked',
+      'try again later',
+      'we limit how often',
+      'confirm your identity',
+      'checkpoint',
+      'security check',
+      'unusual activity',
+      'account restricted'
+    ];
+    const hit = patterns.find(p => text.includes(p));
+    if (!hit) return null;
+    const err = new Error(`Facebook defense signal detected: ${hit}`);
+    err.code = 'facebook_defense';
+    return err;
+  }
+
+  function assertNoFacebookDefenseSignal() {
+    const err = detectFacebookDefenseSignal();
+    if (err) throw err;
+  }
+
   function identityMatches(actual, expected) {
     if (!expected) return true;
     actual = cleanIdentityName(actual || '').toLowerCase();
@@ -731,6 +756,7 @@
   async function postToGroup(message, imageUrl, identityName, identityUrl=null) {
     log('=== START POST ===');
     const groupPageUrl = location.href;
+    assertNoFacebookDefenseSignal();
 
     // 0. Switch Facebook posting identity before opening the group composer.
     const identitySwitch = await switchToIdentity(identityName, identityUrl);
@@ -739,6 +765,7 @@
       location.href = groupPageUrl;
       await sleep(7000);
     }
+    assertNoFacebookDefenseSignal();
 
     // 1. Find trigger
     const trigger = await findTrigger();
@@ -797,6 +824,7 @@
 
     // 10. Wait for dialog to close / feed to refresh, then collect evidence
     await sleep(8000);
+    assertNoFacebookDefenseSignal();
     const evidence = findSubmittedPostEvidence(message);
     log('=== POST DONE ===', evidence);
     return {
@@ -882,5 +910,5 @@
     return true; // keep channel open
   });
 
-  log('Content script v6 loaded');
+  log('Content script v7 loaded');
 })();
