@@ -1381,6 +1381,60 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null) {
               .replace(/\b\w/g, c => c.toUpperCase())
               .trim();
           };
+          const imageUrlFromBackground = (backgroundImage) => {
+            const match = String(backgroundImage || '').match(/url\(["']?([^"')]+)["']?\)/i);
+            return match?.[1] || null;
+          };
+          const bestSrcFromSet = (srcset='') => {
+            const entries = String(srcset || '').split(',')
+              .map(part => part.trim().split(/\s+/))
+              .filter(parts => parts[0])
+              .map(parts => ({ url: parts[0], score: parseFloat(parts[1]) || 1 }));
+            entries.sort((a,b) => b.score - a.score);
+            return entries[0]?.url || null;
+          };
+          const cleanImageUrl = (value) => {
+            if (!value) return null;
+            try { value = new URL(value, location.href).href; } catch (_) {}
+            if (!/^(https?:|data:image\/)/i.test(value)) return null;
+            if (/static\.xx\.fbcdn\.net\/rsrc|emoji\.php|images\/emoji/i.test(value)) return null;
+            return value;
+          };
+          const extractGroupAvatarUrl = (a) => {
+            const roots = [];
+            const addRoot = node => { if (node && !roots.includes(node)) roots.push(node); };
+            addRoot(a);
+            addRoot(a.closest('[role=article], [role=listitem], div'));
+            let cur = a;
+            for (let i = 0; i < 5 && cur; i++, cur = cur.parentElement) addRoot(cur);
+            const candidates = [];
+            for (const root of roots) {
+              const imgs = [root.matches?.('img') ? root : null, ...root.querySelectorAll?.('img') || []].filter(Boolean);
+              imgs.forEach(img => {
+                const alt = cleanName(img.getAttribute?.('alt') || '');
+                const cls = String(img.className || '');
+                const box = img.getBoundingClientRect?.();
+                const width = box?.width || img.naturalWidth || 0;
+                const height = box?.height || img.naturalHeight || 0;
+                if (box && (width < 28 || height < 28)) return;
+                const url = cleanImageUrl(img.currentSrc || bestSrcFromSet(img.getAttribute?.('srcset')) || img.src || img.getAttribute?.('src'));
+                if (!url) return;
+                const iconPenalty = /emoji|icon|logo|verified|chevron|caret|sprite/i.test(`${alt} ${cls}`) ? 100000 : 0;
+                const shapeBonus = Math.abs(width - height) <= Math.max(10, Math.min(width, height) * 0.4) ? 5000 : 0;
+                candidates.push({ url, score: (width * height) + shapeBonus - iconPenalty });
+              });
+              const bgNodes = [root, ...root.querySelectorAll?.('[style*="background"], [class]') || []];
+              bgNodes.forEach(node => {
+                const box = node.getBoundingClientRect?.();
+                if (box && (box.width < 28 || box.height < 28)) return;
+                const inlineBg = cleanImageUrl(imageUrlFromBackground(node.style?.backgroundImage || node.style?.background || ''));
+                const computedBg = cleanImageUrl(imageUrlFromBackground(window.getComputedStyle?.(node)?.backgroundImage || ''));
+                const url = inlineBg || computedBg;
+                if (url) candidates.push({ url, score: ((box?.width || 40) * (box?.height || 40)) + 1000 });
+              });
+            }
+            return candidates.filter(c => c.score > 0).sort((a,b) => b.score - a.score)[0]?.url || null;
+          };
           const candidateTexts = (a) => {
             const out = [];
             const push = (v) => { v = cleanName(v); if (v && !out.includes(v)) out.push(v); };
@@ -1405,7 +1459,7 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null) {
             if (found.has(slug)) return;
             const name = candidateTexts(a).find(t => !badName(t)) || slugToName(slug);
             if (!name || badName(name)) return;
-            found.set(slug, { name, url: `https://www.facebook.com/groups/${encodeURIComponent(slug)}/` });
+            found.set(slug, { name, url: `https://www.facebook.com/groups/${encodeURIComponent(slug)}/`, group_avatar_url: extractGroupAvatarUrl(a) });
           });
           return [...found.values()];
         }
@@ -1435,22 +1489,34 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null) {
       user_id: session.userId,
       group_url: g.url,
       group_name: g.name || null,
+      group_avatar_url: g.group_avatar_url || g.avatar_url || g.image_url || null,
       identity_name: identityName || null,
       identity_key: identityKey || '__legacy__',
       identity_type: identityType || null
     }));
-    const CHUNK = 50;
-    for (let i = 0; i < rows.length; i += CHUNK) {
+    const saveGroupRows = async (chunk, includeAvatars = true) => {
+      const bodyRows = includeAvatars ? chunk : chunk.map(({ group_avatar_url, ...row }) => row);
       const saveRes = await fetch(`${SB_URL}/rest/v1/jsw_groups?on_conflict=user_id,identity_key,group_url`, {
         method: 'POST',
         headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}`, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-        body: JSON.stringify(rows.slice(i, i + CHUNK))
+        body: JSON.stringify(bodyRows)
       });
-      if (!saveRes.ok) throw new Error('Group save failed: ' + await saveRes.text());
+      if (saveRes.ok) return true;
+      const text = await saveRes.text();
+      if (includeAvatars && /group_avatar_url|schema cache|column/i.test(text)) {
+        extLog('warn', 'group_avatar_url column missing; saving groups without avatars until migration is applied');
+        return saveGroupRows(chunk, false);
+      }
+      throw new Error('Group save failed: ' + text);
+    };
+    const CHUNK = 50;
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      await saveGroupRows(rows.slice(i, i + CHUNK));
     }
 
     extLog('info', `Imported ${groups.length} groups via job ${jobId}`);
-    await sbUpdateJob(jobId, { status: 'done', result: { count: groups.length, identity_name: identityName || null, identity_key: identityKey || '__legacy__', identity_type: identityType || null, text: `Imported ${groups.length} groups${identityName ? ' for ' + identityName : ''}` }, completed_at: new Date().toISOString() });
+    const groupAvatarCount = groups.filter(g => !!(g.group_avatar_url || g.avatar_url || g.image_url)).length;
+    await sbUpdateJob(jobId, { status: 'done', result: { count: groups.length, avatar_count: groupAvatarCount, identity_name: identityName || null, identity_key: identityKey || '__legacy__', identity_type: identityType || null, text: `Imported ${groups.length} groups${identityName ? ' for ' + identityName : ''} · ${groupAvatarCount} photos` }, completed_at: new Date().toISOString() });
     chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_DONE', count: groups.length, groups }).catch(() => {});
 
   } catch (e) {
@@ -1534,6 +1600,60 @@ async function importFacebookGroups(identityMeta = null) {
               .replace(/\b\w/g, c => c.toUpperCase())
               .trim();
           };
+          const imageUrlFromBackground = (backgroundImage) => {
+            const match = String(backgroundImage || '').match(/url\(["']?([^"')]+)["']?\)/i);
+            return match?.[1] || null;
+          };
+          const bestSrcFromSet = (srcset='') => {
+            const entries = String(srcset || '').split(',')
+              .map(part => part.trim().split(/\s+/))
+              .filter(parts => parts[0])
+              .map(parts => ({ url: parts[0], score: parseFloat(parts[1]) || 1 }));
+            entries.sort((a,b) => b.score - a.score);
+            return entries[0]?.url || null;
+          };
+          const cleanImageUrl = (value) => {
+            if (!value) return null;
+            try { value = new URL(value, location.href).href; } catch (_) {}
+            if (!/^(https?:|data:image\/)/i.test(value)) return null;
+            if (/static\.xx\.fbcdn\.net\/rsrc|emoji\.php|images\/emoji/i.test(value)) return null;
+            return value;
+          };
+          const extractGroupAvatarUrl = (a) => {
+            const roots = [];
+            const addRoot = node => { if (node && !roots.includes(node)) roots.push(node); };
+            addRoot(a);
+            addRoot(a.closest('[role=article], [role=listitem], div'));
+            let cur = a;
+            for (let i = 0; i < 5 && cur; i++, cur = cur.parentElement) addRoot(cur);
+            const candidates = [];
+            for (const root of roots) {
+              const imgs = [root.matches?.('img') ? root : null, ...root.querySelectorAll?.('img') || []].filter(Boolean);
+              imgs.forEach(img => {
+                const alt = cleanName(img.getAttribute?.('alt') || '');
+                const cls = String(img.className || '');
+                const box = img.getBoundingClientRect?.();
+                const width = box?.width || img.naturalWidth || 0;
+                const height = box?.height || img.naturalHeight || 0;
+                if (box && (width < 28 || height < 28)) return;
+                const url = cleanImageUrl(img.currentSrc || bestSrcFromSet(img.getAttribute?.('srcset')) || img.src || img.getAttribute?.('src'));
+                if (!url) return;
+                const iconPenalty = /emoji|icon|logo|verified|chevron|caret|sprite/i.test(`${alt} ${cls}`) ? 100000 : 0;
+                const shapeBonus = Math.abs(width - height) <= Math.max(10, Math.min(width, height) * 0.4) ? 5000 : 0;
+                candidates.push({ url, score: (width * height) + shapeBonus - iconPenalty });
+              });
+              const bgNodes = [root, ...root.querySelectorAll?.('[style*="background"], [class]') || []];
+              bgNodes.forEach(node => {
+                const box = node.getBoundingClientRect?.();
+                if (box && (box.width < 28 || box.height < 28)) return;
+                const inlineBg = cleanImageUrl(imageUrlFromBackground(node.style?.backgroundImage || node.style?.background || ''));
+                const computedBg = cleanImageUrl(imageUrlFromBackground(window.getComputedStyle?.(node)?.backgroundImage || ''));
+                const url = inlineBg || computedBg;
+                if (url) candidates.push({ url, score: ((box?.width || 40) * (box?.height || 40)) + 1000 });
+              });
+            }
+            return candidates.filter(c => c.score > 0).sort((a,b) => b.score - a.score)[0]?.url || null;
+          };
           const candidateTexts = (a) => {
             const out = [];
             const push = (v) => { v = cleanName(v); if (v && !out.includes(v)) out.push(v); };
@@ -1559,7 +1679,7 @@ async function importFacebookGroups(identityMeta = null) {
             const name = candidateTexts(a).find(t => !badName(t)) || slugToName(slug);
             if (!name || badName(name)) return;
             const cleanUrl = `https://www.facebook.com/groups/${encodeURIComponent(slug)}/`;
-            found.set(slug, { name, url: cleanUrl });
+            found.set(slug, { name, url: cleanUrl, group_avatar_url: extractGroupAvatarUrl(a) });
           });
 
           return [...found.values()];
@@ -1602,15 +1722,15 @@ async function importFacebookGroups(identityMeta = null) {
       user_id:    session.userId,
       group_url:  g.url,
       group_name: g.name || null,
+      group_avatar_url: g.group_avatar_url || g.avatar_url || g.image_url || null,
       identity_name: identityName || null,
       identity_key: identityKey || '__legacy__',
       identity_type: identityType || null
     }));
 
     // Batch in chunks of 50
-    const CHUNK = 50;
-    for (let i = 0; i < rows.length; i += CHUNK) {
-      const chunk = rows.slice(i, i + CHUNK);
+    const saveGroupRows = async (chunk, includeAvatars = true) => {
+      const bodyRows = includeAvatars ? chunk : chunk.map(({ group_avatar_url, ...row }) => row);
       const saveRes = await fetch(`${SB_URL}/rest/v1/jsw_groups?on_conflict=user_id,identity_key,group_url`, {
         method: 'POST',
         headers: {
@@ -1619,9 +1739,19 @@ async function importFacebookGroups(identityMeta = null) {
           'Content-Type': 'application/json',
           'Prefer': 'resolution=merge-duplicates,return=minimal'
         },
-        body: JSON.stringify(chunk)
+        body: JSON.stringify(bodyRows)
       });
-      if (!saveRes.ok) throw new Error('Group save failed: ' + await saveRes.text());
+      if (saveRes.ok) return true;
+      const text = await saveRes.text();
+      if (includeAvatars && /group_avatar_url|schema cache|column/i.test(text)) {
+        extLog('warn', 'group_avatar_url column missing; saving groups without avatars until migration is applied');
+        return saveGroupRows(chunk, false);
+      }
+      throw new Error('Group save failed: ' + text);
+    };
+    const CHUNK = 50;
+    for (let i = 0; i < rows.length; i += CHUNK) {
+      await saveGroupRows(rows.slice(i, i + CHUNK));
     }
 
     extLog('info', `Imported ${groups.length} groups for user ${session.userId}${identityName ? ' / ' + identityName : ''}`);

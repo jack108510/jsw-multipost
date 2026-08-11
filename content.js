@@ -312,15 +312,21 @@
     for (const root of roots) {
       const imgs = [root.matches?.('img') ? root : null, ...root.querySelectorAll?.('img') || []].filter(Boolean);
       const imageCandidates = imgs
-        .filter(img => {
+        .map(img => {
           const alt = normalizeText(img.getAttribute?.('alt') || '');
           const cls = String(img.className || '');
           const box = img.getBoundingClientRect?.();
-          const usableSize = !box || (box.width >= 20 && box.height >= 20);
-          return usableSize && !/emoji|icon|logo|verified|chevron|caret/i.test(`${alt} ${cls}`);
+          const width = box?.width || img.naturalWidth || 0;
+          const height = box?.height || img.naturalHeight || 0;
+          const usableSize = !box || (width >= 24 && height >= 24);
+          const url = tryUrl(img.currentSrc || bestSrcFromSet(img.getAttribute?.('srcset')) || img.src || img.getAttribute?.('src'));
+          const iconPenalty = /emoji|icon|logo|verified|chevron|caret|sprite/i.test(`${alt} ${cls}`) ? 100000 : 0;
+          const shapeBonus = Math.abs(width - height) <= Math.max(8, Math.min(width, height) * 0.35) ? 5000 : 0;
+          return { url, score: (width * height) + shapeBonus - iconPenalty };
         })
-        .map(img => tryUrl(img.currentSrc || bestSrcFromSet(img.getAttribute?.('srcset')) || img.src || img.getAttribute?.('src')))
-        .filter(Boolean);
+        .filter(c => c.url && c.score > 0)
+        .sort((a,b) => b.score - a.score)
+        .map(c => c.url);
       if (imageCandidates.length) return imageCandidates[0];
 
       // SVG <image> elements can hold profile photos, but CSS namespace-style
@@ -405,7 +411,12 @@
   }
 
   function isForbiddenIdentityName(name) {
-    return /^(quick switch profiles?|see all profiles?|see all pages?|settings(?: & privacy)?|help(?: & support)?|report a problem|give feedback|meta verified|meta business suite|display & accessibility|privacy|terms|advertising|ad choices|cookies|more|active|log out)$/i.test(cleanIdentityName(name || ''));
+    const cleaned = cleanIdentityName(name || '');
+    if (!cleaned) return true;
+    if (/^(quick switch profiles?|see all profiles?|see all pages?|settings(?: & privacy)?|help(?: & support)?|report a problem|give feedback|meta verified|meta business suite|display & accessibility|privacy|terms|privacy policy|advertising|ad choices|cookies|more|active|log out)$/i.test(cleaned)) return true;
+    if (/^(?:[A-Z]\s*){1,3}$/i.test(cleaned.replace(/\./g, ''))) return true; // menu initials like "B B"
+    if (/^(facebook|meta|pages?|profiles?|home|watch|marketplace|groups?|notifications?|menu)$/i.test(cleaned)) return true;
+    return false;
   }
 
   function identityUrlAllowed(url) {
@@ -593,7 +604,8 @@
       const hasSwitcherVerb = /Switch to|Continue as|Use Facebook as/i.test(combined);
       const avatarUrl = extractAvatarUrl(el);
       const hasAvatar = !!avatarUrl;
-      const looksLikeIdentityRow = hasSwitcherVerb || /facebook identity|profile|page|active/i.test(combined) || hasAvatar;
+      const hasIdentityText = /facebook identity|profile|page|active|switch to|continue as|use facebook as/i.test(combined);
+      const looksLikeIdentityRow = hasSwitcherVerb || hasIdentityText || (hasAvatar && /profile\.php\?id=\d+|\/pages\//i.test(el.href || el.closest?.('a[href]')?.href || ''));
       if (!looksLikeIdentityRow) continue;
 
       const url = el.href || el.closest?.('a[href]')?.href || null;
