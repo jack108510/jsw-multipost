@@ -800,15 +800,15 @@ input[type="range"]::-webkit-slider-thumb{
               <h2>New post</h2>
               <div class="desc">One step at a time: profile → message → groups → timing → review.</div>
             </div>
-            <button class="btn btn-ghost" onclick="resetComposeWizard()">Start over</button>
+            <button type="button" class="btn btn-ghost" onclick="resetComposeWizard()">Start over</button>
           </div>
 
           <div class="compose-steps" id="composeStepNav">
-            <button class="compose-step active" data-compose-step="identity" onclick="showComposeStep('identity')"><span>1</span>Profile</button>
-            <button class="compose-step" data-compose-step="message" onclick="showComposeStep('message')"><span>2</span>Message</button>
-            <button class="compose-step" data-compose-step="groups" onclick="showComposeStep('groups')"><span>3</span>Groups</button>
-            <button class="compose-step" data-compose-step="timing" onclick="showComposeStep('timing')"><span>4</span>Timing</button>
-            <button class="compose-step" data-compose-step="review" onclick="showComposeStep('review')"><span>5</span>Review</button>
+            <button type="button" class="compose-step active" data-compose-step="identity" onclick="goComposeStep('identity')"><span>1</span>Profile</button>
+            <button type="button" class="compose-step" data-compose-step="message" onclick="goComposeStep('message')"><span>2</span>Message</button>
+            <button type="button" class="compose-step" data-compose-step="groups" onclick="goComposeStep('groups')"><span>3</span>Groups</button>
+            <button type="button" class="compose-step" data-compose-step="timing" onclick="goComposeStep('timing')"><span>4</span>Timing</button>
+            <button type="button" class="compose-step" data-compose-step="review" onclick="goComposeStep('review')"><span>5</span>Review</button>
           </div>
 
           <div class="compose-panel card" data-compose-panel="identity">
@@ -900,9 +900,9 @@ input[type="range"]::-webkit-slider-thumb{
           </div>
 
           <div class="compose-footer card">
-            <button class="btn btn-ghost" id="composeBackBtn" onclick="backComposeStep()">Back</button>
-            <button class="btn btn-primary" id="composeNextBtn" onclick="nextComposeStep()">Continue</button>
-            <button class="btn btn-primary" id="postNowBtn" style="display:none;" onclick="createPostJob()">
+            <button type="button" class="btn btn-ghost" id="composeBackBtn" onclick="backComposeStep()">Back</button>
+            <button type="button" class="btn btn-primary" id="composeNextBtn" onclick="nextComposeStep()">Continue</button>
+            <button type="button" class="btn btn-primary" id="postNowBtn" style="display:none;" onclick="createPostJob()">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
               Queue Post
             </button>
@@ -1353,8 +1353,8 @@ function renderPostingIdentities(){
     return `<div class="job">
       <div class="job-icon">${identityImageUrl(i)?`<img src="${esc(identityImageUrl(i))}" style="width:22px;height:22px;border-radius:999px;object-fit:cover;" referrerpolicy="no-referrer">`:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0113 0"/></svg>'}</div>
       <div class="job-body"><div class="job-msg">${esc(i.name || 'Unnamed identity')} ${i.is_active?'<span class="warning-chip">active</span>':''}</div><div class="job-meta">${count} group${count===1?'':'s'} · ${esc(i.type || 'facebook identity')}${i.url?' · '+esc(i.url):''}</div></div>
-      <button class="btn btn-ghost" style="padding:6px 10px;" onclick="setSelectedIdentity(${jsArg(key)}); syncGroupsForSelectedIdentity();">Sync</button>
-      <button class="btn ${key===selectedKey?'btn-primary':'btn-ghost'}" style="padding:6px 10px;" onclick="setSelectedIdentity(${jsArg(key)}); renderPostingIdentities();">${key===selectedKey?'Selected':'Use'}</button>
+      <button type="button" class="btn btn-ghost" style="padding:6px 10px;" data-key="${esc(key)}" onclick="setSelectedIdentity(this.dataset.key); syncGroupsForSelectedIdentity();">Sync</button>
+      <button type="button" class="btn ${key===selectedKey?'btn-primary':'btn-ghost'}" style="padding:6px 10px;" data-key="${esc(key)}" onclick="setSelectedIdentity(this.dataset.key); renderPostingIdentities();">${key===selectedKey?'Selected':'Use'}</button>
     </div>`;
   }).join('');
   renderIdentitySelectors();
@@ -1541,7 +1541,7 @@ function renderGroupsList(){
         <div style="display:flex;align-items:center;gap:12px;">
           <div class="job-icon">${identityImageUrl(identity)?`<img src="${esc(identityImageUrl(identity))}" style="width:22px;height:22px;border-radius:999px;object-fit:cover;" referrerpolicy="no-referrer">`:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0113 0"/></svg>'}</div>
           <div class="job-body"><div class="job-msg">${esc(identity.name || 'Unnamed channel')}</div><div class="job-meta">0 groups · ${esc(identity.type || 'facebook identity')}</div></div>
-          <button class="btn btn-ghost" style="padding:6px 10px;" onclick="setSelectedIdentity(${jsArg(key)}); syncGroupsForSelectedIdentity();">Sync</button>
+          <button type="button" class="btn btn-ghost" style="padding:6px 10px;" data-key="${esc(key)}" onclick="setSelectedIdentity(this.dataset.key); syncGroupsForSelectedIdentity();">Sync</button>
         </div>
       </div>`;
     }).join('') || emptyState('No groups yet','Use Sync All Channels to import and organize groups by posting identity.');
@@ -1560,8 +1560,8 @@ function renderGroupsList(){
       <div style="display:flex;align-items:center;gap:12px;">
         <div class="job-icon">${identityImageUrl(bucket.identity)?`<img src="${esc(identityImageUrl(bucket.identity))}" style="width:22px;height:22px;border-radius:999px;object-fit:cover;" referrerpolicy="no-referrer">`:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0113 0"/></svg>'}</div>
         <div class="job-body"><div class="job-msg">${esc(bucket.label)} ${selected?'<span class="warning-chip">selected</span>':''}${bucket.isLegacy?'<span class="warning-chip">needs channel</span>':''}</div><div class="job-meta">${bucket.groups.length} group${bucket.groups.length===1?'':'s'}${bucket.identity?.type?' · '+esc(bucket.identity.type):''}</div></div>
-        ${bucket.identity?`<button class="btn btn-ghost" style="padding:6px 10px;" onclick="setSelectedIdentity(${jsArg(bucket.key)}); syncGroupsForSelectedIdentity();">Sync</button>`:''}
-        ${bucket.identity?`<button class="btn ${selected?'btn-primary':'btn-ghost'}" style="padding:6px 10px;" onclick="setSelectedIdentity(${jsArg(bucket.key)}); renderPostingIdentities();">${selected?'Selected':'Use'}</button>`:''}
+        ${bucket.identity?`<button type="button" class="btn btn-ghost" style="padding:6px 10px;" data-key="${esc(bucket.key)}" onclick="setSelectedIdentity(this.dataset.key); syncGroupsForSelectedIdentity();">Sync</button>`:''}
+        ${bucket.identity?`<button type="button" class="btn ${selected?'btn-primary':'btn-ghost'}" style="padding:6px 10px;" data-key="${esc(bucket.key)}" onclick="setSelectedIdentity(this.dataset.key); renderPostingIdentities();">${selected?'Selected':'Use'}</button>`:''}
       </div>
       ${bucket.isLegacy?`<div class="result-meta" style="margin-top:10px;color:#facc15;">Legacy groups are preserved separately so they do not get mixed into Wildrose, Vet Inc, or other channels. Re-sync each channel to organize them under the right Page/profile.</div>`:''}
       <div class="result-list" style="margin-top:10px;">${groupsHtml}</div>
@@ -1572,6 +1572,7 @@ function renderGroupsList(){
 
 const COMPOSE_STEPS = ['identity','message','groups','timing','review'];
 let composeStep = 'identity';
+let composeSelectedGroupIds = new Set();
 
 function identityInitials(name=''){
   const parts=String(name||'').trim().split(/\s+/).filter(Boolean);
@@ -1602,7 +1603,7 @@ function renderComposeIdentityCards(){
     const key=identityKey(identity);
     const count=groupCountForIdentityKey(key);
     const selected=key===selectedKey;
-    return `<button class="identity-card ${selected?'selected':''}" onclick="selectComposeIdentity(${jsArg(key)}); nextComposeStep();">
+    return `<button type="button" class="identity-card ${selected?'selected':''}" data-key="${esc(key)}" onclick="selectComposeIdentity(this.dataset.key); nextComposeStep();">
       ${identityAvatarHtml(identity)}
       <div style="min-width:0;flex:1;">
         <div class="identity-card-name">${esc(identity.name || 'Unnamed identity')}</div>
@@ -1612,6 +1613,7 @@ function renderComposeIdentityCards(){
   }).join('');
 }
 function selectComposeIdentity(key){
+  composeSelectedGroupIds.clear();
   setSelectedIdentity(key);
   renderComposeWizard();
 }
@@ -1630,7 +1632,10 @@ function showComposeStep(step){
   if (step==='review') renderComposeReview();
 }
 function validateComposeStep(step){
-  if (step==='identity' && postingIdentitiesCache.length && !getSelectedIdentity()) { toast('Choose a posting profile first','error'); return false; }
+  if (step==='identity') {
+    if (!postingIdentitiesCache.length) { toast('Sync a posting profile first','error'); navigate('settings'); return false; }
+    if (!getSelectedIdentity()) { toast('Choose a posting profile first','error'); return false; }
+  }
   if (step==='message' && !(document.getElementById('composeMessage')?.value || '').trim()) { toast('Write the message first','error'); return false; }
   if (step==='groups' && !getSelectedGroups().length) { toast('Select at least one group','error'); return false; }
   if (step==='timing') {
@@ -1638,6 +1643,19 @@ function validateComposeStep(step){
     if ((mode==='later' || mode==='repeat') && !document.getElementById('composeScheduleTime')?.value) { toast('Choose a schedule time','error'); return false; }
   }
   return true;
+}
+function canEnterComposeStep(targetStep){
+  const targetIndex=COMPOSE_STEPS.indexOf(targetStep);
+  if (targetIndex <= 0) return true;
+  for (let i=0; i<targetIndex; i++) {
+    if (!validateComposeStep(COMPOSE_STEPS[i])) return false;
+  }
+  return true;
+}
+function goComposeStep(step){
+  if (!COMPOSE_STEPS.includes(step)) step='identity';
+  if (!canEnterComposeStep(step)) return;
+  showComposeStep(step);
 }
 function nextComposeStep(){
   if (!validateComposeStep(composeStep)) return;
@@ -1653,6 +1671,7 @@ function resetComposeWizard(){
   document.getElementById('composeImage').value='';
   document.getElementById('composeAiEnabled').checked=false;
   document.getElementById('composeAiPrompt').value='';
+  composeSelectedGroupIds.clear();
   document.querySelectorAll('#composeGroupSelect .chip.selected').forEach(c=>c.classList.remove('selected'));
   setComposeTimingMode('now');
   hideWaiting();
@@ -1670,12 +1689,17 @@ function renderComposeWizard(){
   showComposeStep(composeStep);
 }
 function selectAllComposeGroups(){
-  [...document.querySelectorAll('#composeGroupSelect .chip')].slice(0, ANTI_BOT_RULES.maxGroupsPerJob).forEach(c=>c.classList.add('selected'));
+  composeSelectedGroupIds.clear();
+  groupsForSelectedIdentity().slice(0, ANTI_BOT_RULES.maxGroupsPerJob).forEach(g=>composeSelectedGroupIds.add(String(g.id)));
+  renderComposeGroups();
   updateRiskPanels();
+  renderComposeReview();
 }
 function clearComposeGroups(){
-  document.querySelectorAll('#composeGroupSelect .chip.selected').forEach(c=>c.classList.remove('selected'));
+  composeSelectedGroupIds.clear();
+  renderComposeGroups();
   updateRiskPanels();
+  renderComposeReview();
 }
 function getComposeTimingMode(){
   return document.querySelector('input[name="composeTiming"]:checked')?.value || 'now';
@@ -1730,25 +1754,33 @@ function renderComposeReview(){
 function renderComposeGroups(){
   renderIdentitySelectors();
   const el = document.getElementById('composeGroupSelect');
+  if (!el) return;
   const visibleGroups = groupsForSelectedIdentity();
+  const visibleIds = new Set(visibleGroups.map(g=>String(g.id)));
+  composeSelectedGroupIds = new Set([...composeSelectedGroupIds].filter(id=>visibleIds.has(String(id))));
   if (!visibleGroups.length) {
     const identityName = currentIdentityName() || 'this identity';
     el.innerHTML = `<span style="color:var(--text-3);font-size:12px;">No groups saved for ${esc(identityName)}. Sync or add groups in the Groups tab.</span>`;
     return;
   }
-  el.innerHTML = visibleGroups.map(g=>`<div class="chip" data-id="${g.id}" onclick="toggleGroupChip(this)">
-    <span>${esc(g.group_name||g.group_url.split('/').pop())}</span></div>`).join('');
+  el.innerHTML = visibleGroups.map(g=>`<button type="button" class="chip ${composeSelectedGroupIds.has(String(g.id))?'selected':''}" data-id="${esc(String(g.id))}" onclick="toggleGroupChip(this)">
+    <span>${esc(g.group_name||g.group_url.split('/').pop())}</span></button>`).join('');
   updateRiskPanels();
 }
 
 function toggleGroupChip(el){
-  el.classList.toggle('selected');
+  const id=String(el.dataset.id || '');
+  if (!id) return;
+  if (composeSelectedGroupIds.has(id)) composeSelectedGroupIds.delete(id);
+  else composeSelectedGroupIds.add(id);
+  el.classList.toggle('selected', composeSelectedGroupIds.has(id));
+  updateRiskPanels();
+  renderComposeReview();
 }
 
 function getSelectedGroups(){
-  const selected = [...document.querySelectorAll('#composeGroupSelect .chip.selected')];
   const identity=getSelectedIdentity();
-  return selected.map(c=>groupsCache.find(g=>g.id===c.dataset.id)).filter(Boolean).map(g=>({url:g.group_url,name:g.group_name,identity_name:identity?.name || null,identity_key:identityKey(identity) || legacyIdentityKey(),identity_type:identity?.type || null}));
+  return groupsCache.filter(g=>composeSelectedGroupIds.has(String(g.id))).map(g=>({url:g.group_url,name:g.group_name,identity_name:identity?.name || null,identity_key:identityKey(identity) || legacyIdentityKey(),identity_type:identity?.type || null}));
 }
 
 /* ============================================================
@@ -1766,7 +1798,7 @@ document.addEventListener('input', e=>{
   if (['composeMessage','composeDelay','composeScheduleDate','composeScheduleTime','schedMessage','schedTime'].includes(e.target.id)) { updateRiskPanels(); renderComposeReview(); }
 });
 document.addEventListener('click', e=>{
-  if (e.target.closest('#composeGroupSelect .chip')) setTimeout(updateRiskPanels, 0);
+  if (e.target.closest('#composeGroupSelect .chip')) setTimeout(()=>{ updateRiskPanels(); renderComposeReview(); }, 0);
 });
 document.addEventListener('change', e=>{
   if (['composeRepeatFreq','composeRepeatDay','schedFreq','schedDay','schedAi'].includes(e.target.id)) { updateRiskPanels(); renderComposeReview(); }
