@@ -269,22 +269,73 @@
     return match?.[1] || null;
   }
 
+  function bestSrcFromSet(srcset='') {
+    const entries = String(srcset || '').split(',')
+      .map(part => part.trim().split(/\s+/))
+      .filter(parts => parts[0])
+      .map(parts => ({ url: parts[0], score: parseFloat(parts[1]) || 1 }));
+    entries.sort((a,b) => b.score - a.score);
+    return entries[0]?.url || null;
+  }
+
+  function avatarUrlAllowed(url) {
+    if (!url) return false;
+    const value = String(url).trim();
+    if (!value || /^(about:blank|chrome-extension:)/i.test(value)) return false;
+    if (/static\.xx\.fbcdn\.net\/rsrc/i.test(value)) return false;
+    if (/\/emoji\.php|\/images\/emoji|\/assets\/emoji/i.test(value)) return false;
+    return /^(https?:|data:image\/)/i.test(value);
+  }
+
+  function nearbyAvatarRoots(el) {
+    const roots = [];
+    const add = node => { if (node && !roots.includes(node)) roots.push(node); };
+    add(el);
+    add(el?.closest?.('a[href], [role="button"], [role="listitem"], [role="article"]'));
+    let cur = el;
+    for (let i = 0; cur && i < 5; i++, cur = cur.parentElement) add(cur);
+    for (const root of [...roots]) {
+      add(root.previousElementSibling);
+      add(root.nextElementSibling);
+    }
+    return roots.filter(Boolean);
+  }
+
   function extractAvatarUrl(el) {
-    const roots = [el, el?.closest?.('a[href], [role="button"], div'), el?.closest?.('div')].filter(Boolean);
+    const roots = nearbyAvatarRoots(el);
+    const tryUrl = value => {
+      if (!value) return null;
+      try { value = new URL(value, location.href).href; } catch (_) {}
+      return avatarUrlAllowed(value) ? value : null;
+    };
+
     for (const root of roots) {
-      const img = root.matches?.('img[src]') ? root : root.querySelector?.('img[src]');
-      const src = img?.currentSrc || img?.src || img?.getAttribute?.('src');
-      if (src) return src;
+      const imgs = [root.matches?.('img') ? root : null, ...root.querySelectorAll?.('img') || []].filter(Boolean);
+      const imageCandidates = imgs
+        .filter(img => {
+          const alt = normalizeText(img.getAttribute?.('alt') || '');
+          const cls = String(img.className || '');
+          const box = img.getBoundingClientRect?.();
+          const usableSize = !box || (box.width >= 20 && box.height >= 20);
+          return usableSize && !/emoji|icon|logo|verified|chevron|caret/i.test(`${alt} ${cls}`);
+        })
+        .map(img => tryUrl(img.currentSrc || bestSrcFromSet(img.getAttribute?.('srcset')) || img.src || img.getAttribute?.('src')))
+        .filter(Boolean);
+      if (imageCandidates.length) return imageCandidates[0];
 
-      const svgImage = root.matches?.('image') ? root : root.querySelector?.('image[href], image[xlink\:href]');
-      const href = svgImage?.href?.baseVal || svgImage?.getAttribute?.('href') || svgImage?.getAttribute?.('xlink:href');
-      if (href) return href;
+      const svgImages = [root.matches?.('image') ? root : null, ...root.querySelectorAll?.('image[href], image[xlink\:href]') || []].filter(Boolean);
+      for (const svgImage of svgImages) {
+        const href = tryUrl(svgImage?.href?.baseVal || svgImage?.getAttribute?.('href') || svgImage?.getAttribute?.('xlink:href'));
+        if (href) return href;
+      }
 
-      const bgNodes = [root, ...root.querySelectorAll?.('[style*="background"]') || []];
+      const bgNodes = [root, ...root.querySelectorAll?.('[style*="background"], [class]') || []];
       for (const node of bgNodes) {
-        const inlineBg = imageUrlFromBackground(node.style?.backgroundImage || node.style?.background || '');
+        const box = node.getBoundingClientRect?.();
+        if (box && (box.width < 20 || box.height < 20)) continue;
+        const inlineBg = tryUrl(imageUrlFromBackground(node.style?.backgroundImage || node.style?.background || ''));
         if (inlineBg) return inlineBg;
-        const computedBg = imageUrlFromBackground(window.getComputedStyle?.(node)?.backgroundImage || '');
+        const computedBg = tryUrl(imageUrlFromBackground(window.getComputedStyle?.(node)?.backgroundImage || ''));
         if (computedBg) return computedBg;
       }
     }

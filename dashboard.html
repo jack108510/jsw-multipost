@@ -373,8 +373,9 @@ input[type="range"]::-webkit-slider-thumb{
 .identity-card{display:flex;align-items:center;gap:12px;text-align:left;padding:14px;background:var(--card-2);border:1px solid var(--border);border-radius:12px;transition:all .18s;min-width:0;}
 .identity-card:hover{border-color:var(--border-2);transform:translateY(-1px);}
 .identity-card.selected{border-color:rgba(99,102,241,.7);background:var(--grad-subtle);}
-.identity-avatar{width:46px;height:46px;border-radius:999px;background:var(--grad-subtle);border:1px solid var(--border-2);display:flex;align-items:center;justify-content:center;overflow:hidden;font-weight:800;color:var(--text);flex-shrink:0;}
+.identity-avatar{width:46px;height:46px;border-radius:999px;background:linear-gradient(135deg,rgba(99,102,241,.35),rgba(78,204,163,.28));border:1px solid var(--border-2);box-shadow:inset 0 0 0 1px rgba(255,255,255,.04);display:flex;align-items:center;justify-content:center;overflow:hidden;font-weight:800;color:var(--text);flex-shrink:0;letter-spacing:.02em;}
 .identity-avatar img{width:100%;height:100%;object-fit:cover;display:block;}
+.identity-avatar.small{width:32px;height:32px;font-size:11px;}
 .identity-card-name{font-size:14px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .identity-card-meta{font-size:11px;color:var(--text-3);margin-top:2px;}
 .selected-identity-pill{display:inline-flex;align-items:center;gap:9px;padding:8px 10px;margin-bottom:14px;border:1px solid var(--border);background:var(--card-2);border-radius:999px;font-size:12px;color:var(--text-2);}
@@ -1351,7 +1352,7 @@ function renderPostingIdentities(){
     const key=identityKey(i);
     const count=groupCountForIdentityKey(key);
     return `<div class="job">
-      <div class="job-icon">${identityImageUrl(i)?`<img src="${esc(identityImageUrl(i))}" style="width:22px;height:22px;border-radius:999px;object-fit:cover;" referrerpolicy="no-referrer">`:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0113 0"/></svg>'}</div>
+      ${identityAvatarHtml(i, 'small')}
       <div class="job-body"><div class="job-msg">${esc(i.name || 'Unnamed identity')} ${i.is_active?'<span class="warning-chip">active</span>':''}</div><div class="job-meta">${count} group${count===1?'':'s'} · ${esc(i.type || 'facebook identity')}${i.url?' · '+esc(i.url):''}</div></div>
       <button type="button" class="btn btn-ghost" style="padding:6px 10px;" data-key="${esc(key)}" onclick="setSelectedIdentity(this.dataset.key); syncGroupsForSelectedIdentity();">Sync</button>
       <button type="button" class="btn ${key===selectedKey?'btn-primary':'btn-ghost'}" style="padding:6px 10px;" data-key="${esc(key)}" onclick="setSelectedIdentity(this.dataset.key); renderPostingIdentities();">${key===selectedKey?'Selected':'Use'}</button>
@@ -1539,7 +1540,7 @@ function renderGroupsList(){
       const key=identityKey(identity);
       return `<div class="job" style="display:block;">
         <div style="display:flex;align-items:center;gap:12px;">
-          <div class="job-icon">${identityImageUrl(identity)?`<img src="${esc(identityImageUrl(identity))}" style="width:22px;height:22px;border-radius:999px;object-fit:cover;" referrerpolicy="no-referrer">`:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0113 0"/></svg>'}</div>
+          ${identityAvatarHtml(identity, 'small')}
           <div class="job-body"><div class="job-msg">${esc(identity.name || 'Unnamed channel')}</div><div class="job-meta">0 groups · ${esc(identity.type || 'facebook identity')}</div></div>
           <button type="button" class="btn btn-ghost" style="padding:6px 10px;" data-key="${esc(key)}" onclick="setSelectedIdentity(this.dataset.key); syncGroupsForSelectedIdentity();">Sync</button>
         </div>
@@ -1558,7 +1559,7 @@ function renderGroupsList(){
       </div>`).join('') : `<div class="result-meta" style="margin-top:10px;">No groups synced for this channel yet.</div>`;
     return `<div class="job" style="display:block;${selected?'border-color:rgba(78,204,163,.45);':''}">
       <div style="display:flex;align-items:center;gap:12px;">
-        <div class="job-icon">${identityImageUrl(bucket.identity)?`<img src="${esc(identityImageUrl(bucket.identity))}" style="width:22px;height:22px;border-radius:999px;object-fit:cover;" referrerpolicy="no-referrer">`:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0113 0"/></svg>'}</div>
+        ${identityAvatarHtml(bucket.identity, 'small')}
         <div class="job-body"><div class="job-msg">${esc(bucket.label)} ${selected?'<span class="warning-chip">selected</span>':''}${bucket.isLegacy?'<span class="warning-chip">needs channel</span>':''}</div><div class="job-meta">${bucket.groups.length} group${bucket.groups.length===1?'':'s'}${bucket.identity?.type?' · '+esc(bucket.identity.type):''}</div></div>
         ${bucket.identity?`<button type="button" class="btn btn-ghost" style="padding:6px 10px;" data-key="${esc(bucket.key)}" onclick="setSelectedIdentity(this.dataset.key); syncGroupsForSelectedIdentity();">Sync</button>`:''}
         ${bucket.identity?`<button type="button" class="btn ${selected?'btn-primary':'btn-ghost'}" style="padding:6px 10px;" data-key="${esc(bucket.key)}" onclick="setSelectedIdentity(this.dataset.key); renderPostingIdentities();">${selected?'Selected':'Use'}</button>`:''}

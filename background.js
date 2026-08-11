@@ -670,6 +670,7 @@ async function getPostingIdentityByNameOrKey(name, key) {
     const norm = v => String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
     const wantedName = norm(name);
     const wantedKey = norm(key);
+    if (wantedKey === '__load_all__') return { __all: identities };
     return identities.find(i =>
       (wantedName && norm(i.name) === wantedName) ||
       (wantedKey && [i.id, i.url, i.name].some(v => norm(v) === wantedKey))
@@ -1232,7 +1233,9 @@ async function syncFacebookIdentitiesForJob(jobId) {
       extLog('warn', 'Managed Pages scrape failed: ' + (pagesResponse.error || 'unknown'));
     }
 
-    const combined = mergePostingIdentities(switcherResponse.identities || [], pagesResponse?.pages || []);
+    const existingStored = await getPostingIdentityByNameOrKey(null, '__load_all__');
+    const existingIdentities = Array.isArray(existingStored?.__all) ? existingStored.__all : [];
+    const combined = mergePostingIdentities(existingIdentities, switcherResponse.identities || [], pagesResponse?.pages || []);
     const identities = combined.map((i, idx) => ({
       id: i.id || i.url || i.name || `identity-${idx + 1}`,
       name: i.name || `Identity ${idx + 1}`,
