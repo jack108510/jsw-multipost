@@ -1181,7 +1181,7 @@ function mergePostingIdentities(...lists) {
         name,
         type: item.type || prev.type || 'facebook identity',
         url: item.url || prev.url || null,
-        avatar_url: item.avatar_url || prev.avatar_url || null,
+        avatar_url: item.avatar_url || item.picture_url || item.profile_picture_url || item.photo_url || item.image_url || prev.avatar_url || prev.picture_url || prev.profile_picture_url || prev.photo_url || prev.image_url || null,
         is_active: !!(prev.is_active || item.is_active)
       });
     }
@@ -1238,11 +1238,12 @@ async function syncFacebookIdentitiesForJob(jobId) {
       name: i.name || `Identity ${idx + 1}`,
       type: i.type || 'facebook identity',
       url: i.url || null,
-      avatar_url: i.avatar_url || null,
+      avatar_url: i.avatar_url || i.picture_url || i.profile_picture_url || i.photo_url || i.image_url || null,
       is_active: !!i.is_active,
       source: i.source || null,
       synced_at: new Date().toISOString()
     }));
+    const avatarCount = identities.filter(i => !!i.avatar_url).length;
     if (!identities.length) throw new Error('No Facebook identities found');
 
     await upsertAmplrData(session, 'posting_identities', {
@@ -1251,7 +1252,9 @@ async function syncFacebookIdentitiesForJob(jobId) {
       synced_at: new Date().toISOString(),
       sources: {
         switcher_count: (switcherResponse.identities || []).length,
-        managed_pages_count: (pagesResponse?.pages || []).length
+        managed_pages_count: (pagesResponse?.pages || []).length,
+        avatar_count: avatarCount,
+        extension_version: EXT_VERSION
       }
     });
 
@@ -1265,7 +1268,9 @@ async function syncFacebookIdentitiesForJob(jobId) {
         active_identity: switcherResponse.active_identity || null,
         switcher_count: (switcherResponse.identities || []).length,
         managed_pages_count: (pagesResponse?.pages || []).length,
-        text: `Synced ${identities.length} posting identities`
+        avatar_count: avatarCount,
+        extension_version: EXT_VERSION,
+        text: `Synced ${identities.length} posting identities · ${avatarCount} profile pictures`
       },
       completed_at: new Date().toISOString()
     });

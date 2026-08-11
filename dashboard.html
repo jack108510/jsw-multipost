@@ -1297,7 +1297,8 @@ function pollIdentitySyncJob(jobId){
         await savePostingIdentitiesFromJob(data);
         renderPostingIdentities();
         renderComposeGroups();
-        toast(`Synced ${postingIdentitiesCache.length} posting identities`,'success');
+        const avatarText = Number.isFinite(r.avatar_count) ? ` · ${r.avatar_count} profile pictures` : '';
+        toast(`Synced ${postingIdentitiesCache.length} posting identities${avatarText}`,'success');
       } else {
         toast('Identity sync failed: '+(r.error || data.error || 'unknown'),'error');
       }

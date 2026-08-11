@@ -29,6 +29,6 @@ assert(/detectFacebookDefenseSignal/.test(content), 'content-script defense dete
 assert(/temporarily blocked/.test(content) && /confirm your identity/.test(content), 'Facebook block/checkpoint terms missing');
 assert(/ANTI_BOT_RULES/.test(dashboard), 'dashboard anti-bot rules missing');
 assert(/Anti-bot defense active/.test(dashboard), 'dashboard anti-bot UI copy missing');
-assert(manifest.version === '2.2.8', `manifest version expected 2.2.8, got ${manifest.version}`);
+assert(manifest.version === '2.2.9', `manifest version expected 2.2.9, got ${manifest.version}`);
 
 console.log('anti-bot defense tests passed');
