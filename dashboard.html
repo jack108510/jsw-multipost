@@ -359,6 +359,43 @@ input[type="range"]::-webkit-slider-thumb{
 .chip.selected{background:var(--grad-subtle); border-color:var(--accent); color:var(--text);}
 .chip .x{opacity:.5; font-size:14px; line-height:1;}
 
+
+/* Compose wizard */
+.compose-shell{display:grid;gap:14px;max-width:920px;margin:0 auto;}
+.compose-header{display:flex;align-items:center;justify-content:space-between;gap:14px;}
+.compose-header h2{font-size:24px;letter-spacing:-.5px;margin-bottom:4px;}
+.compose-steps{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px;}
+.compose-step{display:flex;align-items:center;justify-content:center;gap:7px;padding:10px 8px;border:1px solid var(--border);background:var(--card);border-radius:10px;color:var(--text-3);font-size:12px;font-weight:700;transition:all .18s;}
+.compose-step span{width:20px;height:20px;border-radius:999px;display:flex;align-items:center;justify-content:center;background:var(--card-2);border:1px solid var(--border);font-size:10px;}
+.compose-step.active{color:var(--text);border-color:rgba(99,102,241,.55);background:var(--grad-subtle);}
+.compose-panel{min-height:360px;}
+.identity-card-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,230px),1fr));gap:12px;}
+.identity-card{display:flex;align-items:center;gap:12px;text-align:left;padding:14px;background:var(--card-2);border:1px solid var(--border);border-radius:12px;transition:all .18s;min-width:0;}
+.identity-card:hover{border-color:var(--border-2);transform:translateY(-1px);}
+.identity-card.selected{border-color:rgba(99,102,241,.7);background:var(--grad-subtle);}
+.identity-avatar{width:46px;height:46px;border-radius:999px;background:var(--grad-subtle);border:1px solid var(--border-2);display:flex;align-items:center;justify-content:center;overflow:hidden;font-weight:800;color:var(--text);flex-shrink:0;}
+.identity-avatar img{width:100%;height:100%;object-fit:cover;display:block;}
+.identity-card-name{font-size:14px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.identity-card-meta{font-size:11px;color:var(--text-3);margin-top:2px;}
+.selected-identity-pill{display:inline-flex;align-items:center;gap:9px;padding:8px 10px;margin-bottom:14px;border:1px solid var(--border);background:var(--card-2);border-radius:999px;font-size:12px;color:var(--text-2);}
+.selected-identity-pill .identity-avatar{width:28px;height:28px;font-size:10px;}
+.advanced-box{border:1px solid var(--border);background:var(--card-2);border-radius:12px;padding:12px 14px;margin-top:10px;}
+.advanced-box summary{cursor:pointer;font-size:12px;font-weight:700;color:var(--text-2);}
+.compose-group-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:8px;}
+.compose-group-grid .chip{justify-content:flex-start;min-height:40px;}
+.timing-options{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:10px;}
+.timing-option{display:flex;flex-direction:column;gap:4px;padding:14px;background:var(--card-2);border:1px solid var(--border);border-radius:12px;cursor:pointer;transition:all .18s;}
+.timing-option input{display:none;}
+.timing-option strong{font-size:13px;}
+.timing-option span{font-size:11px;color:var(--text-3);}
+.timing-option.selected{border-color:rgba(99,102,241,.65);background:var(--grad-subtle);}
+.compose-review{display:grid;gap:10px;}
+.review-row{padding:13px 14px;background:var(--card-2);border:1px solid var(--border);border-radius:10px;}
+.review-label{font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3);font-weight:800;margin-bottom:5px;}
+.review-value{font-size:13px;color:var(--text);overflow-wrap:anywhere;}
+.compose-footer{display:flex;align-items:center;justify-content:space-between;gap:10px;position:sticky;bottom:0;z-index:10;}
+@media(max-width:700px){.compose-steps{grid-template-columns:1fr;}.compose-step{justify-content:flex-start;}.compose-header,.compose-footer{align-items:stretch;flex-direction:column;}.compose-panel{min-height:auto;}}
+
 /* Group finder */
 /* Product polish */
 .onboarding-steps{display:grid;gap:8px;margin-top:10px;}
@@ -678,24 +715,40 @@ input[type="range"]::-webkit-slider-thumb{
 
       <!-- ================= COMPOSE ================= -->
       <section class="page" id="page-compose">
-        <div class="card" style="margin-bottom:16px;">
-          <h3>Start here</h3>
-          <div class="desc">Simple flow: connect the extension, add groups, test one post, then schedule.</div>
-          <div class="onboarding-steps">
-            <div class="onboarding-step"><div class="step-num">1</div><div class="step-copy"><strong>Install and pair the Chrome extension</strong>Open Settings, generate a pairing code, then enter it in the extension.</div></div>
-            <div class="onboarding-step"><div class="step-num">2</div><div class="step-copy"><strong>Sync identities, then add groups</strong>Detect Facebook Pages/profiles from the extension, then save or sync groups for that identity.</div></div>
-            <div class="onboarding-step"><div class="step-num">3</div><div class="step-copy"><strong>Test one post first</strong>Select one group, use a normal delay, and confirm the result in History.</div></div>
-            <div class="onboarding-step"><div class="step-num">4</div><div class="step-copy"><strong>Then schedule or scale</strong>Amplr warns about risky volume, but it will not block you.</div></div>
+        <div class="compose-shell">
+          <div class="compose-header card">
+            <div>
+              <h2>New post</h2>
+              <div class="desc">One step at a time: profile → message → groups → timing → review.</div>
+            </div>
+            <button class="btn btn-ghost" onclick="resetComposeWizard()">Start over</button>
           </div>
-        </div>
-        <div class="grid-2">
-          <div>
-            <div class="card">
-              <h3>Message</h3>
-              <div class="desc">This is what gets posted to each group.</div>
-              <div class="field"><textarea id="composeMessage" rows="6" placeholder="Write your post..." style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:14px;resize:vertical;"></textarea></div>
 
-              <div class="field">
+          <div class="compose-steps" id="composeStepNav">
+            <button class="compose-step active" data-compose-step="identity" onclick="showComposeStep('identity')"><span>1</span>Profile</button>
+            <button class="compose-step" data-compose-step="message" onclick="showComposeStep('message')"><span>2</span>Message</button>
+            <button class="compose-step" data-compose-step="groups" onclick="showComposeStep('groups')"><span>3</span>Groups</button>
+            <button class="compose-step" data-compose-step="timing" onclick="showComposeStep('timing')"><span>4</span>Timing</button>
+            <button class="compose-step" data-compose-step="review" onclick="showComposeStep('review')"><span>5</span>Review</button>
+          </div>
+
+          <div class="compose-panel card" data-compose-panel="identity">
+            <h3>Who are you posting as?</h3>
+            <div class="desc">Pick the Facebook profile or Page first. Amplr will only show groups connected to that identity.</div>
+            <div id="composeIdentityCards" class="identity-card-grid"></div>
+            <select id="composeIdentitySelect" onchange="selectComposeIdentity(this.value)" style="display:none;"></select>
+            <div class="desc" id="composeIdentityHint" style="margin-top:12px;">Sync identities in Settings if this list is empty.</div>
+          </div>
+
+          <div class="compose-panel card" data-compose-panel="message" style="display:none;">
+            <div id="composeSelectedIdentityPill" class="selected-identity-pill"></div>
+            <h3>Write the message</h3>
+            <div class="desc">This is what Amplr will post to each selected group.</div>
+            <div class="field"><textarea id="composeMessage" rows="7" placeholder="Write your post..." style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:10px;padding:12px;font-size:14px;resize:vertical;"></textarea></div>
+
+            <details class="advanced-box">
+              <summary>Optional tools</summary>
+              <div class="field" style="margin-top:14px;">
                 <label>Paraphrase Instruction</label>
                 <input type="text" id="rewriteInstruction" placeholder="e.g. Paraphrase naturally, shorten it, or make it less salesy." style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;">
                 <div class="action-row" style="margin-top:8px;">
@@ -705,10 +758,8 @@ input[type="range"]::-webkit-slider-thumb{
                 <div class="desc" id="rewriteStatus">Uses n8n + local Ollama. Paraphrases should keep the same meaning and links.</div>
               </div>
 
-              <div id="composeRiskBox" style="display:none;margin:12px 0;padding:12px;border:1px solid rgba(234,179,8,.45);border-radius:10px;background:rgba(234,179,8,.08);font-size:12px;color:var(--text-2);"></div>
-
               <div class="toggle">
-                <span>AI Refinement — rewrite message before posting</span>
+                <span>AI refinement during posting</span>
                 <label class="switch"><input type="checkbox" id="composeAiEnabled"><span class="slider"></span></label>
               </div>
 
@@ -721,42 +772,69 @@ input[type="range"]::-webkit-slider-thumb{
                 <label>Image URL (optional)</label>
                 <input type="url" id="composeImage" placeholder="https://example.com/image.jpg">
               </div>
-            </div>
+            </details>
           </div>
 
-          <div>
-            <div class="card">
-              <h3>Posting Identity</h3>
-              <div class="desc">Choose which Facebook profile/Page the extension should verify before posting.</div>
-              <select id="composeIdentitySelect" onchange="setSelectedIdentity(this.value); renderComposeGroups(); updateRiskPanels();" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;"></select>
-              <div class="desc" id="composeIdentityHint" style="margin-top:8px;">Sync identities in Settings if this list is empty.</div>
+          <div class="compose-panel card" data-compose-panel="groups" style="display:none;">
+            <div id="composeGroupsIdentityPill" class="selected-identity-pill"></div>
+            <h3>Choose groups</h3>
+            <div class="desc">Only groups saved under this posting profile are shown here.</div>
+            <div class="action-row" style="margin-bottom:12px;">
+              <button class="btn btn-ghost" onclick="selectAllComposeGroups()">Select all safe batch</button>
+              <button class="btn btn-ghost" onclick="clearComposeGroups()">Clear</button>
+              <button class="btn btn-ghost" onclick="navigate('groups')">Manage groups</button>
             </div>
-            <div class="card">
-              <h3>Target Groups</h3>
-              <div class="desc">Select which saved groups to post to.</div>
-              <div class="group-chips" id="composeGroupSelect">
-                <span style="color:var(--text-3);font-size:12px;">No groups saved yet. Add some in the Groups tab.</span>
-              </div>
+            <div class="group-chips compose-group-grid" id="composeGroupSelect">
+              <span style="color:var(--text-3);font-size:12px;">No groups saved yet. Add some in the Groups tab.</span>
             </div>
-            <div class="card" style="margin-top:16px;">
-              <h3>Delay Between Posts</h3>
-              <div class="desc">Seconds to wait between each group post.</div>
+            <div id="composeRiskBox" style="display:none;margin:14px 0 0;padding:12px;border:1px solid rgba(234,179,8,.45);border-radius:10px;background:rgba(234,179,8,.08);font-size:12px;color:var(--text-2);"></div>
+          </div>
+
+          <div class="compose-panel card" data-compose-panel="timing" style="display:none;">
+            <h3>When should it run?</h3>
+            <div class="desc">Choose now, schedule once, or repeat. Advanced delay stays tucked away.</div>
+            <div class="timing-options">
+              <label class="timing-option selected"><input type="radio" name="composeTiming" value="now" checked onchange="setComposeTimingMode('now')"><strong>Post now</strong><span>The extension picks it up immediately.</span></label>
+              <label class="timing-option"><input type="radio" name="composeTiming" value="later" onchange="setComposeTimingMode('later')"><strong>Schedule later</strong><span>Pick a date and time.</span></label>
+              <label class="timing-option"><input type="radio" name="composeTiming" value="repeat" onchange="setComposeTimingMode('repeat')"><strong>Repeat this post</strong><span>Daily or weekly rotating queue.</span></label>
+            </div>
+            <div id="composeScheduleFields" class="grid-3" style="display:none;gap:8px;margin-top:16px;">
+              <div class="field"><label>Date</label><input type="date" id="composeScheduleDate"></div>
+              <div class="field"><label>Time</label><input type="time" id="composeScheduleTime" value="09:00"></div>
+              <div class="field" id="composeRepeatWrap" style="display:none;"><label>Repeat</label><select id="composeRepeatFreq" onchange="setComposeTimingMode('repeat')"><option value="daily">Daily</option><option value="weekly">Weekly</option></select></div>
+              <div class="field" id="composeRepeatDayWrap" style="display:none;"><label>Day</label><select id="composeRepeatDay"><option value="1">Mon</option><option value="2">Tue</option><option value="3">Wed</option><option value="4">Thu</option><option value="5">Fri</option><option value="6">Sat</option><option value="0">Sun</option></select></div>
+            </div>
+            <details class="advanced-box" style="margin-top:14px;">
+              <summary>Advanced spacing</summary>
+              <div class="desc" style="margin-top:10px;">Seconds to wait between each group post. Amplr still enforces safe randomized spacing.</div>
               <div style="display:flex; align-items:center; gap:12px;">
                 <input type="range" id="composeDelay" min="90" max="210" value="120">
                 <span id="composeDelayVal" style="font-family:'Instrument Serif',serif; font-size:22px; min-width:50px; text-align:right;">120s</span>
               </div>
-            </div>
-            <button class="btn btn-primary btn-block" id="postNowBtn" style="margin-top:16px; padding:14px;" onclick="createPostJob()">
+            </details>
+          </div>
+
+          <div class="compose-panel card" data-compose-panel="review" style="display:none;">
+            <h3>Review before queueing</h3>
+            <div class="desc">Confirm the profile, message, groups, timing, and safety notes.</div>
+            <div id="composeReviewBox"></div>
+          </div>
+
+          <div class="compose-footer card">
+            <button class="btn btn-ghost" id="composeBackBtn" onclick="backComposeStep()">Back</button>
+            <button class="btn btn-primary" id="composeNextBtn" onclick="nextComposeStep()">Continue</button>
+            <button class="btn btn-primary" id="postNowBtn" style="display:none;" onclick="createPostJob()">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-              Post Now
+              Queue Post
             </button>
-            <div class="waiting-box" id="composeWaiting">
-              <div class="waiting-pulse">
-                <div class="ring"></div>
-                <div class="waiting-text" id="composeWaitingText">Waiting for extension...</div>
-              </div>
-              <div class="waiting-sub" id="composeWaitingSub">Your Chrome extension will pick this up automatically.</div>
+          </div>
+
+          <div class="waiting-box" id="composeWaiting">
+            <div class="waiting-pulse">
+              <div class="ring"></div>
+              <div class="waiting-text" id="composeWaitingText">Waiting for extension...</div>
             </div>
+            <div class="waiting-sub" id="composeWaitingSub">Your Chrome extension will pick this up automatically.</div>
           </div>
         </div>
       </section>
@@ -1058,7 +1136,7 @@ function navigate(route){
   document.getElementById('pageTitle').innerHTML = PAGE_TITLES[route].replace(/(\w+)$/, '<em class="serif">$1</em>');
 
   if (route==='ops') loadOpsDashboard();
-  if (route==='compose') renderComposeGroups();
+  if (route==='compose') renderComposeWizard();
   if (route==='groups') { renderIdentitySelectors(); renderGroupsList(); renderFinderCandidates(); }
   if (route==='schedule') renderSchedules();
   if (route==='history') loadHistory();
@@ -1390,6 +1468,160 @@ function renderGroupsList(){
   }).join('');
 }
 
+
+const COMPOSE_STEPS = ['identity','message','groups','timing','review'];
+let composeStep = 'identity';
+
+function identityInitials(name=''){
+  const parts=String(name||'').trim().split(/\s+/).filter(Boolean);
+  return (parts.length ? parts.slice(0,2).map(p=>p[0]).join('') : '?').toUpperCase();
+}
+function identityAvatarHtml(identity, sizeClass=''){
+  const name=identity?.name || 'Identity';
+  return `<div class="identity-avatar ${sizeClass}">${identity?.avatar_url?`<img src="${esc(identity.avatar_url)}" alt="${esc(name)}" onerror="this.remove();this.parentElement.textContent='${esc(identityInitials(name))}'">`:esc(identityInitials(name))}</div>`;
+}
+function selectedIdentityPillHtml(){
+  const identity=getSelectedIdentity();
+  if (!identity) return `<div class="selected-identity-pill">No profile selected</div>`;
+  return `<div class="selected-identity-pill">${identityAvatarHtml(identity)}<span>Posting as <strong style="color:var(--text);">${esc(identity.name || 'Unnamed identity')}</strong></span></div>`;
+}
+function renderComposeIdentityCards(){
+  const el=document.getElementById('composeIdentityCards');
+  if (!el) return;
+  const selectedKey=getSelectedIdentityKey();
+  if (!postingIdentitiesCache.length) {
+    el.innerHTML=`<div class="empty-state" style="grid-column:1/-1;"><h4>No Facebook profiles synced yet</h4><p>Go to Settings and sync identities from the Chrome extension.</p><button class="btn btn-primary" style="margin-top:14px;" onclick="navigate('settings')">Open Settings</button></div>`;
+    return;
+  }
+  el.innerHTML=postingIdentitiesCache.map(identity=>{
+    const key=identityKey(identity);
+    const count=groupCountForIdentityKey(key);
+    const selected=key===selectedKey;
+    return `<button class="identity-card ${selected?'selected':''}" onclick="selectComposeIdentity(${jsArg(key)}); nextComposeStep();">
+      ${identityAvatarHtml(identity)}
+      <div style="min-width:0;flex:1;">
+        <div class="identity-card-name">${esc(identity.name || 'Unnamed identity')}</div>
+        <div class="identity-card-meta">${esc(identity.type || 'Facebook identity')} · ${count} group${count===1?'':'s'}${identity.is_active?' · active':''}</div>
+      </div>
+    </button>`;
+  }).join('');
+}
+function selectComposeIdentity(key){
+  setSelectedIdentity(key);
+  renderComposeWizard();
+}
+function showComposeStep(step){
+  if (!COMPOSE_STEPS.includes(step)) step='identity';
+  composeStep=step;
+  document.querySelectorAll('[data-compose-panel]').forEach(panel=>{ panel.style.display = panel.dataset.composePanel===step ? 'block' : 'none'; });
+  document.querySelectorAll('[data-compose-step]').forEach(btn=>btn.classList.toggle('active', btn.dataset.composeStep===step));
+  const idx=COMPOSE_STEPS.indexOf(step);
+  const back=document.getElementById('composeBackBtn');
+  const next=document.getElementById('composeNextBtn');
+  const post=document.getElementById('postNowBtn');
+  if (back) back.style.visibility = idx===0 ? 'hidden' : 'visible';
+  if (next) next.style.display = step==='review' ? 'none' : 'inline-flex';
+  if (post) post.style.display = step==='review' ? 'inline-flex' : 'none';
+  if (step==='review') renderComposeReview();
+}
+function validateComposeStep(step){
+  if (step==='identity' && postingIdentitiesCache.length && !getSelectedIdentity()) { toast('Choose a posting profile first','error'); return false; }
+  if (step==='message' && !(document.getElementById('composeMessage')?.value || '').trim()) { toast('Write the message first','error'); return false; }
+  if (step==='groups' && !getSelectedGroups().length) { toast('Select at least one group','error'); return false; }
+  if (step==='timing') {
+    const mode=getComposeTimingMode();
+    if ((mode==='later' || mode==='repeat') && !document.getElementById('composeScheduleTime')?.value) { toast('Choose a schedule time','error'); return false; }
+  }
+  return true;
+}
+function nextComposeStep(){
+  if (!validateComposeStep(composeStep)) return;
+  const idx=COMPOSE_STEPS.indexOf(composeStep);
+  showComposeStep(COMPOSE_STEPS[Math.min(idx+1, COMPOSE_STEPS.length-1)]);
+}
+function backComposeStep(){
+  const idx=COMPOSE_STEPS.indexOf(composeStep);
+  showComposeStep(COMPOSE_STEPS[Math.max(idx-1, 0)]);
+}
+function resetComposeWizard(){
+  document.getElementById('composeMessage').value='';
+  document.getElementById('composeImage').value='';
+  document.getElementById('composeAiEnabled').checked=false;
+  document.getElementById('composeAiPrompt').value='';
+  document.querySelectorAll('#composeGroupSelect .chip.selected').forEach(c=>c.classList.remove('selected'));
+  setComposeTimingMode('now');
+  hideWaiting();
+  showComposeStep('identity');
+  updateRiskPanels();
+}
+function renderComposeWizard(){
+  renderIdentitySelectors();
+  renderComposeIdentityCards();
+  renderComposeGroups();
+  const pill=selectedIdentityPillHtml();
+  const p1=document.getElementById('composeSelectedIdentityPill'); if (p1) p1.innerHTML=pill;
+  const p2=document.getElementById('composeGroupsIdentityPill'); if (p2) p2.innerHTML=pill;
+  renderComposeReview();
+  showComposeStep(composeStep);
+}
+function selectAllComposeGroups(){
+  [...document.querySelectorAll('#composeGroupSelect .chip')].slice(0, ANTI_BOT_RULES.maxGroupsPerJob).forEach(c=>c.classList.add('selected'));
+  updateRiskPanels();
+}
+function clearComposeGroups(){
+  document.querySelectorAll('#composeGroupSelect .chip.selected').forEach(c=>c.classList.remove('selected'));
+  updateRiskPanels();
+}
+function getComposeTimingMode(){
+  return document.querySelector('input[name="composeTiming"]:checked')?.value || 'now';
+}
+function setComposeTimingMode(mode){
+  document.querySelectorAll('input[name="composeTiming"]').forEach(r=>{ r.checked = r.value===mode; r.closest('.timing-option')?.classList.toggle('selected', r.checked); });
+  const fields=document.getElementById('composeScheduleFields');
+  const repeat=document.getElementById('composeRepeatWrap');
+  const repeatDay=document.getElementById('composeRepeatDayWrap');
+  if (fields) fields.style.display = mode==='now' ? 'none' : 'grid';
+  if (repeat) repeat.style.display = mode==='repeat' ? 'block' : 'none';
+  if (repeatDay) repeatDay.style.display = mode==='repeat' && document.getElementById('composeRepeatFreq')?.value==='weekly' ? 'block' : 'none';
+  document.querySelectorAll('.timing-option').forEach(label=>label.classList.toggle('selected', label.querySelector('input')?.checked));
+  updateRiskPanels();
+}
+function composeScheduledFor(){
+  const mode=getComposeTimingMode();
+  if (mode==='now') return null;
+  const date=document.getElementById('composeScheduleDate')?.value;
+  const time=document.getElementById('composeScheduleTime')?.value || '09:00';
+  if (date) return new Date(`${date}T${time}:00`);
+  const [h,m]=time.split(':').map(Number);
+  const d=new Date(); d.setSeconds(0,0); d.setHours(Number.isFinite(h)?h:9, Number.isFinite(m)?m:0);
+  if (d <= new Date()) d.setDate(d.getDate()+1);
+  return d;
+}
+function composeRepeatDays(){
+  if (getComposeTimingMode() !== 'repeat') return [];
+  const freq=document.getElementById('composeRepeatFreq')?.value || 'daily';
+  if (freq==='weekly') return [parseInt(document.getElementById('composeRepeatDay')?.value || '1')];
+  return [0,1,2,3,4,5,6];
+}
+function renderComposeReview(){
+  const el=document.getElementById('composeReviewBox'); if (!el) return;
+  const identity=getSelectedIdentity();
+  const message=(document.getElementById('composeMessage')?.value || '').trim();
+  const groups=getSelectedGroups();
+  const delay=parseInt(document.getElementById('composeDelay')?.value)||120;
+  const mode=getComposeTimingMode();
+  const scheduledFor=composeScheduledFor();
+  const warnings=buildRiskWarnings({ message, groups, delay, scheduledFor, mode: mode==='now'?'now':'schedule' });
+  const timingText = mode==='now' ? 'Post now' : mode==='later' ? `Scheduled for ${scheduledFor ? scheduledFor.toLocaleString() : 'next selected time'}` : `Repeats ${document.getElementById('composeRepeatFreq')?.value || 'daily'} starting ${scheduledFor ? scheduledFor.toLocaleString() : 'next selected time'}`;
+  el.innerHTML=`<div class="compose-review">
+    <div class="review-row"><div class="review-label">Posting profile</div><div class="review-value">${identity ? `${identityAvatarHtml(identity)} <span style="vertical-align:middle;">${esc(identity.name || 'Unnamed identity')}</span>` : 'No profile selected'}</div></div>
+    <div class="review-row"><div class="review-label">Message</div><div class="review-value">${message ? esc(message).replace(/\n/g,'<br>') : 'No message yet'}</div></div>
+    <div class="review-row"><div class="review-label">Groups</div><div class="review-value">${groups.length} selected${groups.length?` · ${groups.slice(0,6).map(g=>esc(g.name||g.url)).join(', ')}${groups.length>6?'…':''}`:''}</div></div>
+    <div class="review-row"><div class="review-label">Timing</div><div class="review-value">${esc(timingText)} · ${delay}s spacing</div></div>
+    <div class="review-row"><div class="review-label">Safety</div><div class="review-value">${warnings.length ? warnings.map(w=>`<div style="color:#facc15;margin-bottom:4px;">${esc(w)}</div>`).join('') : 'Looks good. Amplr will space posts and stop on Facebook restriction warnings.'}</div></div>
+  </div>`;
+}
+
 function renderComposeGroups(){
   renderIdentitySelectors();
   const el = document.getElementById('composeGroupSelect');
@@ -1426,13 +1658,13 @@ document.addEventListener('input', e=>{
   if (e.target.id==='composeDelay') {
     document.getElementById('composeDelayVal').textContent = e.target.value+'s';
   }
-  if (['composeMessage','composeDelay','schedMessage','schedTime'].includes(e.target.id)) updateRiskPanels();
+  if (['composeMessage','composeDelay','composeScheduleDate','composeScheduleTime','schedMessage','schedTime'].includes(e.target.id)) { updateRiskPanels(); renderComposeReview(); }
 });
 document.addEventListener('click', e=>{
   if (e.target.closest('#composeGroupSelect .chip')) setTimeout(updateRiskPanels, 0);
 });
 document.addEventListener('change', e=>{
-  if (['schedFreq','schedDay','schedAi'].includes(e.target.id)) updateRiskPanels();
+  if (['composeRepeatFreq','composeRepeatDay','schedFreq','schedDay','schedAi'].includes(e.target.id)) { updateRiskPanels(); renderComposeReview(); }
 });
 
 const ANTI_BOT_RULES = {
@@ -1542,30 +1774,51 @@ function restorePreviousRewrite(){
 async function createPostJob(){
   const message = document.getElementById('composeMessage').value.trim();
   const groups = getSelectedGroups();
-  if (!message) { toast('Write a message first','error'); return; }
-  if (!groups.length) { toast('Select at least one group','error'); return; }
+  if (!message) { toast('Write a message first','error'); showComposeStep('message'); return; }
+  if (!groups.length) { toast('Select at least one group','error'); showComposeStep('groups'); return; }
 
   const imageUrl = document.getElementById('composeImage').value.trim() || null;
-  const delay = parseInt(document.getElementById('composeDelay').value) || 30;
+  const delay = parseInt(document.getElementById('composeDelay').value) || 120;
   const aiEnabled = document.getElementById('composeAiEnabled').checked;
   const aiPrompt = document.getElementById('composeAiPrompt').value.trim() || null;
   const identity=getSelectedIdentity();
-  if (postingIdentitiesCache.length && !identity) { toast('Choose a posting identity first','error'); return; }
-  const riskWarnings = buildRiskWarnings({ message, groups, delay, mode:'now' });
+  if (postingIdentitiesCache.length && !identity) { toast('Choose a posting identity first','error'); showComposeStep('identity'); return; }
+
+  const timingMode=getComposeTimingMode();
+  const scheduledFor=composeScheduledFor();
+  const repeatDays=composeRepeatDays();
+  const repeatTime=document.getElementById('composeScheduleTime')?.value || '09:00';
+  const isScheduled=timingMode !== 'now';
+  const riskWarnings = buildRiskWarnings({ message, groups, delay, scheduledFor, mode:isScheduled?'schedule':'now' });
   renderRiskBox('composeRiskBox', riskWarnings);
-  if (!acknowledgeRiskIfNeeded(riskWarnings, 'Post now anyway?')) return;
+  if (!acknowledgeRiskIfNeeded(riskWarnings, isScheduled ? 'Queue this schedule anyway?' : 'Queue this post anyway?')) return;
 
   const btn = document.getElementById('postNowBtn');
   btn.disabled = true;
 
-  const { data, error } = await sb.from('jsw_post_jobs').insert({
+  const payload = {
     user_id:user.id, message, image_url:imageUrl, groups, delay,
     ai_enabled:aiEnabled, ai_prompt:aiPrompt, status:'pending'
-  }).select();
+  };
+  if (isScheduled) {
+    payload.scheduled_for = scheduledFor.toISOString();
+    payload.repeat_days = repeatDays;
+    payload.repeat_time = repeatTime;
+  }
+
+  const { data, error } = await sb.from('jsw_post_jobs').insert(payload).select();
 
   if (error) { toast('Failed to create job: '+error.message,'error'); btn.disabled=false; return; }
 
   const job = data[0];
+  if (isScheduled) {
+    toast('Post scheduled','success');
+    btn.disabled=false;
+    await renderSchedules();
+    resetComposeWizard();
+    navigate('schedule');
+    return;
+  }
   toast('Post job created — waiting for extension','info');
   showWaiting('Waiting for extension...','Your Chrome extension will pick this up automatically.');
   pollJobStatus(job.id);
