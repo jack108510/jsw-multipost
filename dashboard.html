@@ -489,6 +489,40 @@ input[type="range"]::-webkit-slider-thumb{
 .quick-action h4{font-size:13px; font-weight:600; margin-bottom:2px;}
 .quick-action p{font-size:11px; color:var(--text-3);}
 
+
+
+/* Clean user workflow */
+.clean-hero{
+  display:grid; grid-template-columns:minmax(0,1.25fr) minmax(280px,.75fr); gap:16px; margin-bottom:18px;
+}
+.clean-hero h1{font-size:34px;line-height:1.08;letter-spacing:-1px;margin-bottom:10px;}
+.clean-hero p{color:var(--text-2);font-size:14px;max-width:620px;}
+.clean-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px;}
+.flow-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr));gap:12px;margin:18px 0;}
+.flow-card{padding:16px;background:var(--card);border:1px solid var(--border);border-radius:14px;position:relative;}
+.flow-card.ready{border-color:rgba(34,197,94,.35);background:rgba(34,197,94,.05);}
+.flow-card.wait{border-color:rgba(234,179,8,.32);background:rgba(234,179,8,.05);}
+.flow-card strong{display:block;font-size:13px;margin-bottom:4px;}
+.flow-card span{display:block;color:var(--text-3);font-size:12px;}
+.flow-num{width:24px;height:24px;border-radius:999px;background:var(--card-2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;margin-bottom:10px;color:var(--text-2);}
+.simple-status{display:flex;align-items:center;gap:12px;padding:14px;border-radius:12px;background:var(--card-2);border:1px solid var(--border);margin-top:10px;}
+.simple-status .status-dot{width:11px;height:11px;border-radius:50%;background:var(--text-3);flex:0 0 auto;}
+.simple-status.good .status-dot{background:var(--green);box-shadow:0 0 10px rgba(34,197,94,.55);}
+.simple-status.warn .status-dot{background:var(--yellow);box-shadow:0 0 10px rgba(234,179,8,.45);}
+.simple-status.bad .status-dot{background:var(--red);box-shadow:0 0 10px rgba(239,68,68,.45);}
+.simple-status strong{display:block;font-size:13px;}
+.simple-status small{display:block;color:var(--text-3);font-size:11px;margin-top:2px;}
+.clean-section-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:14px;}
+.clean-section-head h2{font-size:20px;letter-spacing:-.4px;}
+.clean-section-head p{color:var(--text-3);font-size:12px;margin-top:3px;}
+.advanced-nav{margin-top:12px;padding-top:12px;border-top:1px solid var(--border);}
+.advanced-nav details{color:var(--text-3);font-size:12px;}
+.advanced-nav summary{cursor:pointer;padding:8px 10px;border-radius:8px;}
+.advanced-nav summary:hover{background:var(--card);color:var(--text-2);}
+.advanced-settings{margin-top:16px;}
+.advanced-settings summary{cursor:pointer;color:var(--text-2);font-weight:600;padding:12px 0;}
+@media(max-width:900px){.clean-hero{grid-template-columns:1fr;}.clean-hero h1{font-size:28px;}}
+
 /* Responsive */
 @media(max-width:900px){.ops-hero{grid-template-columns:1fr;}.ops-metrics{grid-template-columns:repeat(2,1fr);}}
 @media(max-width:1100px){
@@ -615,31 +649,34 @@ input[type="range"]::-webkit-slider-thumb{
     </div>
 
     <div class="nav-section">
-      <div class="nav-label">Workspace</div>
-      <a class="nav-item active" data-route="ops" onclick="navigate('ops')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 15l4-4 3 3 5-7"/></svg>
-        Ops <span class="nav-badge" id="navOpsAlerts">0</span>
+      <div class="nav-label">Start here</div>
+      <a class="nav-item active" data-route="home" onclick="navigate('home')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>
+        Home
       </a>
       <a class="nav-item" data-route="compose" onclick="navigate('compose')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
-        Compose
+        New Post
+      </a>
+      <a class="nav-item" data-route="settings" onclick="navigate('settings')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="7" r="4"/><path d="M5.5 21a6.5 6.5 0 0113 0"/></svg>
+        Profiles
       </a>
       <a class="nav-item" data-route="groups" onclick="navigate('groups')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
         Groups <span class="nav-badge" id="navGroupCount">0</span>
       </a>
-      <a class="nav-item" data-route="schedule" onclick="navigate('schedule')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-        Schedule
-      </a>
       <a class="nav-item" data-route="history" onclick="navigate('history')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v5h5"/><path d="M3.05 13A9 9 0 1020 8.5"/><path d="M12 7v5l3 2"/></svg>
         History
       </a>
-      <a class="nav-item" data-route="settings" onclick="navigate('settings')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-2 2 2 2 0 01-2-2v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83 0 2 2 0 010-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 01-2-2 2 2 0 012-2h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 010-2.83 2 2 0 012.83 0l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 012-2 2 2 0 012 2v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 0 2 2 0 010 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 012 2 2 2 0 01-2 2h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-        Settings
-      </a>
+      <div class="advanced-nav">
+        <details>
+          <summary>Advanced</summary>
+          <a class="nav-item" data-route="schedule" onclick="navigate('schedule')">Schedules</a>
+          <a class="nav-item" data-route="ops" onclick="navigate('ops')">Ops <span class="nav-badge" id="navOpsAlerts">0</span></a>
+        </details>
+      </div>
     </div>
 
     <div class="sb-bottom">
@@ -660,7 +697,7 @@ input[type="range"]::-webkit-slider-thumb{
   <!-- Main -->
   <main class="main">
     <div class="topbar">
-      <div class="page-title" id="pageTitle">Ops</div>
+      <div class="page-title" id="pageTitle">Home</div>
       <div class="topbar-right">
         <button class="btn btn-ghost" onclick="navigate('compose')">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
@@ -674,8 +711,50 @@ input[type="range"]::-webkit-slider-thumb{
       <!-- Setup error placeholder -->
       <div id="setupErrorBox"></div>
 
-      <!-- ================= OPS ================= -->
-      <section class="page active" id="page-ops">
+      <!-- ================= HOME ================= -->
+      <section class="page active" id="page-home">
+        <div class="clean-hero">
+          <div class="card">
+            <h1>Make a safe Facebook post without the dev-ops mess.</h1>
+            <p>Amplr is now organized around the normal workflow: connect the extension, choose a posting profile, pick groups, write the post, and queue it safely.</p>
+            <div class="clean-actions">
+              <button class="btn btn-primary" onclick="navigate('compose')">Create New Post</button>
+              <button class="btn btn-ghost" onclick="navigate('settings')">Check Profiles</button>
+              <button class="btn btn-ghost" onclick="navigate('groups')">Manage Groups</button>
+            </div>
+          </div>
+          <div class="card">
+            <h3>Connection</h3>
+            <div class="desc">Plain status. No runner jargon.</div>
+            <div id="homeConnectionStatus" class="simple-status warn"><span class="status-dot"></span><div><strong>Checking extension…</strong><small>Amplr will update this automatically.</small></div></div>
+            <div class="clean-actions" style="margin-top:12px;">
+              <button class="btn btn-ghost" onclick="checkExtensionStatus(); loadHomeScreen();">Refresh</button>
+              <button class="btn btn-ghost" onclick="navigate('settings')">Pair Extension</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="flow-grid">
+          <div class="flow-card" id="homeStepConnect"><div class="flow-num">1</div><strong>Connect extension</strong><span id="homeStepConnectText">Checking…</span></div>
+          <div class="flow-card" id="homeStepProfiles"><div class="flow-num">2</div><strong>Sync profiles</strong><span id="homeStepProfilesText">Checking…</span></div>
+          <div class="flow-card" id="homeStepGroups"><div class="flow-num">3</div><strong>Add groups</strong><span id="homeStepGroupsText">Checking…</span></div>
+          <div class="flow-card ready"><div class="flow-num">4</div><strong>Post safely</strong><span>Use the New Post flow.</span></div>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <div class="clean-section-head"><div><h2>Next best action</h2><p id="homeNextActionSub">Amplr will suggest the simplest next step.</p></div></div>
+            <div id="homeNextAction"></div>
+          </div>
+          <div class="card">
+            <div class="clean-section-head"><div><h2>Recent activity</h2><p>Only the useful stuff.</p></div><button class="btn btn-ghost" onclick="navigate('history')">History</button></div>
+            <div id="homeRecentJobs"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ================= ADVANCED OPS ================= -->
+      <section class="page" id="page-ops">
         <div class="ops-hero">
           <div class="ops-health" id="opsHealthBox">
             <h3>Campaign operations</h3>
@@ -952,66 +1031,86 @@ input[type="range"]::-webkit-slider-thumb{
         </div>
       </section>
 
-      <!-- ================= SETTINGS ================= -->
+      <!-- ================= PROFILES / CONNECTION ================= -->
       <section class="page" id="page-settings">
-        <div class="grid-2">
+        <div class="clean-section-head">
           <div>
-            <div class="card">
-              <h3>AI Configuration</h3>
-              <div class="desc">Used by the extension to refine messages.</div>
-              <div class="field">
-                <label>Provider</label>
-                <select id="setProvider" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;">
-                  <option value="openai">OpenAI</option>
-                  <option value="anthropic">Anthropic</option>
-                  <option value="gemini">Google Gemini</option>
-                  <option value="openrouter">OpenRouter</option>
-                </select>
-              </div>
-              <div class="field">
-                <label>API Key</label>
-                <input type="password" id="setApiKey" placeholder="sk-..." style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;">
-              </div>
-              <div class="field">
-                <label>Model</label>
-                <input type="text" id="setModel" placeholder="gpt-4o-mini" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;">
-              </div>
-              <div class="field">
-                <label>Default Delay (seconds)</label>
-                <input type="number" id="setDelay" value="30" min="5" max="300" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;">
-              </div>
-              <div class="field">
-                <label>n8n Ollama Rewrite Webhook</label>
-                <input type="url" id="setRewriteWebhook" placeholder="http://localhost:5678/webhook/amplr-rewrite" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;">
-                <div class="desc">Amplr sends current message + paraphrase instruction to n8n, and n8n calls local Ollama.</div>
-              </div>
-              <div class="field">
-                <label>Rewrite Model</label>
-                <select id="setRewriteModel" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;">
-                  <option value="qwen3:8b">qwen3:8b — current default</option>
-                  <option value="llama3.1:8b">llama3.1:8b — natural paraphrases</option>
-                  <option value="qwen2.5:14b">qwen2.5:14b — higher quality if available</option>
-                  <option value="mistral-nemo">mistral-nemo — concise rewrites</option>
-                </select>
-                <div class="desc">Sent with the n8n request. The workflow uses it when that model is installed in Ollama.</div>
-              </div>
-              <button class="btn btn-primary btn-block" onclick="saveSettings()">Save Settings</button>
-            </div>
+            <h2>Profiles</h2>
+            <p>Connect the extension, sync who you can post as, then manage groups. Advanced settings are hidden.</p>
           </div>
-          <div>
-            <div class="card" style="margin-bottom:16px;">
-              <h3>Posting Identities</h3>
-              <div class="desc">Sync Facebook profiles/Pages visible in the current Chrome Facebook switcher.</div>
-              <button class="btn btn-primary btn-block" id="syncIdentitiesBtn" onclick="syncPostingIdentities()">Sync Posting Identities</button>
-              <div id="postingIdentitiesList" style="margin-top:14px;"></div>
-            </div>
-            <div class="card">
-              <h3>Extension Pairing</h3>
-              <div class="desc">Enter this code in your Chrome extension to connect.</div>
-              <div id="pairingArea"></div>
-            </div>
+          <button class="btn btn-primary" onclick="syncPostingIdentities()" id="syncIdentitiesBtn">Sync Posting Profiles</button>
+        </div>
+
+        <div class="grid-2">
+          <div class="card">
+            <h3>Connect Chrome extension</h3>
+            <div class="desc">Amplr needs the Chrome extension open and paired to post from Facebook. If posting stops, start here.</div>
+            <div id="settingsConnectionStatus" class="simple-status warn"><span class="status-dot"></span><div><strong>Checking extension…</strong><small>Open the extension if this stays offline.</small></div></div>
+            <div id="pairingArea" style="margin-top:14px;"></div>
+          </div>
+
+          <div class="card">
+            <h3>Posting profiles</h3>
+            <div class="desc">These are the profiles/Pages Amplr can organize groups under.</div>
+            <div id="postingIdentitiesList" style="margin-top:14px;"></div>
           </div>
         </div>
+
+        <div class="card" style="margin-top:16px;">
+          <h3>Simple setup checklist</h3>
+          <div class="flow-grid" style="margin-bottom:0;">
+            <div class="flow-card" id="profileStepConnect"><div class="flow-num">1</div><strong>Extension paired</strong><span id="profileStepConnectText">Checking…</span></div>
+            <div class="flow-card" id="profileStepIdentities"><div class="flow-num">2</div><strong>Profiles synced</strong><span id="profileStepIdentitiesText">Checking…</span></div>
+            <div class="flow-card" id="profileStepGroups"><div class="flow-num">3</div><strong>Groups ready</strong><span id="profileStepGroupsText">Checking…</span></div>
+          </div>
+        </div>
+
+        <details class="advanced-settings">
+          <summary>Advanced AI and delay settings</summary>
+          <div class="card">
+            <div class="grid-2">
+              <div>
+                <div class="field">
+                  <label>Provider</label>
+                  <select id="setProvider" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;">
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic</option>
+                    <option value="gemini">Google Gemini</option>
+                    <option value="openrouter">OpenRouter</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label>API Key</label>
+                  <input type="password" id="setApiKey" placeholder="sk-..." style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;">
+                </div>
+                <div class="field">
+                  <label>Model</label>
+                  <input type="text" id="setModel" placeholder="gpt-4o-mini" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;">
+                </div>
+              </div>
+              <div>
+                <div class="field">
+                  <label>Default Delay (seconds)</label>
+                  <input type="number" id="setDelay" value="120" min="90" max="300" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;">
+                </div>
+                <div class="field">
+                  <label>n8n Ollama Rewrite Webhook</label>
+                  <input type="url" id="setRewriteWebhook" placeholder="http://localhost:5678/webhook/amplr-rewrite" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:13px;">
+                </div>
+                <div class="field">
+                  <label>Rewrite Model</label>
+                  <select id="setRewriteModel" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;">
+                    <option value="qwen3:8b">qwen3:8b — current default</option>
+                    <option value="llama3.1:8b">llama3.1:8b — natural paraphrases</option>
+                    <option value="qwen2.5:14b">qwen2.5:14b — higher quality if available</option>
+                    <option value="mistral-nemo">mistral-nemo — concise rewrites</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+            <button class="btn btn-primary" onclick="saveSettings()">Save Advanced Settings</button>
+          </div>
+        </details>
       </section>
 
     </div>
@@ -1092,7 +1191,7 @@ async function onAuthSuccess(s){
   await checkSchema();
   // Load everything
   await Promise.all([loadSettings(), loadGroups(), loadGroupCandidates(), loadPostingIdentities(), loadOverview(), checkExtensionStatus()]);
-  navigate(location.hash.slice(1) && PAGE_TITLES[location.hash.slice(1)] ? location.hash.slice(1) : 'ops');
+  navigate(location.hash.slice(1) && PAGE_TITLES[location.hash.slice(1)] ? location.hash.slice(1) : 'home');
   // Start global job watcher
   startGlobalJobWatcher();
 }
@@ -1127,7 +1226,7 @@ async function checkSchema(){
 /* ============================================================
    NAVIGATION
    ============================================================ */
-const PAGE_TITLES = {ops:'Ops',compose:'Compose',groups:'Groups',schedule:'Schedule',history:'History',settings:'Settings'};
+const PAGE_TITLES = {home:'Home',compose:'New Post',groups:'Groups',schedule:'Schedules',history:'History',settings:'Profiles',ops:'Advanced Ops'};
 
 function navigate(route){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
@@ -1135,6 +1234,7 @@ function navigate(route){
   document.querySelectorAll('.nav-item').forEach(n=>n.classList.toggle('active', n.dataset.route===route));
   document.getElementById('pageTitle').innerHTML = PAGE_TITLES[route].replace(/(\w+)$/, '<em class="serif">$1</em>');
 
+  if (route==='home') loadHomeScreen();
   if (route==='ops') loadOpsDashboard();
   if (route==='compose') renderComposeWizard();
   if (route==='groups') { renderIdentitySelectors(); renderGroupsList(); renderFinderCandidates(); }
@@ -1146,7 +1246,7 @@ function navigate(route){
 }
 
 window.addEventListener('hashchange', ()=>{
-  const r = location.hash.slice(1) || 'compose';
+  const r = location.hash.slice(1) || 'home';
   if (PAGE_TITLES[r]) navigate(r);
 });
 
@@ -1938,6 +2038,61 @@ async function loadOverview(){
   renderExtPairingInfo();
 }
 
+
+
+/* ============================================================
+   CLEAN HOME
+   ============================================================ */
+function setFlowCard(id, ready, text){
+  const card=document.getElementById(id);
+  if (card) card.className='flow-card '+(ready?'ready':'wait');
+  const label=document.getElementById(id+'Text');
+  if (label) label.textContent=text;
+}
+function setSimpleStatus(id, kind, title, sub){
+  const el=document.getElementById(id);
+  if (!el) return;
+  el.className='simple-status '+kind;
+  el.innerHTML=`<span class="status-dot"></span><div><strong>${esc(title)}</strong><small>${esc(sub)}</small></div>`;
+}
+function extensionHeartbeatInfo(){
+  const heartbeat=settingsCache.ext_heartbeat ? safeDate(settingsCache.ext_heartbeat) : null;
+  const age=heartbeat ? Date.now()-heartbeat.getTime() : Infinity;
+  if (!heartbeat) return {kind:'bad', title:'Extension not connected', sub:'Open the Chrome extension and pair it from Profiles.', connected:false};
+  if (age < 3*60*1000) return {kind:'good', title:'Extension connected', sub:`Last seen ${Math.max(1,Math.round(age/1000))}s ago.`, connected:true};
+  if (age < 10*60*1000) return {kind:'warn', title:'Extension may be asleep', sub:`Last seen ${Math.round(age/60000)} min ago. Open the extension if posting stalls.`, connected:false};
+  return {kind:'bad', title:'Extension offline', sub:`Last seen ${Math.round(age/60000)} min ago. Reload or open the extension.`, connected:false};
+}
+async function loadHomeScreen(){
+  if (!user) return;
+  await loadSettings();
+  const ext=extensionHeartbeatInfo();
+  const identities=postingIdentitiesCache.length;
+  const groups=groupsCache.length;
+  setSimpleStatus('homeConnectionStatus', ext.kind, ext.title, ext.sub);
+  setSimpleStatus('settingsConnectionStatus', ext.kind, ext.title, ext.sub);
+  setFlowCard('homeStepConnect', ext.connected, ext.connected?'Connected':'Open/pair the Chrome extension');
+  setFlowCard('homeStepProfiles', identities>0, identities ? `${identities} profile${identities===1?'':'s'} synced` : 'Sync posting profiles');
+  setFlowCard('homeStepGroups', groups>0, groups ? `${groups} group${groups===1?'':'s'} saved` : 'Add or sync groups');
+  setFlowCard('profileStepConnect', ext.connected, ext.connected?'Connected':'Open/pair the Chrome extension');
+  setFlowCard('profileStepIdentities', identities>0, identities ? `${identities} profile${identities===1?'':'s'} ready` : 'Click Sync Posting Profiles');
+  setFlowCard('profileStepGroups', groups>0, groups ? `${groups} group${groups===1?'':'s'} ready` : 'Go to Groups next');
+
+  const next=document.getElementById('homeNextAction');
+  if (next) {
+    if (!ext.connected) next.innerHTML=`<div class="job"><div class="job-icon">1</div><div class="job-body"><div class="job-msg">Connect the Chrome extension</div><div class="job-meta">This is required before sync or posting can run.</div></div><button class="btn btn-primary" onclick="navigate('settings')">Connect</button></div>`;
+    else if (!identities) next.innerHTML=`<div class="job"><div class="job-icon">2</div><div class="job-body"><div class="job-msg">Sync posting profiles</div><div class="job-meta">Amplr needs to know which profile or Page you are posting as.</div></div><button class="btn btn-primary" onclick="navigate('settings')">Sync Profiles</button></div>`;
+    else if (!groups) next.innerHTML=`<div class="job"><div class="job-icon">3</div><div class="job-body"><div class="job-msg">Add groups</div><div class="job-meta">Save the groups you want to post into for each profile.</div></div><button class="btn btn-primary" onclick="navigate('groups')">Add Groups</button></div>`;
+    else next.innerHTML=`<div class="job"><div class="job-icon">✓</div><div class="job-body"><div class="job-msg">Ready to post</div><div class="job-meta">Use the clean step-by-step composer.</div></div><button class="btn btn-primary" onclick="navigate('compose')">Create New Post</button></div>`;
+  }
+
+  const recent=document.getElementById('homeRecentJobs');
+  if (recent) {
+    const { data } = await sb.from('jsw_post_jobs').select('*').eq('user_id',user.id).order('created_at',{ascending:false}).limit(3);
+    recent.innerHTML = data?.length ? data.map(jobRow).join('') : emptyState('No posts yet','Create your first post and activity will show here.');
+  }
+}
+
 function normalizeResult(j){
   const r = j.result || {};
   if (typeof r === 'string') { try { return JSON.parse(r); } catch { return {}; } }
@@ -2498,6 +2653,7 @@ function renderSettingsPage(){
   if (rewriteModel) rewriteModel.value = getRewriteModel();
   renderPairingArea();
   renderPostingIdentities();
+  loadHomeScreen();
 }
 
 function renderPairingArea(){
