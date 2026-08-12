@@ -1562,10 +1562,10 @@ async function upsertAmplrData(session, key, value) {
 // ============================================================
 // Job-aware version: updates job progress and result in jsw_post_jobs
 async function importFacebookGroupsForJob(jobId, identityMeta = null, options = {}) {
-  const identityName = typeof identityMeta === 'string' ? identityMeta : (identityMeta?.name || null);
-  const identityKey = (typeof identityMeta === 'object' && identityMeta?.key) ? identityMeta.key : identityName;
-  const identityType = (typeof identityMeta === 'object' && identityMeta?.type) ? identityMeta.type : null;
-  const identityUrl = (typeof identityMeta === 'object' && identityMeta?.url) ? identityMeta.url : null;
+  const identityName = typeof identityMeta === 'string' ? identityMeta : (identityMeta?.name || identityMeta?.identity_name || null);
+  const identityKey = (typeof identityMeta === 'object' && (identityMeta?.key || identityMeta?.identity_key)) ? (identityMeta.key || identityMeta.identity_key) : identityName;
+  const identityType = (typeof identityMeta === 'object' && (identityMeta?.type || identityMeta?.identity_type)) ? (identityMeta.type || identityMeta.identity_type) : null;
+  const identityUrl = (typeof identityMeta === 'object' && (identityMeta?.url || identityMeta?.identity_url)) ? (identityMeta.url || identityMeta.identity_url) : null;
   const finalizeJob = options.finalizeJob !== false;
   const progressPrefix = options.progressPrefix || '';
   const session = await getStoredSession();
@@ -1585,15 +1585,29 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null, options = 
   let tab;
   try {
     await updateProgress('Opening your Facebook groups...');
-    tab = await chrome.tabs.create({ url: 'https://www.facebook.com/groups/joins/', active: false });
-    await sleep(5000);
-    if (identityName) {
-      await updateProgress(`Switching to ${identityName}...`);
-      const switchRes = await chrome.tabs.sendMessage(tab.id, { type: 'SWITCH_FACEBOOK_IDENTITY', identityName, identityUrl });
-      if (!switchRes?.success) throw new Error(switchRes?.error || `Could not switch to ${identityName}`);
-      await sleep(4000);
+    const isManagedPageUrl = /^page$/i.test(String(identityType || '')) || (!!identityUrl && /^https:\/\/(www\.)?facebook\.com\/profile\.php\?id=\d+/i.test(String(identityUrl)));
+    if (isManagedPageUrl) {
+      // Managed Pages discovered from facebook.com/pages may not appear in the
+      // normal account switcher. Do the Page-context navigation from the
+      // background worker instead of inside content.js; if content.js navigates
+      // while replying to SWITCH_FACEBOOK_IDENTITY, Chrome closes the message
+      // channel and the dashboard reports the Page as not scanned.
+      await updateProgress(`Opening ${identityName} page context...`);
+      tab = await chrome.tabs.create({ url: identityUrl, active: false });
+      await sleep(8000);
       await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/groups/joins/' });
+      await sleep(7000);
+    } else {
+      tab = await chrome.tabs.create({ url: 'https://www.facebook.com/groups/joins/', active: false });
       await sleep(5000);
+      if (identityName) {
+        await updateProgress(`Switching to ${identityName}...`);
+        const switchRes = await chrome.tabs.sendMessage(tab.id, { type: 'SWITCH_FACEBOOK_IDENTITY', identityName, identityUrl });
+        if (!switchRes?.success) throw new Error(switchRes?.error || `Could not switch to ${identityName}`);
+        await sleep(4000);
+        await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/groups/joins/' });
+        await sleep(5000);
+      }
     }
 
     let groups = [];
@@ -1629,7 +1643,9 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null, options = 
             const t = cleanName(text);
             if (t.length < 3 || t.length > 90) return true;
             if (/^\d+$/.test(t)) return true;
-            if (/^(new|see all|join|joined|member|members|post|posts|comment|comments|notification|notifications)$/i.test(t)) return true;
+            // Facebook often puts action buttons next to group links. Never save
+            // button/action copy as the group name.
+            if (/^(new|see all|join|join group|joined|joined group|visit group|view group|member|members|post|posts|comment|comments|notification|notifications)$/i.test(t)) return true;
             if (/\b(left a comment|commented|reacted|shared a post|posted in|new post|see all|sponsored|crossposted|your post was|make progress|grow your audience|follow a few steps)\b/i.test(t)) return true;
             if (/[.!?]\s+[A-Z0-9].*[.!?]/.test(t)) return true;
             return false;
@@ -1814,15 +1830,24 @@ async function importFacebookGroups(identityMeta = null) {
   try {
     chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_PROGRESS', text: 'Opening your Facebook groups...' });
 
-    tab = await chrome.tabs.create({ url: 'https://www.facebook.com/groups/joins/', active: false });
-    await sleep(5000);
-    if (identityName) {
-      chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_PROGRESS', text: `Switching to ${identityName}...` });
-      const switchRes = await chrome.tabs.sendMessage(tab.id, { type: 'SWITCH_FACEBOOK_IDENTITY', identityName, identityUrl });
-      if (!switchRes?.success) throw new Error(switchRes?.error || `Could not switch to ${identityName}`);
-      await sleep(4000);
+    const isManagedPageUrl = /^page$/i.test(String(identityType || '')) || (!!identityUrl && /^https:\/\/(www\.)?facebook\.com\/profile\.php\?id=\d+/i.test(String(identityUrl)));
+    if (isManagedPageUrl) {
+      chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_PROGRESS', text: `Opening ${identityName} page context...` });
+      tab = await chrome.tabs.create({ url: identityUrl, active: false });
+      await sleep(8000);
       await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/groups/joins/' });
+      await sleep(7000);
+    } else {
+      tab = await chrome.tabs.create({ url: 'https://www.facebook.com/groups/joins/', active: false });
       await sleep(5000);
+      if (identityName) {
+        chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_PROGRESS', text: `Switching to ${identityName}...` });
+        const switchRes = await chrome.tabs.sendMessage(tab.id, { type: 'SWITCH_FACEBOOK_IDENTITY', identityName, identityUrl });
+        if (!switchRes?.success) throw new Error(switchRes?.error || `Could not switch to ${identityName}`);
+        await sleep(4000);
+        await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/groups/joins/' });
+        await sleep(5000);
+      }
     }
 
     // Scroll and collect — runs multiple passes until no new groups appear
@@ -1860,7 +1885,9 @@ async function importFacebookGroups(identityMeta = null) {
             const t = cleanName(text);
             if (t.length < 3 || t.length > 90) return true;
             if (/^\d+$/.test(t)) return true;
-            if (/^(new|see all|join|joined|member|members|post|posts|comment|comments|notification|notifications)$/i.test(t)) return true;
+            // Facebook often puts action buttons next to group links. Never save
+            // button/action copy as the group name.
+            if (/^(new|see all|join|join group|joined|joined group|visit group|view group|member|members|post|posts|comment|comments|notification|notifications)$/i.test(t)) return true;
             if (/\b(left a comment|commented|reacted|shared a post|posted in|new post|see all|sponsored|crossposted|your post was|make progress|grow your audience|follow a few steps)\b/i.test(t)) return true;
             if (/[.!?]\s+[A-Z0-9].*[.!?]/.test(t)) return true;
             return false;
