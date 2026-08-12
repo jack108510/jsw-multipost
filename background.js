@@ -759,6 +759,16 @@ async function getExistingGroupUrlsByIdentity(session, identityKeys = []) {
   return out;
 }
 
+function friendlyGroupScanMissReason(error) {
+  const message = String(error?.message || error || '');
+  if (/message channel closed|receiving end does not exist|Extension context invalidated|Could not establish connection/i.test(message)) {
+    return 'Facebook did not return a group list for this profile/page during this pass.';
+  }
+  if (/No groups found/i.test(message)) return 'No joined groups were visible for this profile/page.';
+  if (/not signed in|logged into Facebook/i.test(message)) return 'Facebook session was not available for this profile/page.';
+  return 'No group list was available for this profile/page during this pass.';
+}
+
 async function runImportGroupsJob(job, session) {
   const targets = await getImportTargetsForJob(job, session);
   if (!targets.length) throw new Error('No synced Facebook profiles/pages found. Sync profiles first.');
@@ -791,28 +801,50 @@ async function runImportGroupsJob(job, session) {
         new_groups: newGroups.slice(0, 50)
       });
     } catch (e) {
-      errors.push({ identity_name: mergedTarget.name || null, identity_key: mergedTarget.key || '__legacy__', error: e.message });
-      perIdentity.push({ identity_name: mergedTarget.name || null, identity_key: mergedTarget.key || '__legacy__', count: 0, new_count: 0, error: e.message });
+      const reason = friendlyGroupScanMissReason(e);
+      errors.push({
+        identity_name: mergedTarget.name || null,
+        identity_key: mergedTarget.key || '__legacy__',
+        status: 'not_scanned',
+        reason,
+        raw_error: e.message
+      });
+      perIdentity.push({
+        identity_name: mergedTarget.name || null,
+        identity_key: mergedTarget.key || '__legacy__',
+        identity_type: mergedTarget.type || null,
+        count: 0,
+        new_count: 0,
+        status: 'not_scanned',
+        reason
+      });
     }
   }
 
   const totalGroups = perIdentity.reduce((sum, item) => sum + (item.count || 0), 0);
   const totalNew = perIdentity.reduce((sum, item) => sum + (item.new_count || 0), 0);
-  const status = errors.length === targets.length ? 'failed' : 'done';
+  const notScanned = perIdentity.filter(item => item.status === 'not_scanned').length;
+  const scanned = perIdentity.length - notScanned;
+  const status = scanned > 0 ? 'done' : 'failed';
   const isDailyScan = !!(job.daily_scan || job.result?.daily_scan);
   const label = isDailyScan ? 'Daily group scan' : 'Group scan';
+  const scanText = status === 'done'
+    ? `${label} complete: ${totalGroups} groups across ${targets.length} profiles/pages · ${totalNew} new${notScanned ? ` · ${notScanned} profile/page${notScanned === 1 ? '' : 's'} not scanned` : ''}`
+    : `${label} could not scan any synced profiles/pages`;
   await sbUpdateJob(job.id, {
     status,
     result: {
-      text: `${status === 'done' ? label + ' complete' : label + ' failed'}: ${totalGroups} groups across ${targets.length} profiles/pages · ${totalNew} new`,
+      text: scanText,
       daily_scan: isDailyScan,
       target_count: targets.length,
+      scanned_count: scanned,
+      not_scanned_count: notScanned,
       total_groups: totalGroups,
       total_new_groups: totalNew,
       identities: perIdentity,
-      errors
+      not_scanned: errors
     },
-    error: errors.length ? errors.map(e => `${e.identity_name || e.identity_key}: ${e.error}`).join('; ') : null,
+    error: status === 'failed' ? errors.map(e => `${e.identity_name || e.identity_key}: ${e.reason}`).join('; ') : null,
     completed_at: new Date().toISOString()
   });
 }
