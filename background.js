@@ -744,11 +744,11 @@ async function getImportTargetsForJob(job, session = null) {
 }
 
 async function getExistingGroupUrlsByIdentity(session, identityKeys = []) {
+  const validKeys = identityKeys.map(key => String(key || '').trim()).filter(Boolean);
   const out = new Map();
-  for (const key of identityKeys) out.set(String(key || '__legacy__'), new Set());
-  if (!session?.userId || !identityKeys.length) return out;
-  for (const key of identityKeys) {
-    const normalizedKey = String(key || '__legacy__');
+  for (const key of validKeys) out.set(key, new Set());
+  if (!session?.userId || !validKeys.length) return out;
+  for (const normalizedKey of validKeys) {
     const res = await fetch(`${SB_URL}/rest/v1/jsw_groups?user_id=eq.${encodeURIComponent(session.userId)}&identity_key=eq.${encodeURIComponent(normalizedKey)}&select=group_url`, {
       headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}` }
     });
@@ -772,7 +772,7 @@ function friendlyGroupScanMissReason(error) {
 async function runImportGroupsJob(job, session) {
   const targets = await getImportTargetsForJob(job, session);
   if (!targets.length) throw new Error('No synced Facebook profiles/pages found. Sync profiles first.');
-  const beforeByIdentity = await getExistingGroupUrlsByIdentity(session, targets.map(t => t.key || t.name || '__legacy__'));
+  const beforeByIdentity = await getExistingGroupUrlsByIdentity(session, targets.map(t => t.key || t.name).filter(Boolean));
   const perIdentity = [];
   const errors = [];
 
@@ -781,19 +781,20 @@ async function runImportGroupsJob(job, session) {
     const storedIdentity = await getPostingIdentityByNameOrKey(target.name, target.key);
     const mergedTarget = {
       name: target.name || storedIdentity?.name || null,
-      key: target.key || storedIdentity?.id || storedIdentity?.url || storedIdentity?.name || target.name || '__legacy__',
+      key: target.key || storedIdentity?.id || storedIdentity?.url || storedIdentity?.name || target.name || null,
       type: target.type || storedIdentity?.type || null,
       url: target.url || storedIdentity?.url || null
     };
+    if (!mergedTarget.name || !mergedTarget.key) throw new Error('Group import target is missing a Facebook profile/page owner. Sync profiles first.');
     const label = mergedTarget.name || mergedTarget.key || `profile ${i + 1}`;
     await sbUpdateJob(job.id, { result: { text: `Scanning ${label} (${i + 1}/${targets.length})...`, current_identity: label, target_index: i + 1, target_count: targets.length } });
     try {
       const result = await importFacebookGroupsForJob(job.id, mergedTarget, { finalizeJob: false, progressPrefix: `${label}: ` });
-      const before = beforeByIdentity.get(String(mergedTarget.key || '__legacy__')) || new Set();
+      const before = beforeByIdentity.get(String(mergedTarget.key)) || new Set();
       const newGroups = (result?.groups || []).filter(g => g?.url && !before.has(g.url)).map(g => ({ group_name: g.name || null, group_url: g.url, group_avatar_url: g.group_avatar_url || null }));
       perIdentity.push({
         identity_name: mergedTarget.name || null,
-        identity_key: mergedTarget.key || '__legacy__',
+        identity_key: mergedTarget.key,
         identity_type: mergedTarget.type || null,
         count: result?.count || 0,
         avatar_count: result?.avatar_count || 0,
@@ -804,14 +805,14 @@ async function runImportGroupsJob(job, session) {
       const reason = friendlyGroupScanMissReason(e);
       errors.push({
         identity_name: mergedTarget.name || null,
-        identity_key: mergedTarget.key || '__legacy__',
+        identity_key: mergedTarget.key || null,
         status: 'not_scanned',
         reason,
         raw_error: e.message
       });
       perIdentity.push({
         identity_name: mergedTarget.name || null,
-        identity_key: mergedTarget.key || '__legacy__',
+        identity_key: mergedTarget.key || null,
         identity_type: mergedTarget.type || null,
         count: 0,
         new_count: 0,
@@ -1562,7 +1563,7 @@ async function upsertAmplrData(session, key, value) {
 // Job-aware version: updates job progress and result in jsw_post_jobs
 async function importFacebookGroupsForJob(jobId, identityMeta = null, options = {}) {
   const identityName = typeof identityMeta === 'string' ? identityMeta : (identityMeta?.name || null);
-  const identityKey = (typeof identityMeta === 'object' && identityMeta?.key) ? identityMeta.key : (identityName || '__legacy__');
+  const identityKey = (typeof identityMeta === 'object' && identityMeta?.key) ? identityMeta.key : identityName;
   const identityType = (typeof identityMeta === 'object' && identityMeta?.type) ? identityMeta.type : null;
   const identityUrl = (typeof identityMeta === 'object' && identityMeta?.url) ? identityMeta.url : null;
   const finalizeJob = options.finalizeJob !== false;
@@ -1571,6 +1572,9 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null, options = 
   if (!session || !session.userId) {
     await sbUpdateJob(jobId, { status: 'failed', result: { error: 'Not signed in' }, completed_at: new Date().toISOString() });
     return;
+  }
+  if (!identityName || !identityKey) {
+    throw new Error('Group import refused: missing Facebook profile/page owner. Sync profiles first.');
   }
 
   const updateProgress = async (text) => {
@@ -1747,8 +1751,8 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null, options = 
       group_url: g.url,
       group_name: g.name || null,
       group_avatar_url: g.group_avatar_url || g.avatar_url || g.image_url || null,
-      identity_name: identityName || null,
-      identity_key: identityKey || '__legacy__',
+      identity_name: identityName,
+      identity_key: identityKey,
       identity_type: identityType || null
     }));
     const saveGroupRows = async (chunk, includeAvatars = true) => {
@@ -1773,7 +1777,7 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null, options = 
 
     extLog('info', `Imported ${groups.length} groups via job ${jobId}`);
     const groupAvatarCount = groups.filter(g => !!(g.group_avatar_url || g.avatar_url || g.image_url)).length;
-    const importResult = { count: groups.length, avatar_count: groupAvatarCount, identity_name: identityName || null, identity_key: identityKey || '__legacy__', identity_type: identityType || null, groups, text: `Imported ${groups.length} groups${identityName ? ' for ' + identityName : ''} · ${groupAvatarCount} photos` };
+    const importResult = { count: groups.length, avatar_count: groupAvatarCount, identity_name: identityName, identity_key: identityKey, identity_type: identityType || null, groups, text: `Imported ${groups.length} groups for ${identityName} · ${groupAvatarCount} photos` };
     if (finalizeJob) {
       await sbUpdateJob(jobId, { status: 'done', result: importResult, completed_at: new Date().toISOString() });
     }
@@ -1793,12 +1797,16 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null, options = 
 
 async function importFacebookGroups(identityMeta = null) {
   const identityName = typeof identityMeta === 'string' ? identityMeta : (identityMeta?.name || identityMeta?.identity_name || null);
-  const identityKey = (typeof identityMeta === 'object' && (identityMeta?.key || identityMeta?.identity_key)) ? (identityMeta.key || identityMeta.identity_key) : (identityName || '__legacy__');
+  const identityKey = (typeof identityMeta === 'object' && (identityMeta?.key || identityMeta?.identity_key)) ? (identityMeta.key || identityMeta.identity_key) : identityName;
   const identityType = (typeof identityMeta === 'object' && (identityMeta?.type || identityMeta?.identity_type)) ? (identityMeta.type || identityMeta.identity_type) : null;
   const identityUrl = (typeof identityMeta === 'object' && (identityMeta?.url || identityMeta?.identity_url)) ? (identityMeta.url || identityMeta.identity_url) : null;
   const session = await getStoredSession();
   if (!session || !session.userId) {
     chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_ERROR', error: 'Not signed in' });
+    return;
+  }
+  if (!identityName || !identityKey) {
+    chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_ERROR', error: 'Group import refused: missing Facebook profile/page owner. Sync profiles first.' });
     return;
   }
 
@@ -1988,8 +1996,8 @@ async function importFacebookGroups(identityMeta = null) {
       group_url:  g.url,
       group_name: g.name || null,
       group_avatar_url: g.group_avatar_url || g.avatar_url || g.image_url || null,
-      identity_name: identityName || null,
-      identity_key: identityKey || '__legacy__',
+      identity_name: identityName,
+      identity_key: identityKey,
       identity_type: identityType || null
     }));
 
@@ -2020,7 +2028,7 @@ async function importFacebookGroups(identityMeta = null) {
     }
 
     extLog('info', `Imported ${groups.length} groups for user ${session.userId}${identityName ? ' / ' + identityName : ''}`);
-    chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_DONE', count: groups.length, groups, identity_name: identityName || null, identity_key: identityKey || '__legacy__', identity_type: identityType || null });
+    chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_DONE', count: groups.length, groups, identity_name: identityName, identity_key: identityKey, identity_type: identityType || null });
 
   } catch (e) {
     extLog('error', 'importFacebookGroups error: ' + e.message);

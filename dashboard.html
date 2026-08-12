@@ -1255,7 +1255,11 @@ window.addEventListener('hashchange', ()=>{
    POSTING IDENTITIES
    ============================================================ */
 function identityKey(i){ return i?.id || i?.url || i?.name || ''; }
-function legacyIdentityKey(){ return '__legacy__'; }
+function legacyIdentityKey(){ return ''; }
+function validGroupIdentityKey(g){
+  const key=String(g?.identity_key || '').trim();
+  return key && key !== '__legacy__' ? key : '';
+}
 function getSelectedIdentityKey(){
   return localStorage.getItem('amplr_selected_identity') || identityKey(postingIdentitiesCache[0]) || '';
 }
@@ -1264,36 +1268,35 @@ function getSelectedIdentity(){
   return postingIdentitiesCache.find(i=>identityKey(i)===key) || postingIdentitiesCache[0] || null;
 }
 function identityByKey(key){ return postingIdentitiesCache.find(i=>identityKey(i)===key) || null; }
-function groupCountForIdentityKey(key){ return groupsCache.filter(g => (g?.identity_key || legacyIdentityKey()) === key).length; }
+function groupCountForIdentityKey(key){ return groupsCache.filter(g => validGroupIdentityKey(g) === key).length; }
 function totalGroupCount(){ return groupsCache.length; }
-function currentIdentityKey(){ return identityKey(getSelectedIdentity()) || legacyIdentityKey(); }
+function currentIdentityKey(){ return identityKey(getSelectedIdentity()) || ''; }
 function currentIdentityName(){ return getSelectedIdentity()?.name || null; }
 function currentIdentityType(){ return getSelectedIdentity()?.type || null; }
 function groupMatchesSelectedIdentity(g){
   const selectedKey=currentIdentityKey();
-  const groupKey=g?.identity_key || legacyIdentityKey();
-  return groupKey === selectedKey;
+  return !!selectedKey && validGroupIdentityKey(g) === selectedKey;
 }
 function groupsForSelectedIdentity(){ return groupsCache.filter(groupMatchesSelectedIdentity); }
-function groupsForIdentityKey(key){ return groupsCache.filter(g => (g?.identity_key || legacyIdentityKey()) === key); }
+function groupsForIdentityKey(key){ return groupsCache.filter(g => validGroupIdentityKey(g) === key); }
 function identityLabelForKey(key){
-  if (key === legacyIdentityKey()) return 'Legacy / unscoped';
   const identity=identityByKey(key);
-  return identity?.name || groupsCache.find(g => (g?.identity_key || legacyIdentityKey()) === key)?.identity_name || key || 'Unknown channel';
+  return identity?.name || groupsCache.find(g => validGroupIdentityKey(g) === key)?.identity_name || key || 'Unknown channel';
 }
-function identityLabelForGroup(g){ return g?.identity_name || identityLabelForKey(g?.identity_key || legacyIdentityKey()); }
+function identityLabelForGroup(g){ return g?.identity_name || identityLabelForKey(validGroupIdentityKey(g)); }
 function organizedGroupBuckets(){
   const seen=new Set();
   const buckets=[];
   postingIdentitiesCache.forEach(identity=>{
-    const key=identityKey(identity) || legacyIdentityKey();
+    const key=identityKey(identity);
+    if (!key) return;
     if (seen.has(key)) return;
     seen.add(key);
     buckets.push({ key, identity, label:identity.name || 'Unnamed channel', groups:groupsForIdentityKey(key), isLegacy:false });
   });
-  const extraKeys=[...new Set(groupsCache.map(g=>g?.identity_key || legacyIdentityKey()))].filter(key=>!seen.has(key));
+  const extraKeys=[...new Set(groupsCache.map(validGroupIdentityKey).filter(Boolean))].filter(key=>!seen.has(key));
   extraKeys.forEach(key=>{
-    buckets.push({ key, identity:null, label:identityLabelForKey(key), groups:groupsForIdentityKey(key), isLegacy:key===legacyIdentityKey() });
+    buckets.push({ key, identity:null, label:identityLabelForKey(key), groups:groupsForIdentityKey(key), isLegacy:false });
   });
   return buckets;
 }
@@ -1413,6 +1416,8 @@ function pollIdentitySyncJob(jobId){
 async function syncGroupsForSelectedIdentity(){
   const identity=getSelectedIdentity();
   if (!identity) { toast('Sync posting identities first','error'); navigate('settings'); return; }
+  const selectedKey=identityKey(identity);
+  if (!selectedKey) { toast('Selected profile is missing an owner key. Sync posting identities again.','error'); return; }
   const btn=document.getElementById('syncSelectedGroupsBtn');
   if (btn) btn.disabled=true;
   const { data, error } = await sb.from('jsw_post_jobs').insert({
@@ -1421,7 +1426,7 @@ async function syncGroupsForSelectedIdentity(){
     delay:0,
     ai_enabled:false,
     ai_prompt: identity.name || null,
-    groups:[{ identity_name: identity.name || null, identity_key: identityKey(identity) || legacyIdentityKey(), identity_type: identity.type || null }],
+    groups:[{ identity_name: identity.name || null, identity_key: selectedKey, identity_type: identity.type || null }],
     status:'pending'
   }).select();
   if (error) { toast('Could not start group sync: '+error.message,'error'); if(btn) btn.disabled=false; return; }
@@ -1432,13 +1437,15 @@ async function syncGroupsForAllIdentities(){
   if (!postingIdentitiesCache.length) { toast('Sync posting identities first','error'); navigate('settings'); return; }
   const btn=document.getElementById('syncAllGroupsBtn');
   if (btn) btn.disabled=true;
-  const jobs=postingIdentitiesCache.map(identity=>({
+  const validIdentities=postingIdentitiesCache.filter(identity=>identityKey(identity));
+  if (!validIdentities.length) { toast('No valid posting identities found. Sync posting identities again.','error'); if(btn) btn.disabled=false; return; }
+  const jobs=validIdentities.map(identity=>({
     user_id:user.id,
     message:'__import_groups__',
     delay:0,
     ai_enabled:false,
     ai_prompt: identity.name || null,
-    groups:[{ identity_name: identity.name || null, identity_key: identityKey(identity) || legacyIdentityKey(), identity_type: identity.type || null }],
+    groups:[{ identity_name: identity.name || null, identity_key: identityKey(identity), identity_type: identity.type || null }],
     status:'pending'
   }));
   const { data, error } = await sb.from('jsw_post_jobs').insert(jobs).select();
@@ -1488,7 +1495,7 @@ function pollAllGroupSyncJobs(jobIds, button=null){
 async function loadGroups(){
   const { data, error } = await sb.from('jsw_groups').select('*').order('created_at',{ascending:false});
   if (error) { if (!isNoTable(error)) toast('Failed to load groups: '+error.message,'error'); return; }
-  groupsCache = data || [];
+  groupsCache = (data || []).filter(g => validGroupIdentityKey(g));
   updateGroupCounts();
 }
 
@@ -1502,12 +1509,14 @@ async function addGroup(){
   url = url.replace(/\/$/,'');
   const name = url.split('/').pop() || url;
   const identity=getSelectedIdentity();
+  const selectedKey=identityKey(identity);
+  if (!identity || !selectedKey) { toast('Choose a valid posting identity before adding a group.','error'); return; }
   const { error } = await sb.from('jsw_groups').upsert({
     user_id:user.id,
     group_url:url,
     group_name:name,
     identity_name:identity?.name || null,
-    identity_key:identityKey(identity) || legacyIdentityKey(),
+    identity_key:selectedKey,
     identity_type:identity?.type || null
   }, { onConflict:'user_id,identity_key,group_url' });
   if (error) { toast('Error: '+error.message,'error'); return; }
@@ -1560,11 +1569,10 @@ function renderGroupsList(){
     return `<div class="job" style="display:block;${selected?'border-color:rgba(78,204,163,.45);':''}">
       <div style="display:flex;align-items:center;gap:12px;">
         ${identityAvatarHtml(bucket.identity, 'small')}
-        <div class="job-body"><div class="job-msg">${esc(bucket.label)} ${selected?'<span class="warning-chip">selected</span>':''}${bucket.isLegacy?'<span class="warning-chip">needs channel</span>':''}</div><div class="job-meta">${bucket.groups.length} group${bucket.groups.length===1?'':'s'}${bucket.identity?.type?' · '+esc(bucket.identity.type):''}</div></div>
+        <div class="job-body"><div class="job-msg">${esc(bucket.label)} ${selected?'<span class="warning-chip">selected</span>':''}</div><div class="job-meta">${bucket.groups.length} group${bucket.groups.length===1?'':'s'}${bucket.identity?.type?' · '+esc(bucket.identity.type):''}</div></div>
         ${bucket.identity?`<button type="button" class="btn btn-ghost" style="padding:6px 10px;" data-key="${esc(bucket.key)}" onclick="setSelectedIdentity(this.dataset.key); syncGroupsForSelectedIdentity();">Sync</button>`:''}
         ${bucket.identity?`<button type="button" class="btn ${selected?'btn-primary':'btn-ghost'}" style="padding:6px 10px;" data-key="${esc(bucket.key)}" onclick="setSelectedIdentity(this.dataset.key); renderPostingIdentities();">${selected?'Selected':'Use'}</button>`:''}
       </div>
-      ${bucket.isLegacy?`<div class="result-meta" style="margin-top:10px;color:#facc15;">Legacy groups are preserved separately so they do not get mixed into Wildrose, Vet Inc, or other channels. Re-sync each channel to organize them under the right Page/profile.</div>`:''}
       <div class="result-list" style="margin-top:10px;">${groupsHtml}</div>
     </div>`;
   }).join('');
@@ -1781,7 +1789,7 @@ function toggleGroupChip(el){
 
 function getSelectedGroups(){
   const identity=getSelectedIdentity();
-  return groupsCache.filter(g=>composeSelectedGroupIds.has(String(g.id))).map(g=>({url:g.group_url,name:g.group_name,identity_name:identity?.name || null,identity_key:identityKey(identity) || legacyIdentityKey(),identity_type:identity?.type || null}));
+  return groupsCache.filter(g=>composeSelectedGroupIds.has(String(g.id))).map(g=>({url:g.group_url,name:g.group_name,identity_name:identity?.name || null,identity_key:identityKey(identity),identity_type:identity?.type || null}));
 }
 
 /* ============================================================
@@ -1846,7 +1854,7 @@ function updateRiskPanels(){
 
   const schedMessage=document.getElementById('schedMessage')?.value || '';
   const schedIdentity=getSelectedIdentity();
-  const schedGroups=groupsForSelectedIdentity().map(g=>({url:g.group_url,name:g.group_name,identity_name:schedIdentity?.name || null,identity_key:identityKey(schedIdentity) || legacyIdentityKey(),identity_type:schedIdentity?.type || null}));
+  const schedGroups=groupsForSelectedIdentity().map(g=>({url:g.group_url,name:g.group_name,identity_name:schedIdentity?.name || null,identity_key:identityKey(schedIdentity),identity_type:schedIdentity?.type || null}));
   renderRiskBox('scheduleRiskBox', buildRiskWarnings({message:schedMessage, groups:schedGroups, delay:settingsCache.default_delay || 30, mode:'schedule'}));
 }
 
@@ -2318,7 +2326,7 @@ function makeFinderCandidate(query, identity){
   return {
     id:'cand_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,8),
     identity_name:identity?.name || null,
-    identity_key:identityKey(identity) || legacyIdentityKey(),
+    identity_key:identityKey(identity),
     identity_type:identity?.type || null,
     query,
     title:query.replace(/\b\w/g,c=>c.toUpperCase()),
@@ -2434,7 +2442,7 @@ function campaignNameForJob(j){
   if(/wildrose|\$5\.99|5\.99|ai adoption|basic website|small business automation/.test(text)) return 'Wildrose';
   if(/empty slot|emptyslot|last-minute vet|vet appointment|cancelled vet|pet owner|clinic openings/.test(text)) return 'Empty Slot';
   const g=(j.groups||[])[0]||{};
-  return g.identity_name || identityLabelForKey(g.identity_key || legacyIdentityKey()) || 'Unscoped';
+  return g.identity_name || identityLabelForKey(validGroupIdentityKey(g)) || 'Unknown campaign';
 }
 function groupCount(j){ return Array.isArray(j.groups) ? j.groups.length : 0; }
 function jobScheduledOrTouchedToday(j){
@@ -2579,7 +2587,7 @@ async function addSchedule(){
   const message = document.getElementById('schedMessage').value.trim();
   if (!message) { toast('Write a message','error'); return; }
   const identity=getSelectedIdentity();
-  const groups = groupsForSelectedIdentity().map(g=>({url:g.group_url,name:g.group_name,identity_name:identity?.name || null,identity_key:identityKey(identity) || legacyIdentityKey(),identity_type:identity?.type || null}));
+  const groups = groupsForSelectedIdentity().map(g=>({url:g.group_url,name:g.group_name,identity_name:identity?.name || null,identity_key:identityKey(identity),identity_type:identity?.type || null}));
   if (!groups.length) { toast('Add groups first in the Groups tab','error'); return; }
 
   const frequency = document.getElementById('schedFreq').value;
