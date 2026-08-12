@@ -4,6 +4,9 @@
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const EXT_VERSION = chrome.runtime.getManifest?.().version || 'unknown';
 const CONNECTION_STATUS_KEY = 'extension_status';
+const DAILY_GROUP_SCAN_ALARM = 'daily-group-scan';
+const DAILY_GROUP_SCAN_HOUR_LOCAL = 7;
+const DAILY_GROUP_SCAN_MINUTE_LOCAL = 15;
 
 // Software-level anti-bot safety controls. These reduce automated-looking
 // posting patterns and stop when Facebook shows block/checkpoint signals.
@@ -386,6 +389,7 @@ async function startDashPolling() {
   await chrome.alarms.clear('poll-jobs');
   await chrome.alarms.clear('amplr_heartbeat');
   await chrome.alarms.clear('check-post-results');
+  await chrome.alarms.clear(DAILY_GROUP_SCAN_ALARM);
 
   // Write first so the dashboard flips online immediately after reload/sign-in.
   try { await writeHeartbeat(); } catch (e) { console.warn('[JSW] heartbeat write failed during startup:', e.message); }
@@ -396,12 +400,27 @@ async function startDashPolling() {
   await chrome.alarms.create('poll-jobs', { periodInMinutes: 0.5 }); // every 30s
   await chrome.alarms.create('amplr_heartbeat', { periodInMinutes: 0.5 }); // every 30s
   await chrome.alarms.create('check-post-results', { periodInMinutes: 360 }); // every 6h
+  await scheduleDailyGroupScanAlarm();
+}
+
+function nextDailyGroupScanTime() {
+  const next = new Date();
+  next.setHours(DAILY_GROUP_SCAN_HOUR_LOCAL, DAILY_GROUP_SCAN_MINUTE_LOCAL, 0, 0);
+  if (next.getTime() <= Date.now() + 60 * 1000) next.setDate(next.getDate() + 1);
+  return next;
+}
+
+async function scheduleDailyGroupScanAlarm() {
+  const when = nextDailyGroupScanTime();
+  await chrome.alarms.create(DAILY_GROUP_SCAN_ALARM, { when: when.getTime(), periodInMinutes: 24 * 60 });
+  extLog('info', `Daily group scan scheduled for ${when.toLocaleString()}`);
 }
 
 async function stopDashPolling() {
   await chrome.alarms.clear('poll-jobs');
   await chrome.alarms.clear('amplr_heartbeat');
   await chrome.alarms.clear('check-post-results');
+  await chrome.alarms.clear(DAILY_GROUP_SCAN_ALARM);
 }
 
 // Heartbeat and poll-jobs alarm handler
@@ -409,6 +428,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'amplr_heartbeat') writeHeartbeat();
   else if (alarm.name === 'poll-jobs') { pollPendingJobs(); pollGroupLookups(); }
   else if (alarm.name === 'check-post-results') { checkPostResults(); }
+  else if (alarm.name === DAILY_GROUP_SCAN_ALARM) { enqueueDailyGroupScan(); }
 });
 
 // ─── Group name lookup ───
@@ -667,13 +687,7 @@ async function getPostingIdentityByNameOrKey(name, key) {
   try {
     const session = await getStoredSession();
     if (!session || !session.userId) return null;
-    const res = await fetch(`${SB_URL}/rest/v1/amplr_data?user_id=eq.${session.userId}&key=eq.posting_identities&select=value`, {
-      headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}` }
-    });
-    if (!res.ok) return null;
-    const rows = await res.json();
-    const value = rows?.[0]?.value;
-    const identities = Array.isArray(value) ? value : (value?.identities || []);
+    const identities = await getStoredPostingIdentities(session);
     const norm = v => String(v || '').trim().replace(/\s+/g, ' ').toLowerCase();
     const wantedName = norm(name);
     const wantedKey = norm(key);
@@ -685,6 +699,164 @@ async function getPostingIdentityByNameOrKey(name, key) {
   } catch (e) {
     extLog('warn', 'getPostingIdentityByNameOrKey error: ' + e.message);
     return null;
+  }
+}
+
+async function getStoredPostingIdentities(session = null) {
+  session = session || await getStoredSession();
+  if (!session || !session.userId) return [];
+  const res = await fetch(`${SB_URL}/rest/v1/amplr_data?user_id=eq.${session.userId}&key=eq.posting_identities&select=value`, {
+    headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}` }
+  });
+  if (!res.ok) return [];
+  const rows = await res.json();
+  const value = rows?.[0]?.value;
+  return Array.isArray(value) ? value : (value?.identities || []);
+}
+
+function normalizeImportTarget(target) {
+  if (!target || typeof target !== 'object') return null;
+  const identityName = target.identity_name || target.profile_name || target.page_name || target.name || null;
+  const identityKey = target.identity_key || target.profile_key || target.page_key || target.key || identityName || null;
+  const identityUrl = target.identity_url || target.url || target.profile_url || target.page_url || null;
+  const identityType = target.identity_type || target.type || (target.page_name ? 'Facebook Page' : 'Facebook profile');
+  if (!identityName && !identityUrl) return null;
+  return { name: identityName, key: identityKey, type: identityType, url: identityUrl };
+}
+
+async function getImportTargetsForJob(job, session = null) {
+  const rawTargets = Array.isArray(job.groups) ? job.groups : [];
+  let targets = rawTargets.map(normalizeImportTarget).filter(Boolean);
+  if (job.ai_prompt && !targets.length) targets = [{ name: job.ai_prompt, key: job.ai_prompt, type: null, url: null }];
+  if (!targets.length) targets = (await getStoredPostingIdentities(session)).map(identity => normalizeImportTarget({
+    identity_name: identity.name,
+    identity_key: identity.id || identity.url || identity.name,
+    identity_type: identity.type,
+    identity_url: identity.url
+  })).filter(Boolean);
+  const seen = new Set();
+  return targets.filter(target => {
+    const dedupeKey = String(target.key || target.name || target.url || '').trim().toLowerCase();
+    if (!dedupeKey || seen.has(dedupeKey)) return false;
+    seen.add(dedupeKey);
+    return true;
+  });
+}
+
+async function getExistingGroupUrlsByIdentity(session, identityKeys = []) {
+  const out = new Map();
+  for (const key of identityKeys) out.set(String(key || '__legacy__'), new Set());
+  if (!session?.userId || !identityKeys.length) return out;
+  for (const key of identityKeys) {
+    const normalizedKey = String(key || '__legacy__');
+    const res = await fetch(`${SB_URL}/rest/v1/jsw_groups?user_id=eq.${encodeURIComponent(session.userId)}&identity_key=eq.${encodeURIComponent(normalizedKey)}&select=group_url`, {
+      headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}` }
+    });
+    if (!res.ok) continue;
+    const rows = await res.json();
+    out.set(normalizedKey, new Set((rows || []).map(r => r.group_url).filter(Boolean)));
+  }
+  return out;
+}
+
+async function runImportGroupsJob(job, session) {
+  const targets = await getImportTargetsForJob(job, session);
+  if (!targets.length) throw new Error('No synced Facebook profiles/pages found. Sync profiles first.');
+  const beforeByIdentity = await getExistingGroupUrlsByIdentity(session, targets.map(t => t.key || t.name || '__legacy__'));
+  const perIdentity = [];
+  const errors = [];
+
+  for (let i = 0; i < targets.length; i++) {
+    const target = targets[i];
+    const storedIdentity = await getPostingIdentityByNameOrKey(target.name, target.key);
+    const mergedTarget = {
+      name: target.name || storedIdentity?.name || null,
+      key: target.key || storedIdentity?.id || storedIdentity?.url || storedIdentity?.name || target.name || '__legacy__',
+      type: target.type || storedIdentity?.type || null,
+      url: target.url || storedIdentity?.url || null
+    };
+    const label = mergedTarget.name || mergedTarget.key || `profile ${i + 1}`;
+    await sbUpdateJob(job.id, { result: { text: `Scanning ${label} (${i + 1}/${targets.length})...`, current_identity: label, target_index: i + 1, target_count: targets.length } });
+    try {
+      const result = await importFacebookGroupsForJob(job.id, mergedTarget, { finalizeJob: false, progressPrefix: `${label}: ` });
+      const before = beforeByIdentity.get(String(mergedTarget.key || '__legacy__')) || new Set();
+      const newGroups = (result?.groups || []).filter(g => g?.url && !before.has(g.url)).map(g => ({ group_name: g.name || null, group_url: g.url, group_avatar_url: g.group_avatar_url || null }));
+      perIdentity.push({
+        identity_name: mergedTarget.name || null,
+        identity_key: mergedTarget.key || '__legacy__',
+        identity_type: mergedTarget.type || null,
+        count: result?.count || 0,
+        avatar_count: result?.avatar_count || 0,
+        new_count: newGroups.length,
+        new_groups: newGroups.slice(0, 50)
+      });
+    } catch (e) {
+      errors.push({ identity_name: mergedTarget.name || null, identity_key: mergedTarget.key || '__legacy__', error: e.message });
+      perIdentity.push({ identity_name: mergedTarget.name || null, identity_key: mergedTarget.key || '__legacy__', count: 0, new_count: 0, error: e.message });
+    }
+  }
+
+  const totalGroups = perIdentity.reduce((sum, item) => sum + (item.count || 0), 0);
+  const totalNew = perIdentity.reduce((sum, item) => sum + (item.new_count || 0), 0);
+  const status = errors.length === targets.length ? 'failed' : 'done';
+  const isDailyScan = !!(job.daily_scan || job.result?.daily_scan);
+  const label = isDailyScan ? 'Daily group scan' : 'Group scan';
+  await sbUpdateJob(job.id, {
+    status,
+    result: {
+      text: `${status === 'done' ? label + ' complete' : label + ' failed'}: ${totalGroups} groups across ${targets.length} profiles/pages · ${totalNew} new`,
+      daily_scan: isDailyScan,
+      target_count: targets.length,
+      total_groups: totalGroups,
+      total_new_groups: totalNew,
+      identities: perIdentity,
+      errors
+    },
+    error: errors.length ? errors.map(e => `${e.identity_name || e.identity_key}: ${e.error}`).join('; ') : null,
+    completed_at: new Date().toISOString()
+  });
+}
+
+async function enqueueDailyGroupScan() {
+  const session = await getStoredSession();
+  if (!session || !session.userId) return;
+  if (!dashSession) dashSession = session;
+  try {
+    const targets = await getImportTargetsForJob({ groups: [] }, session);
+    if (!targets.length) {
+      extLog('warn', 'Daily group scan skipped: no synced posting identities');
+      return;
+    }
+    const since = new Date(Date.now() - 20 * 60 * 60 * 1000).toISOString();
+    const dupeRes = await fetch(`${SB_URL}/rest/v1/jsw_post_jobs?user_id=eq.${encodeURIComponent(session.userId)}&message=eq.__import_groups__&created_at=gte.${encodeURIComponent(since)}&status=in.(pending,processing,done)&select=id,status,result&limit=10`, {
+      headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}` }
+    });
+    if (dupeRes.ok) {
+      const existing = await dupeRes.json();
+      if (existing?.some(row => row?.result?.daily_scan)) {
+        extLog('info', 'Daily group scan already queued/completed recently; skipping duplicate');
+        return;
+      }
+    }
+    const res = await fetch(`${SB_URL}/rest/v1/jsw_post_jobs`, {
+      method: 'POST',
+      headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}`, 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
+      body: JSON.stringify({
+        user_id: session.userId,
+        message: '__import_groups__',
+        groups: targets.map(t => ({ identity_name: t.name, identity_key: t.key, identity_type: t.type, identity_url: t.url, import_groups: true })),
+        status: 'pending',
+        delay: 0,
+        ai_enabled: false,
+        scheduled_for: null,
+        result: { daily_scan: true, text: `Daily group scan queued for ${targets.length} synced profiles/pages.` }
+      })
+    });
+    if (!res.ok) throw new Error(await res.text());
+    extLog('info', `Daily group scan queued for ${targets.length} profiles/pages`);
+    pollPendingJobs();
+  } catch (e) {
+    extLog('warn', 'enqueueDailyGroupScan failed: ' + e.message);
   }
 }
 
@@ -721,16 +893,7 @@ async function executeDashJob(job) {
     if (!claimed) return;
     extLog('info', 'Running import_groups job ' + job.id);
     try {
-      const identityMeta = Array.isArray(job.groups) ? job.groups[0] : null;
-      const identityName = job.ai_prompt || identityMeta?.identity_name || null;
-      const identityKey = identityMeta?.identity_key || null;
-      const storedIdentity = await getPostingIdentityByNameOrKey(identityName, identityKey);
-      await importFacebookGroupsForJob(job.id, {
-        name: identityName,
-        key: identityKey,
-        type: identityMeta?.identity_type || storedIdentity?.type || null,
-        url: identityMeta?.identity_url || storedIdentity?.url || null
-      });
+      await runImportGroupsJob(job, dashSession);
     } catch (e) {
       await sbUpdateJob(job.id, {
         status: 'failed',
@@ -1365,11 +1528,13 @@ async function upsertAmplrData(session, key, value) {
 // scrapes name + URL, saves to jsw_groups via Supabase REST.
 // ============================================================
 // Job-aware version: updates job progress and result in jsw_post_jobs
-async function importFacebookGroupsForJob(jobId, identityMeta = null) {
+async function importFacebookGroupsForJob(jobId, identityMeta = null, options = {}) {
   const identityName = typeof identityMeta === 'string' ? identityMeta : (identityMeta?.name || null);
   const identityKey = (typeof identityMeta === 'object' && identityMeta?.key) ? identityMeta.key : (identityName || '__legacy__');
   const identityType = (typeof identityMeta === 'object' && identityMeta?.type) ? identityMeta.type : null;
   const identityUrl = (typeof identityMeta === 'object' && identityMeta?.url) ? identityMeta.url : null;
+  const finalizeJob = options.finalizeJob !== false;
+  const progressPrefix = options.progressPrefix || '';
   const session = await getStoredSession();
   if (!session || !session.userId) {
     await sbUpdateJob(jobId, { status: 'failed', result: { error: 'Not signed in' }, completed_at: new Date().toISOString() });
@@ -1377,8 +1542,8 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null) {
   }
 
   const updateProgress = async (text) => {
-    await sbUpdateJob(jobId, { result: { text } });
-    chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_PROGRESS', text }).catch(() => {});
+    await sbUpdateJob(jobId, { result: { text: progressPrefix + text } });
+    chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_PROGRESS', text: progressPrefix + text }).catch(() => {});
   };
 
   let tab;
@@ -1576,13 +1741,21 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null) {
 
     extLog('info', `Imported ${groups.length} groups via job ${jobId}`);
     const groupAvatarCount = groups.filter(g => !!(g.group_avatar_url || g.avatar_url || g.image_url)).length;
-    await sbUpdateJob(jobId, { status: 'done', result: { count: groups.length, avatar_count: groupAvatarCount, identity_name: identityName || null, identity_key: identityKey || '__legacy__', identity_type: identityType || null, text: `Imported ${groups.length} groups${identityName ? ' for ' + identityName : ''} · ${groupAvatarCount} photos` }, completed_at: new Date().toISOString() });
+    const importResult = { count: groups.length, avatar_count: groupAvatarCount, identity_name: identityName || null, identity_key: identityKey || '__legacy__', identity_type: identityType || null, groups, text: `Imported ${groups.length} groups${identityName ? ' for ' + identityName : ''} · ${groupAvatarCount} photos` };
+    if (finalizeJob) {
+      await sbUpdateJob(jobId, { status: 'done', result: importResult, completed_at: new Date().toISOString() });
+    }
     chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_DONE', count: groups.length, groups }).catch(() => {});
+    return importResult;
 
   } catch (e) {
     extLog('error', 'importFacebookGroupsForJob error: ' + e.message);
     if (tab) { try { await chrome.tabs.remove(tab.id); } catch (_) {} }
-    await sbUpdateJob(jobId, { status: 'failed', result: { error: e.message }, completed_at: new Date().toISOString() });
+    if (finalizeJob) {
+      await sbUpdateJob(jobId, { status: 'failed', result: { error: e.message }, completed_at: new Date().toISOString() });
+      return null;
+    }
+    throw e;
   }
 }
 
