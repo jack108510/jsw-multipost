@@ -759,6 +759,24 @@ async function getExistingGroupUrlsByIdentity(session, identityKeys = []) {
   return out;
 }
 
+async function deleteGroupsForIdentity(session, identityKey) {
+  if (!session?.userId || !identityKey) return false;
+  const res = await fetch(`${SB_URL}/rest/v1/jsw_groups?user_id=eq.${encodeURIComponent(session.userId)}&identity_key=eq.${encodeURIComponent(identityKey)}`, {
+    method: 'DELETE',
+    headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}`, 'Prefer': 'return=minimal' }
+  });
+  if (!res.ok) throw new Error(`Could not remove unverified groups for ${identityKey}: ${await res.text()}`);
+  return true;
+}
+
+function groupUrlSignature(groups = []) {
+  return [...new Set((groups || []).map(g => g?.url || g?.group_url).filter(Boolean))].sort().join('\n');
+}
+
+function isPageIdentityType(type) {
+  return /^page|facebook page|business/i.test(String(type || ''));
+}
+
 function friendlyGroupScanMissReason(error) {
   const message = String(error?.message || error || '');
   if (/active Facebook identity|same account-level groups|not verified/i.test(message)) {
@@ -778,6 +796,7 @@ async function runImportGroupsJob(job, session) {
   const beforeByIdentity = await getExistingGroupUrlsByIdentity(session, targets.map(t => t.key || t.name).filter(Boolean));
   const perIdentity = [];
   const errors = [];
+  let accountLevelGroupSignature = null;
 
   for (let i = 0; i < targets.length; i++) {
     const target = targets[i];
@@ -793,6 +812,13 @@ async function runImportGroupsJob(job, session) {
     await sbUpdateJob(job.id, { result: { text: `Scanning ${label} (${i + 1}/${targets.length})...`, current_identity: label, target_index: i + 1, target_count: targets.length } });
     try {
       const result = await importFacebookGroupsForJob(job.id, mergedTarget, { finalizeJob: false, progressPrefix: `${label}: ` });
+      const resultSignature = groupUrlSignature(result?.groups || []);
+      const isPageTarget = isPageIdentityType(mergedTarget.type);
+      if (!isPageTarget && resultSignature) accountLevelGroupSignature = accountLevelGroupSignature || resultSignature;
+      if (isPageTarget && accountLevelGroupSignature && resultSignature === accountLevelGroupSignature) {
+        await deleteGroupsForIdentity(session, mergedTarget.key);
+        throw new Error(`same account-level groups returned for ${mergedTarget.name}`);
+      }
       const before = beforeByIdentity.get(String(mergedTarget.key)) || new Set();
       const newGroups = (result?.groups || []).filter(g => g?.url && !before.has(g.url)).map(g => ({ group_name: g.name || null, group_url: g.url, group_avatar_url: g.group_avatar_url || null }));
       perIdentity.push({
