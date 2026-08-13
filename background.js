@@ -796,6 +796,7 @@ async function runImportGroupsJob(job, session) {
   const beforeByIdentity = await getExistingGroupUrlsByIdentity(session, targets.map(t => t.key || t.name).filter(Boolean));
   const perIdentity = [];
   const errors = [];
+  const scanSignatures = [];
   let accountLevelGroupSignature = null;
 
   for (let i = 0; i < targets.length; i++) {
@@ -819,6 +820,7 @@ async function runImportGroupsJob(job, session) {
         await deleteGroupsForIdentity(session, mergedTarget.key);
         throw new Error(`same account-level groups returned for ${mergedTarget.name}`);
       }
+      scanSignatures.push({ identity_key: mergedTarget.key, identity_name: mergedTarget.name, identity_type: mergedTarget.type, signature: resultSignature });
       const before = beforeByIdentity.get(String(mergedTarget.key)) || new Set();
       const newGroups = (result?.groups || []).filter(g => g?.url && !before.has(g.url)).map(g => ({ group_name: g.name || null, group_url: g.url, group_avatar_url: g.group_avatar_url || null }));
       perIdentity.push({
@@ -848,6 +850,39 @@ async function runImportGroupsJob(job, session) {
         status: 'not_scanned',
         reason
       });
+    }
+  }
+
+  const signatureCounts = new Map();
+  scanSignatures.forEach(item => {
+    if (!item.signature) return;
+    signatureCounts.set(item.signature, (signatureCounts.get(item.signature) || 0) + 1);
+  });
+  const quarantinedKeys = new Set();
+  for (const item of scanSignatures) {
+    if (!item.signature || signatureCounts.get(item.signature) < 2 || !isPageIdentityType(item.identity_type)) continue;
+    try { await deleteGroupsForIdentity(session, item.identity_key); } catch (e) { extLog('warn', e.message); }
+    quarantinedKeys.add(String(item.identity_key));
+    errors.push({
+      identity_name: item.identity_name || null,
+      identity_key: item.identity_key || null,
+      status: 'not_scanned',
+      reason: 'Facebook returned the same group list as another identity, so this Page scan was quarantined.',
+      raw_error: 'duplicate group URL signature'
+    });
+  }
+  if (quarantinedKeys.size) {
+    for (let i = 0; i < perIdentity.length; i++) {
+      if (!quarantinedKeys.has(String(perIdentity[i].identity_key))) continue;
+      perIdentity[i] = {
+        identity_name: perIdentity[i].identity_name || null,
+        identity_key: perIdentity[i].identity_key || null,
+        identity_type: perIdentity[i].identity_type || null,
+        count: 0,
+        new_count: 0,
+        status: 'not_scanned',
+        reason: 'Facebook returned the same group list as another identity, so this Page scan was quarantined.'
+      };
     }
   }
 
