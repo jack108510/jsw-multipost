@@ -988,7 +988,26 @@
 
   // ============ MESSAGE LISTENER ============
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (!['POST_TO_PAGE','SYNC_FACEBOOK_IDENTITIES','SWITCH_FACEBOOK_IDENTITY','SCRAPE_FACEBOOK_MANAGED_PAGES'].includes(msg.type)) return;
+    if (!['POST_TO_PAGE','SYNC_FACEBOOK_IDENTITIES','SWITCH_FACEBOOK_IDENTITY','SCRAPE_FACEBOOK_MANAGED_PAGES','GET_FACEBOOK_ACTIVE_IDENTITY'].includes(msg.type)) return;
+
+    if (msg.type === 'GET_FACEBOOK_ACTIVE_IDENTITY') {
+      (async () => {
+        try {
+          let active = currentIdentityName();
+          if (!active) {
+            const opened = await openIdentityMenu();
+            if (opened) {
+              await sleep(1000);
+              active = activeIdentityFromMenu() || currentIdentityName();
+            }
+          }
+          sendResponse({ success: true, activeIdentity: active || null, pageUrl: location.href });
+        } catch (e) {
+          sendResponse({ success: false, error: e.message, activeIdentity: currentIdentityName() || null, pageUrl: location.href });
+        }
+      })();
+      return true;
+    }
 
     if (msg.type === 'SWITCH_FACEBOOK_IDENTITY') {
       log('Received identity switch command');

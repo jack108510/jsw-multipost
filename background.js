@@ -761,6 +761,9 @@ async function getExistingGroupUrlsByIdentity(session, identityKeys = []) {
 
 function friendlyGroupScanMissReason(error) {
   const message = String(error?.message || error || '');
+  if (/active Facebook identity|same account-level groups|not verified/i.test(message)) {
+    return 'Facebook returned an account-level groups page instead of a verified profile/page-specific list.';
+  }
   if (/message channel closed|receiving end does not exist|Extension context invalidated|Could not establish connection/i.test(message)) {
     return 'Facebook did not return a group list for this profile/page during this pass.';
   }
@@ -1560,6 +1563,32 @@ async function upsertAmplrData(session, key, value) {
 // Opens facebook.com/groups/joins, scrolls to load all,
 // scrapes name + URL, saves to jsw_groups via Supabase REST.
 // ============================================================
+function facebookIdentityNameMatches(actual, expected) {
+  const norm = value => String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const a = norm(actual);
+  const e = norm(expected);
+  return !!a && !!e && (a === e || a.includes(e) || e.includes(a));
+}
+
+async function assertFacebookActiveIdentity(tabId, expectedName, context = 'group import') {
+  if (!expectedName) throw new Error(`Cannot verify active Facebook identity for ${context}`);
+  let response = null;
+  try {
+    response = await chrome.tabs.sendMessage(tabId, { type: 'GET_FACEBOOK_ACTIVE_IDENTITY' });
+  } catch (e) {
+    throw new Error(`Active Facebook identity not verified for ${expectedName}: ${e.message}`);
+  }
+  const active = response?.activeIdentity || null;
+  if (!response?.success || !facebookIdentityNameMatches(active, expectedName)) {
+    throw new Error(`Active Facebook identity not verified for ${expectedName}. Facebook showed ${active || 'unknown'} on ${response?.pageUrl || 'current page'}. Refusing to save same account-level groups.`);
+  }
+  return active;
+}
+
 // Job-aware version: updates job progress and result in jsw_post_jobs
 async function importFacebookGroupsForJob(jobId, identityMeta = null, options = {}) {
   const identityName = typeof identityMeta === 'string' ? identityMeta : (identityMeta?.name || identityMeta?.identity_name || null);
@@ -1597,6 +1626,8 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null, options = 
       await sleep(8000);
       await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/groups/joins/' });
       await sleep(7000);
+      chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_PROGRESS', text: `Verifying active identity for ${identityName}...` }).catch(() => {});
+      await assertFacebookActiveIdentity(tab.id, identityName, 'group import');
     } else {
       tab = await chrome.tabs.create({ url: 'https://www.facebook.com/groups/joins/', active: false });
       await sleep(5000);
@@ -1837,6 +1868,8 @@ async function importFacebookGroups(identityMeta = null) {
       await sleep(8000);
       await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/groups/joins/' });
       await sleep(7000);
+      chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_PROGRESS', text: `Verifying active identity for ${identityName}...` }).catch(() => {});
+      await assertFacebookActiveIdentity(tab.id, identityName, 'group import');
     } else {
       tab = await chrome.tabs.create({ url: 'https://www.facebook.com/groups/joins/', active: false });
       await sleep(5000);
