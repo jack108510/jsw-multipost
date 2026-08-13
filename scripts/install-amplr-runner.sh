@@ -8,6 +8,9 @@ PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG_DIR="$HOME/Library/Logs/Amplr"
 CHROME_PROFILE="${AMPLR_CHROME_PROFILE:-Default}"
 CHECK_INTERVAL="${AMPLR_RUNNER_INTERVAL:-30}"
+HEARTBEAT_STALE_SECONDS="${AMPLR_HEARTBEAT_STALE_SECONDS:-150}"
+HEARTBEAT_CHECK_EVERY="${AMPLR_HEARTBEAT_CHECK_EVERY:-60}"
+EXTENSION_ID="${AMPLR_EXTENSION_ID:-nglcanaclcaahancoecenliekemolfgp}"
 DASHBOARD_URL="${AMPLR_DASHBOARD_URL:-https://jack108510.github.io/jsw-multipost/dashboard.html}"
 
 if [[ ! -d "$EXT_DIR" ]]; then
@@ -50,6 +53,12 @@ cat > "$PLIST" <<EOF_PLIST
     <string>$CHROME_PROFILE</string>
     <key>AMPLR_RUNNER_INTERVAL</key>
     <string>$CHECK_INTERVAL</string>
+    <key>AMPLR_HEARTBEAT_STALE_SECONDS</key>
+    <string>$HEARTBEAT_STALE_SECONDS</string>
+    <key>AMPLR_HEARTBEAT_CHECK_EVERY</key>
+    <string>$HEARTBEAT_CHECK_EVERY</string>
+    <key>AMPLR_EXTENSION_ID</key>
+    <string>$EXTENSION_ID</string>
     <key>AMPLR_DASHBOARD_URL</key>
     <string>$DASHBOARD_URL</string>
   </dict>

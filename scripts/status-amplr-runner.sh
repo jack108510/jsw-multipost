@@ -31,3 +31,15 @@ if [[ -f "$LOG_DIR/runner.watch.log" ]]; then
   echo "Recent runner log:"
   tail -5 "$LOG_DIR/runner.watch.log"
 fi
+
+WATCHDOG="$EXT_DIR/scripts/amplr-heartbeat-watchdog.py"
+if [[ -x "$WATCHDOG" || -f "$WATCHDOG" ]]; then
+  echo "Heartbeat watchdog:"
+  python3 "$WATCHDOG" \
+    --ext-dir "$EXT_DIR" \
+    --chrome-profile "${AMPLR_CHROME_PROFILE:-Default}" \
+    --dashboard-url "${AMPLR_DASHBOARD_URL:-https://jack108510.github.io/jsw-multipost/dashboard.html}" \
+    --extension-id "${AMPLR_EXTENSION_ID:-nglcanaclcaahancoecenliekemolfgp}" \
+    --stale-seconds "${AMPLR_HEARTBEAT_STALE_SECONDS:-150}" \
+    --no-restart || true
+fi
