@@ -306,8 +306,20 @@
   function cleanIdentityName(text) {
     return normalizeText(text)
       .replace(/^(Switch to|Continue as|Use Facebook as)\s+/i, '')
-      .replace(/\s+(profile|page)$/i, '')
+      .replace(/^Search\s+/i, '')
+      .replace(/\s*['’]\s*s\s+(Timeline|profile|page)$/i, '')
+      .replace(/['’]\s*s$/i, '')
+      .replace(/\s+(facebook identity|profile|page)$/i, '')
       .trim();
+  }
+
+  function isBadIdentityEvidence(value) {
+    const raw = normalizeText(value || '');
+    const cleaned = cleanIdentityName(raw);
+    if (!raw || !cleaned) return true;
+    if (/^\s*Search\s+/i.test(raw)) return true;
+    if (/^(close composer dialog|close|composer|create post|create a public post)$/i.test(cleaned)) return true;
+    return isForbiddenIdentityName(cleaned);
   }
 
   function visible(el) {
@@ -404,23 +416,26 @@
   function currentIdentityName() {
     const candidates = [];
     const push = (value) => {
+      if (isBadIdentityEvidence(value)) return;
       const name = cleanIdentityName(value || '');
       if (!name || /^(profile picture|photo|your profile|active)$/i.test(name)) return;
       if (isForbiddenIdentityName(name) || /^(see your profile|view your profile|facebook identity)$/i.test(name)) return;
       candidates.push(name);
     };
 
+    const banner = document.querySelector('[role="banner"]') || document.body;
     [
       '[aria-label="Your profile"]',
       '[aria-label*="Your profile"]',
-      '[aria-label$="profile"]',
-      'a[aria-label*="profile"]',
-      '[role="banner"] [aria-label*="profile"]'
+      '[aria-label="Account Controls and Settings"]',
+      '[aria-label*="Account Controls"]',
+      '[aria-label="Account"]',
+      '[aria-label*="Account"]'
     ].forEach(sel => {
-      document.querySelectorAll(sel).forEach(el => {
+      banner.querySelectorAll(sel).forEach(el => {
         push(el.querySelector?.('img[alt]')?.getAttribute('alt'));
         const label = el.getAttribute?.('aria-label') || '';
-        if (!/Your profile/i.test(label)) push(label);
+        if (!/Your profile|Account Controls|Account/i.test(label)) push(label);
       });
     });
 
@@ -443,29 +458,62 @@
   }
 
   async function openIdentityMenu() {
+    const banner = document.querySelector('[role="banner"]') || document.body;
+    const menuLooksOpen = () => {
+      const text = normalizeText(identityMenuRoot()?.innerText || identityMenuRoot()?.textContent || '');
+      return /Quick switch profiles|See all profiles|Settings & privacy|Log out/i.test(text);
+    };
+    const topRightVisible = (el) => {
+      if (!visible(el)) return false;
+      const box = el.getBoundingClientRect?.();
+      return !!box && box.top < 140 && box.left > window.innerWidth * 0.45;
+    };
+
+    // Most reliable on Facebook: click the top-right account/avatar button by position.
+    // Selector labels change between personal profiles and Pages, but the account
+    // switcher always opens from the right side of the top nav.
+    const y = 50;
+    for (const offset of [24, 64, 104, 144, 184, 224]) {
+      const el = document.elementFromPoint(window.innerWidth - offset, y)?.closest?.('[role="button"], a[href], button');
+      if (!el || !visible(el)) continue;
+      const label = normalizeText(el.getAttribute?.('aria-label') || el.innerText || el.textContent || '');
+      if (/Messenger|Notifications|Facebook menu|Search|Home|Pages|Professional dashboard|Ad Center|Reels/i.test(label)) continue;
+      clickLikeUser(el);
+      await sleep(1200);
+      if (menuLooksOpen()) return true;
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await sleep(250);
+    }
+
     const selectors = [
-      '[aria-label="Your profile"]',
-      '[aria-label*="Your profile"]',
+      '[aria-label="Account Controls and Settings"]',
+      '[aria-label*="Account Controls"]',
       '[aria-label="Account"]',
       '[aria-label*="Account"]',
-      '[aria-label*="profile"]'
+      '[aria-label="Your profile"]',
+      '[aria-label*="Your profile"]'
     ];
     for (const sel of selectors) {
-      const el = [...document.querySelectorAll(sel)].find(visible);
-      if (el) { el.click(); await sleep(1200); return true; }
+      const matches = [...banner.querySelectorAll(sel)];
+      const el = matches.find(topRightVisible)
+        || (/Your profile/i.test(sel) ? null : matches.find(visible));
+      if (el) { clickLikeUser(el); await sleep(1200); return true; }
     }
-    const banner = document.querySelector('[role="banner"]') || document.body;
-    const imgBtn = [...banner.querySelectorAll('div[role="button"], a[role="link"], a')].find(el => visible(el) && el.querySelector('img[alt]'));
-    if (imgBtn) { imgBtn.click(); await sleep(1200); return true; }
+    const imgBtn = [...banner.querySelectorAll('div[role="button"], a[role="link"], a, button')]
+      .filter(topRightVisible)
+      .find(el => el.querySelector('img[alt]'));
+    if (imgBtn) { clickLikeUser(imgBtn); await sleep(1200); return true; }
     return false;
   }
 
   function isForbiddenIdentityName(name) {
     const cleaned = cleanIdentityName(name || '');
     if (!cleaned) return true;
-    if (/^(quick switch profiles?|see all profiles?|see all pages?|settings(?: & privacy)?|help(?: & support)?|report a problem|give feedback|meta verified|meta business suite|display & accessibility|privacy|terms|privacy policy|advertising|ad choices|cookies|more|active|log out)$/i.test(cleaned)) return true;
+    if (/^(quick switch profiles?|see all profiles?|see all pages?|settings(?: & privacy)?|help(?: & support)?|report a problem|give feedback|meta verified|meta business suite|display & accessibility|privacy|terms|privacy policy|advertising|ad choices|cookies|more|active|edit|manage|back to previous(?: page)?|select an option|available voices?,?\s*switch|unread chats?|chatsallhas new content.*|log out)$/i.test(cleaned)) return true;
     if (/^(?:[A-Z]\s*){1,3}$/i.test(cleaned.replace(/\./g, ''))) return true; // menu initials like "B B"
+    if (/^\d+$/.test(cleaned)) return true;
     if (/^(facebook|meta|pages?|profiles?|home|watch|marketplace|groups?|notifications?|menu)$/i.test(cleaned)) return true;
+    if (/\b(number of unread notifications|new notification|notifications?|unread chats?|chat history is missing|available voices)\b/i.test(cleaned)) return true;
     return false;
   }
 
@@ -497,7 +545,28 @@
     return lines[0] || cleanIdentityName(rawLabel);
   }
 
-  function activeIdentityFromMenu(root=document) {
+  function activeIdentityFromMenu(root=document, expectedName=null) {
+    root = root === document ? identityMenuRoot() : root;
+    const rootText = root?.innerText || root?.textContent || '';
+    if (/Quick switch profiles|See all profiles|Meta Business Suite|Settings & privacy|Log out/i.test(rootText)) {
+      const expected = cleanIdentityName(expectedName || '');
+      const lines = rootText.split('\n')
+        .map(cleanIdentityName)
+        .filter(Boolean)
+        .filter(line => !/^facebook identity$/i.test(line))
+        .filter(line => !/^switch to\b/i.test(line))
+        .filter(line => !isForbiddenIdentityName(line));
+      if (expected) {
+        const firstLine = lines.find(line => !/^(quick switch profiles?|see all profiles?|meta business suite|settings|privacy|help|log out)$/i.test(line));
+        if (identityMatches(firstLine, expected)) return expected;
+        const compactRoot = cleanIdentityName(rootText).replace(/\s+/g, '').toLowerCase();
+        const compactExpected = expected.replace(/\s+/g, '').toLowerCase();
+        if (compactRoot.startsWith(compactExpected) || compactRoot.startsWith('facebook'+compactExpected) || compactRoot.startsWith('yourprofile'+compactExpected)) return expected;
+      }
+      const first = lines.find(line => !/^(quick switch profiles?|see all profiles?|meta business suite|settings|privacy|help|log out)$/i.test(line));
+      if (first) return first;
+    }
+
     const rows = [...root.querySelectorAll('[role="button"], a[href], div')].filter(visible);
     for (const el of rows) {
       const rawText = el.innerText || el.textContent || '';
@@ -518,8 +587,31 @@
   }
 
   function identityMenuRoot() {
-    const roots = [...document.querySelectorAll('[role="dialog"], [role="menu"], [aria-label*="Account"], [aria-label*="profile"], [aria-label*="Page"]')].filter(visible);
-    return roots.find(r => /Switch to|Continue as|See all profiles|See all pages|Your Pages|See your profile|View your profile|Quick switch profiles/i.test(r.textContent || '')) || document.body;
+    const menuTextRe = /Switch to|Continue as|See all profiles|See all pages|Your Pages|See your profile|View your profile|Quick switch profiles|Meta Business Suite|Settings & privacy|Log out/i;
+    const textOf = el => normalizeText(el?.innerText || el?.textContent || el?.getAttribute?.('aria-label') || '');
+    const goodBox = el => {
+      const b = el?.getBoundingClientRect?.();
+      return !!b && b.width >= 240 && b.width <= 620 && b.height >= 80 && b.height <= Math.max(950, window.innerHeight);
+    };
+
+    // Facebook's account switcher is often a plain floating div, not a dialog/menu.
+    // Find the text node/row for Quick switch / See all, then climb to the smallest
+    // visible ancestor that contains the account-menu footer/settings rows.
+    const anchors = [...document.querySelectorAll('[role="button"], [aria-label], div, span')]
+      .filter(visible)
+      .filter(el => /Quick switch profiles|See all profiles|Settings & privacy|Log out/i.test(textOf(el)));
+    for (const anchor of anchors) {
+      let node = anchor;
+      let best = null;
+      for (let i = 0; node && i < 10; i++, node = node.parentElement) {
+        const text = textOf(node);
+        if (menuTextRe.test(text) && /Settings & privacy|Log out|Meta Business Suite/i.test(text) && goodBox(node)) best = node;
+      }
+      if (best) return best;
+    }
+
+    const roots = [...document.querySelectorAll('[role="dialog"], [role="menu"], [aria-label*="Account"]')].filter(visible);
+    return roots.find(r => menuTextRe.test(textOf(r))) || document.body;
   }
 
   function clickLikeUser(el) {
@@ -587,13 +679,31 @@
   }
 
   function findIdentityTarget(expectedName) {
-    const candidates = [...document.querySelectorAll('[aria-label], [role="button"], a[href], span[dir="auto"]')].filter(visible);
-    return candidates.find(el => {
-      const label = el.getAttribute('aria-label') || '';
-      const text = el.innerText || el.textContent || '';
-      const name = extractIdentityName(el, label || text);
-      const combined = cleanIdentityName(`${label} ${text}`);
-      return (identityMatches(name, expectedName) || identityMatches(combined, expectedName)) && !isForbiddenIdentityName(name);
+    const expected = cleanIdentityName(expectedName || '').toLowerCase();
+    const root = identityMenuRoot();
+    const rows = [];
+    const seen = new Set();
+    [...root.querySelectorAll('[role="button"], a[href], button, [aria-label]')]
+      .filter(visible)
+      .forEach(el => {
+        const row = el.closest?.('[role="button"], a[href]') || el;
+        if (!row || seen.has(row)) return;
+        seen.add(row);
+        rows.push(row);
+      });
+    return rows.find(row => {
+      const label = cleanIdentityName(row.getAttribute?.('aria-label') || '');
+      const rawText = row.innerText || row.textContent || '';
+      const text = normalizeText(rawText);
+      if (!text && !label) return false;
+      if (/^\s*Search\s+/i.test(text) || /^\s*Search\s+/i.test(row.getAttribute?.('aria-label') || '')) return false;
+      if (text.length > 240 || /Meta Business Suite|Settings & privacy|Help & support|Report a problem|Display & accessibility|Log out/i.test(text)) return false;
+      const lines = rawText.split('\n').map(cleanIdentityName).filter(Boolean).filter(line => !isForbiddenIdentityName(line));
+      const names = [label, ...lines].filter(Boolean);
+      return names.some(name => {
+        const n = cleanIdentityName(name).toLowerCase();
+        return n === expected || n === `${expected}'s` || n === `${expected} 's` || /^Switch to /i.test(name) && identityMatches(name, expectedName);
+      });
     }) || null;
   }
 
@@ -744,6 +854,59 @@
     return [...found.values()];
   }
 
+  async function switchManagedPageFromPagesManager(expectedName) {
+    if (!expectedName) throw new Error('Managed Page name is required');
+    const bodySample = () => normalizeText(document.body?.innerText || document.body?.textContent || '').slice(0, 1600);
+    const findCard = () => {
+      const main = document.querySelector('[role="main"]') || document.body || document;
+      const cards = [...main.querySelectorAll('[role="article"], [role="listitem"], div')].filter(visible);
+      for (const card of cards) {
+        const text = normalizeText(card.innerText || card.textContent || '');
+        if (!/\bSwitch Now\b/i.test(text)) continue;
+        const lines = (card.innerText || card.textContent || '').split('\n').map(cleanIdentityName).filter(Boolean);
+        const hasPageName = lines.some(line => identityMatches(line, expectedName)) || identityMatches(text, expectedName);
+        if (!hasPageName) continue;
+        const switchButton = [...card.querySelectorAll('[role="button"], button, a[href], [aria-label]')]
+          .filter(visible)
+          .find(el => /^Switch Now$/i.test(cleanIdentityName(el.innerText || el.textContent || el.getAttribute('aria-label') || '')))
+          || [...card.querySelectorAll('[role="button"], button, a[href], [aria-label]')]
+            .filter(visible)
+            .find(el => /\bSwitch Now\b/i.test(normalizeText(el.innerText || el.textContent || el.getAttribute('aria-label') || '')));
+        if (switchButton) return { card, switchButton, text: text.slice(0, 500) };
+      }
+      return null;
+    };
+
+    for (let pass = 0; pass < 5; pass++) {
+      const hit = findCard();
+      if (hit) {
+        clickLikeUser(hit.switchButton);
+        await sleep(9000);
+        let active = currentIdentityName();
+        if (!identityMatches(active, expectedName)) {
+          const opened = await openIdentityMenu();
+          if (opened) {
+            await sleep(1000);
+            active = activeIdentityFromMenu(document, expectedName) || active;
+          }
+        }
+        if (!identityMatches(active, expectedName)) {
+          throw new Error(`Clicked Switch Now for ${expectedName}, but active identity did not verify. Active: ${active || 'unknown'}.`);
+        }
+        return {
+          switched: true,
+          active_identity: active || expectedName,
+          page_url: location.href,
+          matched_card_text: hit.text,
+          body_sample: bodySample()
+        };
+      }
+      window.scrollBy(0, window.innerHeight * 1.5);
+      await sleep(1200);
+    }
+    throw new Error(`Could not find Switch Now card for ${expectedName} on Pages manager. ${bodySample()}`);
+  }
+
   async function syncFacebookIdentities() {
     log('Syncing Facebook identities...');
     const activeBefore = currentIdentityName();
@@ -790,7 +953,36 @@
     if (!expected) return true;
     actual = cleanIdentityName(actual || '').toLowerCase();
     expected = cleanIdentityName(expected || '').toLowerCase();
-    return actual && expected && (actual === expected || actual.includes(expected) || expected.includes(actual));
+    if (!actual || !expected) return false;
+    if (actual === expected) return true;
+    const strip = value => value
+      .replace(/\s*['’]\s*s\s+(Timeline|profile|page)$/i, '')
+      .replace(/\s+(facebook identity|profile|page)$/i, '')
+      .replace(/['’]s$/i, '')
+      .trim();
+    return strip(actual) === strip(expected);
+  }
+
+  async function locateIdentitySwitchTarget(expectedName, force=false) {
+    if (!expectedName) return { found: false, active_identity: currentIdentityName(), error: 'missing expected identity' };
+    let active = currentIdentityName();
+    if (!force && identityMatches(active, expectedName)) return { found: true, already_active: true, active_identity: active, pageUrl: location.href };
+    const opened = await openIdentityMenu();
+    if (!opened) return { found: false, active_identity: active || null, error: 'Could not open Facebook profile switcher', pageUrl: location.href };
+    await sleep(1000);
+    let target = findIdentityTarget(expectedName);
+    if (!target) {
+      const expanded = await expandAllIdentitiesIfPresent();
+      if (expanded) {
+        await sleep(800);
+        target = findIdentityTarget(expectedName);
+      }
+    }
+    if (!target) return { found: false, active_identity: activeIdentityFromMenu() || active || null, error: `Could not find Facebook identity ${expectedName}`, debug: identitySwitcherDebugSummary(), pageUrl: location.href };
+    const clickable = target.closest?.('[role="button"], a[href], button') || target;
+    try { clickable.scrollIntoView({ block: 'center', inline: 'center' }); } catch (_) {}
+    const box = clickable.getBoundingClientRect();
+    return { found: true, already_active: false, active_identity: activeIdentityFromMenu() || active || null, text: normalizeText(clickable.innerText || clickable.textContent || clickable.getAttribute('aria-label') || target.innerText || target.textContent || '').slice(0, 500), x: box.left + box.width / 2, y: box.top + box.height / 2, pageUrl: location.href };
   }
 
   async function switchToIdentity(expectedName, identityUrl=null) {
@@ -800,12 +992,44 @@
 
     const tryDirectPageUrl = async (reason='') => {
       if (!identityUrl || !/^https:\/\/(www\.)?facebook\.com\/profile\.php\?id=\d+/i.test(identityUrl)) return null;
-      log('Trying direct Facebook Page profile URL fallback:', identityUrl, reason);
-      location.href = identityUrl;
-      await sleep(7000);
+      const targetId = String(identityUrl).match(/profile\.php\?id=(\d+)/i)?.[1] || null;
+      const currentId = String(location.href).match(/profile\.php\?id=(\d+)/i)?.[1] || null;
+      if (!targetId || currentId !== targetId) {
+        log('Direct Page URL requires background navigation first:', identityUrl, reason);
+        return null;
+      }
+      log('Trying direct Facebook Page profile switch button on current URL:', identityUrl, reason);
+      await sleep(1500);
+      const clickPageSwitchButton = async () => {
+        const expected = cleanIdentityName(expectedName || '').toLowerCase();
+        const candidates = [...document.querySelectorAll('[role="button"], a[href], button')]
+          .filter(visible)
+          .map(el => {
+            let root = el;
+            for (let i = 0; root?.parentElement && i < 5; i++) root = root.parentElement;
+            return { el, text: normalizeText(el.innerText || el.textContent || el.getAttribute('aria-label') || ''), context: normalizeText(root?.innerText || root?.textContent || '') };
+          })
+          .filter(item => /\bSwitch\b/i.test(item.text));
+        const target = candidates.find(item => {
+          const text = item.text.toLowerCase();
+          return text.includes(expected) && /switch into|switch to|continue as|use facebook as/i.test(item.text);
+        }) || candidates.find(item => /^(switch|switch now)$/i.test(item.text) && item.context.toLowerCase().includes(expected) && /switch into|switch to|continue as|use facebook as/i.test(item.context)) || null;
+        if (!target) return false;
+        log('Clicking Page profile switch button:', target.text);
+        clickLikeUser(target.el);
+        await sleep(7000);
+        return true;
+      };
       active = currentIdentityName();
-      if (identityMatches(active, expectedName) || /profile\.php\?id=\d+/i.test(location.href)) {
-        return { switched: true, active_identity: active || expectedName, direct_url_fallback: true, page_url: location.href };
+      if (!identityMatches(active, expectedName) && /Switch into .*Page to take more actions|Switch/i.test(document.body?.innerText || '')) {
+        const clicked = await clickPageSwitchButton();
+        active = currentIdentityName();
+        if (clicked && !identityMatches(active, expectedName)) {
+          log('Page profile switch button clicked, but active identity did not verify:', active || 'unknown');
+        }
+      }
+      if (identityMatches(active, expectedName)) {
+        return { switched: true, active_identity: active || expectedName, direct_url_fallback: false, switched_via_page_profile_button: true, page_url: location.href };
       }
       return null;
     };
@@ -831,8 +1055,16 @@
     await sleep(6000);
     active = currentIdentityName();
     if (!identityMatches(active, expectedName)) {
-      // Facebook sometimes navigates after switch; reload detection from page text/menu can lag.
-      log('Identity switch verification uncertain:', active, expectedName);
+      const reopened = await openIdentityMenu();
+      if (reopened) {
+        await sleep(1000);
+        active = activeIdentityFromMenu() || active;
+      }
+    }
+    if (!identityMatches(active, expectedName)) {
+      const direct = await tryDirectPageUrl('switcher click did not verify active identity');
+      if (direct) return direct;
+      throw new Error(`Facebook identity switch did not verify as "${expectedName}". Active identity: ${active || 'unknown'}. ${identitySwitcherDebugSummary()}`);
     }
     return { switched: true, active_identity: active || expectedName };
   }
@@ -841,6 +1073,7 @@
     if (!dialog) return null;
     const values = [];
     const push = (value) => {
+      if (isBadIdentityEvidence(value)) return;
       const cleaned = cleanIdentityName(value || '');
       if (!cleaned || isForbiddenIdentityName(cleaned)) return;
       if (/\b(post|publish|create a public post|write something|what's on your mind|add to your post|audience|public|group|more options)\b/i.test(cleaned)) return;
@@ -895,36 +1128,156 @@
     };
   }
 
+  function composerIdentitySwitcherCandidates(dialog) {
+    if (!dialog) return [];
+    const top = dialog.getBoundingClientRect?.();
+    const rows = [...dialog.querySelectorAll('[role="button"], button, a[href], [aria-haspopup], [aria-label]')]
+      .filter(visible)
+      .map(el => {
+        const box = el.getBoundingClientRect?.();
+        const text = normalizeText(el.innerText || el.textContent || el.getAttribute?.('aria-label') || '');
+        const topBias = top && box ? Math.max(0, 260 - Math.abs(box.top - top.top)) : 0;
+        const hasIdentity = !isBadIdentityEvidence(text) && !/post|publish|add to your post|audience|public|group|more options/i.test(text);
+        const hasAvatar = !!el.querySelector?.('img[alt]');
+        const looksDropdown = /switch|profile|page|identity|posting as|act as|use facebook as/i.test(text)
+          || el.getAttribute?.('aria-haspopup')
+          || hasAvatar;
+        return { el, text, score: (looksDropdown ? 1000 : 0) + (hasIdentity ? 500 : 0) + (hasAvatar ? 250 : 0) + topBias };
+      })
+      .filter(item => item.score >= 900)
+      .sort((a,b) => b.score - a.score);
+    const seen = new Set();
+    return rows.map(item => item.el.closest?.('[role="button"], button, a[href]') || item.el).filter(el => {
+      if (!el || seen.has(el)) return false;
+      seen.add(el);
+      return true;
+    }).slice(0, 8);
+  }
+
+  function findComposerIdentityOption(expectedName) {
+    const roots = [
+      ...document.querySelectorAll('[role="dialog"], [role="menu"], [role="listbox"], [aria-label*="profile" i], [aria-label*="Page" i]')
+    ].filter(visible);
+    roots.push(document.body);
+    const seen = new Set();
+    for (const root of roots) {
+      const candidates = [...root.querySelectorAll('[role="option"], [role="menuitem"], [role="button"], button, a[href], [aria-label]')]
+        .filter(visible);
+      for (const el of candidates) {
+        const row = el.closest?.('[role="option"], [role="menuitem"], [role="button"], a[href], button') || el;
+        if (!row || seen.has(row)) continue;
+        seen.add(row);
+        const raw = normalizeText(row.innerText || row.textContent || row.getAttribute?.('aria-label') || '');
+        if (!raw || raw.length > 500) continue;
+        const lines = raw.split(/\n| {2,}/).map(cleanIdentityName).filter(Boolean);
+        const names = [cleanIdentityName(row.getAttribute?.('aria-label') || ''), ...lines]
+          .filter(Boolean)
+          .filter(name => !isForbiddenIdentityName(name));
+        if (names.some(name => identityMatches(name, expectedName)) || identityMatches(raw, expectedName)) return row;
+      }
+    }
+    return null;
+  }
+
+  async function switchComposerIdentityInDialog(dialog, expectedName) {
+    if (!dialog || !expectedName) return false;
+    const before = extractComposerIdentity(dialog);
+    if (identityMatches(before, expectedName)) return true;
+
+    for (const candidate of composerIdentitySwitcherCandidates(dialog)) {
+      const label = normalizeText(candidate.innerText || candidate.textContent || candidate.getAttribute?.('aria-label') || '');
+      log('Trying composer actor switcher:', label.slice(0, 120));
+      clickLikeUser(candidate);
+      await sleep(1200);
+      const option = findComposerIdentityOption(expectedName);
+      if (!option) {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        await sleep(350);
+        continue;
+      }
+      log('Selecting composer actor option:', normalizeText(option.innerText || option.textContent || option.getAttribute?.('aria-label') || '').slice(0, 160));
+      clickLikeUser(option);
+      await sleep(2200);
+      if (identityMatches(extractComposerIdentity(dialog), expectedName)) return true;
+    }
+    return false;
+  }
+
   // ============ MAIN ============
+  function isManagedPageIdentityUrl(identityUrl) {
+    return /^https:\/\/(www\.)?facebook\.com\/profile\.php\?id=\d+/i.test(String(identityUrl || ''));
+  }
+
+  function closeComposerDialog(dialog) {
+    if (!dialog) return;
+    const closeBtn = [...dialog.querySelectorAll('[aria-label], [role="button"], button')]
+      .find(el => /^(close|discard)$/i.test(cleanIdentityName(el.getAttribute?.('aria-label') || el.innerText || el.textContent || '')));
+    try {
+      if (closeBtn) closeBtn.click();
+      else document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    } catch (_) {}
+  }
+
+  async function openVerifiedComposerDialog(identityName) {
+    assertNoFacebookDefenseSignal();
+    assertAcceptedGroupBeforePosting();
+    const trigger = await findTrigger();
+    log('Clicking trigger...');
+    trigger.click();
+    const dialog = await findDialog();
+    await sleep(500);
+    let identityCheck = null;
+    try {
+      identityCheck = verifyComposerIdentity(dialog, identityName);
+    } catch (e) {
+      if (e.code !== 'identity_not_verified') throw e;
+      log('Composer opened under wrong actor; trying composer identity picker:', e.message);
+      const switchedInComposer = await switchComposerIdentityInDialog(dialog, identityName);
+      if (!switchedInComposer) throw e;
+      identityCheck = verifyComposerIdentity(dialog, identityName);
+    }
+    return { dialog, identityCheck };
+  }
+
   async function postToGroup(message, imageUrl, identityName, identityUrl=null) {
     log('=== START POST ===');
     const groupPageUrl = location.href;
     assertNoFacebookDefenseSignal();
 
-    // 0. Switch Facebook posting identity before opening the group composer.
-    const identitySwitch = await switchToIdentity(identityName, identityUrl);
-    if (identitySwitch?.direct_url_fallback && groupPageUrl && location.href !== groupPageUrl) {
-      log('Returning to group after direct identity URL fallback:', groupPageUrl);
-      location.href = groupPageUrl;
-      await sleep(7000);
+    let identitySwitch = { switched: false, active_identity: currentIdentityName(), page_first: false };
+    let dialog = null;
+    let identityCheck = null;
+
+    // Page identities are group-specific on Facebook: the global/Page-manager
+    // switch can visually land on the Page but still leave the group composer as
+    // another actor. First verify the actual group composer. If this group was
+    // joined by the requested Page, this succeeds without a fragile global switch.
+    if (isManagedPageIdentityUrl(identityUrl)) {
+      try {
+        const opened = await openVerifiedComposerDialog(identityName);
+        dialog = opened.dialog;
+        identityCheck = opened.identityCheck;
+        identitySwitch = { switched: false, active_identity: identityCheck?.active_identity, page_first: true };
+        log('Managed Page composer verified directly:', identityName);
+      } catch (firstError) {
+        closeComposerDialog(document.querySelector('[role="dialog"]'));
+        await sleep(700);
+        log('Managed Page direct composer check failed; trying switch path:', firstError.message);
+      }
     }
-    assertNoFacebookDefenseSignal();
-    assertAcceptedGroupBeforePosting();
 
-    // 1. Find trigger
-    const trigger = await findTrigger();
-
-    // 2. Click it — opens dialog
-    log('Clicking trigger...');
-    trigger.click();
-
-    // 3. Wait for dialog to appear
-    const dialog = await findDialog();
-
-    // 4. Verify the actual composer identity before typing/submitting.
-    // This is the hard safety gate that prevents accidental cross-Page posts.
-    await sleep(500);
-    const identityCheck = verifyComposerIdentity(dialog, identityName);
+    // Fallback/normal path: switch identity before opening the group composer.
+    if (!dialog) {
+      identitySwitch = await switchToIdentity(identityName, identityUrl);
+      if (identitySwitch?.direct_url_fallback && groupPageUrl && location.href !== groupPageUrl) {
+        log('Returning to group after direct identity URL fallback:', groupPageUrl);
+        location.href = groupPageUrl;
+        await sleep(7000);
+      }
+      const opened = await openVerifiedComposerDialog(identityName);
+      dialog = opened.dialog;
+      identityCheck = opened.identityCheck;
+    }
 
     // 5. Find textbox inside dialog
     const textbox = findTextboxInDialog(dialog);
@@ -986,24 +1339,80 @@
     };
   }
 
+  async function probeGroupComposerIdentity(identityName, identityUrl=null, skipSwitch=false) {
+    const groupPageUrl = location.href;
+    let identitySwitch = { switched: false, active_identity: currentIdentityName(), skipped: !!skipSwitch };
+    let dialog = null;
+    let identityCheck = null;
+
+    if (skipSwitch || isManagedPageIdentityUrl(identityUrl)) {
+      try {
+        const opened = await openVerifiedComposerDialog(identityName);
+        dialog = opened.dialog;
+        identityCheck = opened.identityCheck;
+      } catch (firstError) {
+        closeComposerDialog(document.querySelector('[role="dialog"]'));
+        await sleep(500);
+        if (skipSwitch) throw firstError;
+      }
+    }
+
+    if (!dialog) {
+      identitySwitch = await switchToIdentity(identityName, identityUrl);
+      if (identitySwitch?.direct_url_fallback && groupPageUrl && location.href !== groupPageUrl) {
+        location.href = groupPageUrl;
+        await sleep(7000);
+      }
+      const opened = await openVerifiedComposerDialog(identityName);
+      dialog = opened.dialog;
+      identityCheck = opened.identityCheck;
+    }
+
+    closeComposerDialog(dialog);
+    await sleep(500);
+    return {
+      allowed: true,
+      pageUrl: location.href,
+      identityName: identityName || null,
+      activeIdentity: identityCheck?.active_identity || identitySwitch?.active_identity || null,
+      composerIdentity: identityCheck?.composer_identity || null,
+      composerIdentityVerified: !!identityCheck?.verified,
+      identitySwitched: !!identitySwitch?.switched
+    };
+  }
+
   // ============ MESSAGE LISTENER ============
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (!['POST_TO_PAGE','SYNC_FACEBOOK_IDENTITIES','SWITCH_FACEBOOK_IDENTITY','SCRAPE_FACEBOOK_MANAGED_PAGES','GET_FACEBOOK_ACTIVE_IDENTITY'].includes(msg.type)) return;
+    if (!['POST_TO_PAGE','PROBE_GROUP_COMPOSER_IDENTITY','SYNC_FACEBOOK_IDENTITIES','SWITCH_FACEBOOK_IDENTITY','LOCATE_FACEBOOK_IDENTITY_SWITCH_TARGET','SCRAPE_FACEBOOK_MANAGED_PAGES','SWITCH_FACEBOOK_MANAGED_PAGE','GET_FACEBOOK_ACTIVE_IDENTITY'].includes(msg.type)) return;
 
     if (msg.type === 'GET_FACEBOOK_ACTIVE_IDENTITY') {
       (async () => {
         try {
+          const expected = msg.expectedIdentity || msg.identityName || msg.identity_name || null;
           let active = currentIdentityName();
-          if (!active) {
+          if (expected ? !identityMatches(active, expected) : !active) {
             const opened = await openIdentityMenu();
             if (opened) {
               await sleep(1000);
-              active = activeIdentityFromMenu() || currentIdentityName();
+              active = activeIdentityFromMenu(document, expected) || currentIdentityName();
             }
           }
-          sendResponse({ success: true, activeIdentity: active || null, pageUrl: location.href });
+          sendResponse({ success: true, activeIdentity: active || null, expectedIdentity: expected, matchesExpected: identityMatches(active, expected), pageUrl: location.href });
         } catch (e) {
           sendResponse({ success: false, error: e.message, activeIdentity: currentIdentityName() || null, pageUrl: location.href });
+        }
+      })();
+      return true;
+    }
+
+    if (msg.type === 'LOCATE_FACEBOOK_IDENTITY_SWITCH_TARGET') {
+      log('Received identity switch target locate command');
+      (async () => {
+        try {
+          const result = await locateIdentitySwitchTarget(msg.identityName || msg.identity_name, msg.force === true);
+          sendResponse({ success: true, ...result });
+        } catch (error) {
+          sendResponse({ success: false, error: error.message, activeIdentity: currentIdentityName() || null, pageUrl: location.href });
         }
       })();
       return true;
@@ -1051,6 +1460,43 @@
       return true;
     }
 
+    if (msg.type === 'SWITCH_FACEBOOK_MANAGED_PAGE') {
+      log('Received managed Page switch command');
+      (async () => {
+        try {
+          const result = await switchManagedPageFromPagesManager(msg.identityName || msg.identity_name);
+          sendResponse({ success: true, ...result });
+        } catch (error) {
+          log('MANAGED PAGE SWITCH ERROR:', error.message);
+          sendResponse({ success: false, error: error.message, pageUrl: location.href });
+        }
+      })();
+      return true;
+    }
+
+    if (msg.type === 'PROBE_GROUP_COMPOSER_IDENTITY') {
+      log('Received composer identity probe command');
+      (async () => {
+        try {
+          const result = await probeGroupComposerIdentity(msg.identityName || msg.identity_name || null, msg.identityUrl || msg.identity_url || null, msg.skipSwitch === true);
+          sendResponse({ success: true, ...result });
+        } catch (error) {
+          log('COMPOSER PROBE ERROR:', error.message);
+          sendResponse({
+            success: false,
+            error: error.message,
+            error_code: error.code || null,
+            identity_expected: error.identity_expected || msg.identityName || msg.identity_name || null,
+            identity_active: error.identity_active || null,
+            composer_identity: error.composer_identity || null,
+            composer_identity_verified: false,
+            pageUrl: location.href
+          });
+        }
+      })();
+      return true;
+    }
+
     log('Received post command');
     (async () => {
       try {
@@ -1073,5 +1519,5 @@
     return true; // keep channel open
   });
 
-  log('Content script v7 loaded');
+  log('Content script v8 loaded');
 })();

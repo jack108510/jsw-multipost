@@ -769,6 +769,56 @@ async function deleteGroupsForIdentity(session, identityKey) {
   return true;
 }
 
+async function getKnownAccountLevelGroupSets(session) {
+  const sets = [];
+  if (!session?.userId) return sets;
+  const res = await fetch(`${SB_URL}/rest/v1/jsw_groups?user_id=eq.${encodeURIComponent(session.userId)}&select=identity_name,identity_key,identity_type,group_url`, {
+    headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}` }
+  });
+  if (!res.ok) return sets;
+  const rows = await res.json();
+  const byIdentity = new Map();
+  (rows || []).forEach(row => {
+    if (isPageIdentityType(row.identity_type)) return;
+    const key = row.identity_key || row.identity_name || '__account__';
+    if (!byIdentity.has(key)) byIdentity.set(key, new Set());
+    if (row.group_url) byIdentity.get(key).add(row.group_url);
+  });
+  for (const [identityKey, urls] of byIdentity.entries()) {
+    if (urls.size) sets.push({ identityKey, urls, signature: [...urls].sort().join('\n') });
+  }
+  return sets;
+}
+
+async function assessAccountLevelGroupOverlap(session, identityName, identityType, groups = []) {
+  if (!isPageIdentityType(identityType)) return null;
+  const pageUrls = new Set((groups || []).map(g => g?.url || g?.group_url).filter(Boolean));
+  if (!pageUrls.size) return null;
+  const accountSets = await getKnownAccountLevelGroupSets(session);
+  let worst = null;
+  for (const account of accountSets) {
+    const overlap = [...pageUrls].filter(url => account.urls.has(url)).length;
+    const coverage = overlap / pageUrls.size;
+    const assessment = {
+      type: 'account_level_overlap',
+      identity_name: identityName,
+      account_identity_key: account.identityKey,
+      overlap,
+      scanned_count: pageUrls.size,
+      account_count: account.urls.size,
+      coverage,
+      high_overlap: overlap >= 5 && coverage >= 0.8
+    };
+    if (!worst || assessment.coverage > worst.coverage) worst = assessment;
+  }
+  return worst;
+}
+
+async function getKnownAccountLevelGroupSignatures(session) {
+  const sets = await getKnownAccountLevelGroupSets(session);
+  return new Set(sets.map(item => item.signature).filter(Boolean));
+}
+
 function groupUrlSignature(groups = []) {
   return [...new Set((groups || []).map(g => g?.url || g?.group_url).filter(Boolean))].sort().join('\n');
 }
@@ -798,6 +848,7 @@ async function runImportGroupsJob(job, session) {
   const errors = [];
   const scanSignatures = [];
   let accountLevelGroupSignature = null;
+  const knownAccountLevelGroupSignatures = await getKnownAccountLevelGroupSignatures(session);
 
   for (let i = 0; i < targets.length; i++) {
     const target = targets[i];
@@ -810,25 +861,46 @@ async function runImportGroupsJob(job, session) {
     };
     if (!mergedTarget.name || !mergedTarget.key) throw new Error('Group import target is missing a Facebook profile/page owner. Sync profiles first.');
     const label = mergedTarget.name || mergedTarget.key || `profile ${i + 1}`;
-    await sbUpdateJob(job.id, { result: { text: `Scanning ${label} (${i + 1}/${targets.length})...`, current_identity: label, target_index: i + 1, target_count: targets.length } });
+    await sbUpdateJob(job.id, { result: { group_scan_guard_version: 'fb-groups-scraper-v2', text: `Scanning ${label} (${i + 1}/${targets.length})...`, current_identity: label, target_index: i + 1, target_count: targets.length } });
     try {
       const result = await importFacebookGroupsForJob(job.id, mergedTarget, { finalizeJob: false, progressPrefix: `${label}: ` });
       const resultSignature = groupUrlSignature(result?.groups || []);
       const isPageTarget = isPageIdentityType(mergedTarget.type);
       if (!isPageTarget && resultSignature) accountLevelGroupSignature = accountLevelGroupSignature || resultSignature;
-      if (isPageTarget && accountLevelGroupSignature && resultSignature === accountLevelGroupSignature) {
+      const pageSourceProof = isPageTarget && result?.page_scan_strategy === 'page_groups_tab' && result?.scan_source_url && !isGenericJoinedGroupsUrl(result.scan_source_url);
+      if (isPageTarget && !pageSourceProof && resultSignature && (knownAccountLevelGroupSignatures.has(resultSignature) || (accountLevelGroupSignature && resultSignature === accountLevelGroupSignature))) {
         await deleteGroupsForIdentity(session, mergedTarget.key);
         throw new Error(`same account-level groups returned for ${mergedTarget.name}`);
       }
-      scanSignatures.push({ identity_key: mergedTarget.key, identity_name: mergedTarget.name, identity_type: mergedTarget.type, signature: resultSignature });
+      const overlapAssessment = await assessAccountLevelGroupOverlap(session, mergedTarget.name, mergedTarget.type, result?.groups || []);
+      const warnings = [];
+      if (overlapAssessment?.high_overlap) {
+        warnings.push({
+          ...overlapAssessment,
+          severity: pageSourceProof ? 'warning' : 'blocked',
+          message: pageSourceProof
+            ? 'Saved because the scrape source was the Page-specific Groups tab, but the URL set overlaps the account-level profile list.'
+            : 'Blocked because the scrape did not have Page-specific source proof and overlapped the account-level profile list.'
+        });
+        if (!pageSourceProof) {
+          await deleteGroupsForIdentity(session, mergedTarget.key);
+          throw new Error(`same account-level groups returned for ${mergedTarget.name}`);
+        }
+      }
+      scanSignatures.push({ identity_key: mergedTarget.key, identity_name: mergedTarget.name, identity_type: mergedTarget.type, signature: resultSignature, page_source_proof: pageSourceProof });
       const before = beforeByIdentity.get(String(mergedTarget.key)) || new Set();
       const newGroups = (result?.groups || []).filter(g => g?.url && !before.has(g.url)).map(g => ({ group_name: g.name || null, group_url: g.url, group_avatar_url: g.group_avatar_url || null }));
       perIdentity.push({
         identity_name: mergedTarget.name || null,
+        group_scan_guard_version: result?.group_scan_guard_version || null,
         identity_key: mergedTarget.key,
         identity_type: mergedTarget.type || null,
         count: result?.count || 0,
         avatar_count: result?.avatar_count || 0,
+        scan_source_url: result?.scan_source_url || null,
+        page_scan_strategy: result?.page_scan_strategy || null,
+        debug: result?.debug || null,
+        warnings,
         new_count: newGroups.length,
         new_groups: newGroups.slice(0, 50)
       });
@@ -860,7 +932,7 @@ async function runImportGroupsJob(job, session) {
   });
   const quarantinedKeys = new Set();
   for (const item of scanSignatures) {
-    if (!item.signature || signatureCounts.get(item.signature) < 2 || !isPageIdentityType(item.identity_type)) continue;
+    if (!item.signature || signatureCounts.get(item.signature) < 2 || !isPageIdentityType(item.identity_type) || item.page_source_proof) continue;
     try { await deleteGroupsForIdentity(session, item.identity_key); } catch (e) { extLog('warn', e.message); }
     quarantinedKeys.add(String(item.identity_key));
     errors.push({
@@ -899,6 +971,7 @@ async function runImportGroupsJob(job, session) {
   await sbUpdateJob(job.id, {
     status,
     result: {
+      group_scan_guard_version: 'fb-groups-scraper-v2',
       text: scanText,
       daily_scan: isDailyScan,
       target_count: targets.length,
@@ -957,6 +1030,154 @@ async function enqueueDailyGroupScan() {
   }
 }
 
+async function runComposerProbeJob(job, session) {
+  let items = Array.isArray(job.groups) ? job.groups : [];
+  if (typeof job.groups === 'string') {
+    try { items = JSON.parse(job.groups); } catch (_) { items = []; }
+  }
+  if (!Array.isArray(items)) items = [];
+  const identity = items.find(g => g && (g.identity_name || g.identityName)) || {};
+  const identityName = identity.identity_name || identity.identityName || job.ai_prompt || null;
+  const identityUrl = identity.identity_url || identity.identityUrl || null;
+  const targets = items.map(g => typeof g === 'string' ? { url: g } : g).filter(g => g?.url || g?.group_url).slice(0, 5);
+  const results = [];
+  for (let i = 0; i < targets.length; i++) {
+    const target = targets[i];
+    const url = target.url || target.group_url;
+    await sbUpdateJob(job.id, { result: { text: `Probing ${identityName} composer access ${i + 1}/${targets.length}...`, identity_name: identityName, current_group: target.name || target.group_name || url } });
+    let tab = null;
+    try {
+      const isPageProbe = !!identityUrl && /^https:\/\/(www\.)?facebook\.com\/profile\.php\?id=\d+/i.test(String(identityUrl));
+      if (isPageProbe) {
+        tab = await chrome.tabs.create({ url: identityUrl, active: true });
+        await sleep(8000);
+        const switchResponse = await clickFacebookPageProfileSwitchButton(tab.id, identityName);
+        // The Page switch card disappears once Facebook already considers the Page
+        // active. Do not fail the no-post probe just because there is no button;
+        // the group composer verification below is the authoritative permission check.
+        if (!switchResponse?.clicked && !switchResponse?.success) {
+          extLog('warn', `No Page switch button for ${identityName}; continuing to composer probe: ${switchResponse?.error || switchResponse?.bodyTextSample || 'button not found'}`);
+        }
+        await sleep(5000);
+        await chrome.tabs.update(tab.id, { url });
+        await sleep(8000);
+        const response = await sendTabMessageWithRetry(tab.id, { type: 'PROBE_GROUP_COMPOSER_IDENTITY', identityName, identityUrl, skipSwitch: true });
+        results.push({ group_name: target.name || target.group_name || null, group_url: url, success: !!response?.success, reset_response: target._reset_response || null, reset_error: target._reset_error || null, switch_success: !!switchResponse?.success, switch_response: switchResponse, ...response });
+      } else {
+        tab = await chrome.tabs.create({ url, active: true });
+        await sleep(7000);
+        const response = await sendTabMessageWithRetry(tab.id, { type: 'PROBE_GROUP_COMPOSER_IDENTITY', identityName, identityUrl });
+        results.push({ group_name: target.name || target.group_name || null, group_url: url, success: !!response?.success, ...response });
+      }
+    } catch (e) {
+      results.push({ group_name: target.name || target.group_name || null, group_url: url, success: false, error: e.message });
+    } finally {
+      if (tab?.id) { try { await chrome.tabs.remove(tab.id); } catch (_) {} }
+      await sleep(1000);
+    }
+  }
+  const allowed = results.filter(r => r.success && r.composerIdentityVerified);
+  await sbUpdateJob(job.id, {
+    status: 'done',
+    result: {
+      text: `Composer probe complete: ${allowed.length}/${results.length} groups allow ${identityName}`,
+      identity_name: identityName,
+      tested_count: results.length,
+      allowed_count: allowed.length,
+      results
+    },
+    completed_at: new Date().toISOString()
+  });
+}
+
+async function runGlobalIdentitySwitchProbeJob(job, session) {
+  let items = Array.isArray(job.groups) ? job.groups : [];
+  if (typeof job.groups === 'string') {
+    try { items = JSON.parse(job.groups); } catch (_) { items = []; }
+  }
+  if (!Array.isArray(items) || !items.length) {
+    const saved = await fetch(`${SB_URL}/rest/v1/amplr_data?user_id=eq.${encodeURIComponent(session.userId)}&key=eq.posting_identities&select=value&limit=1`, {
+      headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}` }
+    });
+    if (saved.ok) {
+      const rows = await saved.json();
+      items = rows?.[0]?.value?.identities || [];
+    }
+  }
+  const identities = items.map(i => ({
+    name: i.name || i.identity_name || i.identityName,
+    type: i.type || i.identity_type || i.identityType || null,
+    url: i.url || i.identity_url || i.identityUrl || null,
+    key: i.key || i.id || i.identity_key || i.identityKey || null
+  })).filter(i => i.name);
+
+  const results = [];
+  let tab = null;
+  try {
+    tab = await chrome.tabs.create({ url: 'https://www.facebook.com/', active: true });
+    await sleep(7000);
+    for (let i = 0; i < identities.length; i++) {
+      const identity = identities[i];
+      await sbUpdateJob(job.id, { result: { text: `Testing global Facebook switch ${i + 1}/${identities.length}: ${identity.name}`, current_identity: identity.name, target_index: i + 1, target_count: identities.length } });
+      const startedAtUrl = tab.url || null;
+      let switchResponse = null;
+      let verifyHome = null;
+      let ok = false;
+      let error = null;
+      try {
+        const isManagedPage = /^page$/i.test(String(identity.type || '')) || (!!identity.url && /^https:\/\/(www\.)?facebook\.com\/profile\.php\?id=\d+/i.test(String(identity.url)));
+        // For managed Pages, use Facebook's Pages Manager "Switch Now" card.
+        // Visiting the Page URL alone often opens the Page/profile photo without
+        // changing the global acting identity.
+        if (isManagedPage) {
+          await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/pages/?category=your_pages', active: true });
+          await sleep(8000);
+          switchResponse = await sendTabMessageWithRetry(tab.id, { type: 'SWITCH_FACEBOOK_MANAGED_PAGE', identityName: identity.name });
+        } else {
+          await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/', active: true });
+          await sleep(5000);
+          switchResponse = await sendTabMessageWithRetry(tab.id, { type: 'SWITCH_FACEBOOK_IDENTITY', identityName: identity.name, identityUrl: identity.url || null });
+        }
+        await sleep(7000);
+        await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/', active: true });
+        await sleep(7000);
+        verifyHome = await sendTabMessageWithRetry(tab.id, { type: 'GET_FACEBOOK_ACTIVE_IDENTITY', expectedIdentity: identity.name });
+        ok = !!switchResponse?.success && facebookIdentityNameMatches(verifyHome?.activeIdentity, identity.name);
+        if (!ok) error = switchResponse?.error || `Home active identity verified as ${verifyHome?.activeIdentity || 'unknown'}, not ${identity.name}`;
+      } catch (e) {
+        error = e.message;
+      }
+      results.push({
+        identity_name: identity.name,
+        identity_type: identity.type,
+        identity_url: identity.url,
+        success: ok,
+        error,
+        started_at_url: startedAtUrl,
+        switch_response: switchResponse,
+        verified_home_identity: verifyHome?.activeIdentity || null,
+        verified_home_url: verifyHome?.pageUrl || null
+      });
+      await sleep(1500);
+    }
+  } finally {
+    if (tab?.id) { try { await chrome.tabs.remove(tab.id); } catch (_) {} }
+  }
+
+  const successCount = results.filter(r => r.success).length;
+  await sbUpdateJob(job.id, {
+    status: successCount === results.length ? 'done' : 'failed',
+    result: {
+      text: `Global identity switch probe complete: ${successCount}/${results.length} identities verified`,
+      tested_count: results.length,
+      success_count: successCount,
+      results,
+      extension_version: EXT_VERSION
+    },
+    completed_at: new Date().toISOString()
+  });
+}
+
 // Claim a job (set status=processing) then run it
 async function executeDashJob(job) {
   dashSession = await getStoredSession();
@@ -991,6 +1212,46 @@ async function executeDashJob(job) {
     extLog('info', 'Running import_groups job ' + job.id);
     try {
       await runImportGroupsJob(job, dashSession);
+    } catch (e) {
+      await sbUpdateJob(job.id, {
+        status: 'failed',
+        result: { error: e.message },
+        completed_at: new Date().toISOString()
+      });
+    }
+    return;
+  }
+
+  if (job.message === '__probe_page_group_access__') {
+    const claimed = await sbUpdateJob(job.id, {
+      status: 'processing',
+      started_at: new Date().toISOString(),
+      result: { text: 'Starting no-post composer permission probe...' }
+    });
+    if (!claimed) return;
+    extLog('info', 'Running composer probe job ' + job.id);
+    try {
+      await runComposerProbeJob(job, dashSession);
+    } catch (e) {
+      await sbUpdateJob(job.id, {
+        status: 'failed',
+        result: { error: e.message },
+        completed_at: new Date().toISOString()
+      });
+    }
+    return;
+  }
+
+  if (job.message === '__probe_global_identity_switch__') {
+    const claimed = await sbUpdateJob(job.id, {
+      status: 'processing',
+      started_at: new Date().toISOString(),
+      result: { text: 'Starting global Facebook identity switch probe...' }
+    });
+    if (!claimed) return;
+    extLog('info', 'Running global identity switch probe job ' + job.id);
+    try {
+      await runGlobalIdentitySwitchProbeJob(job, dashSession);
     } catch (e) {
       await sbUpdateJob(job.id, {
         status: 'failed',
@@ -1508,7 +1769,16 @@ async function sendTabMessageWithRetry(tabId, message, attempts = 5) {
       return await chrome.tabs.sendMessage(tabId, message);
     } catch (e) {
       lastError = e;
-      await sleep(1000);
+      const msg = String(e?.message || e || '');
+      if (/Receiving end does not exist|Could not establish connection/i.test(msg)) {
+        try {
+          await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
+          await sleep(800);
+        } catch (injectErr) {
+          lastError = injectErr;
+        }
+      }
+      await sleep(1200);
     }
   }
   throw lastError;
@@ -1650,8 +1920,152 @@ async function assertFacebookActiveIdentity(tabId, expectedName, context = 'grou
   return active;
 }
 
+function facebookPageGroupsUrl(identityUrl) {
+  if (!identityUrl) return null;
+  try {
+    const url = new URL(identityUrl);
+    if (!/facebook\.com$/i.test(url.hostname.replace(/^www\./, ''))) return null;
+    if (/^\/profile\.php$/i.test(url.pathname) && url.searchParams.get('id')) {
+      url.searchParams.set('sk', 'groups');
+      return url.href;
+    }
+    const path = url.pathname.replace(/\/+$/, '');
+    if (path && path !== '/') return `https://www.facebook.com${path}/groups`;
+  } catch (_) {}
+  return null;
+}
+
+function isGenericJoinedGroupsUrl(pageUrl) {
+  try {
+    const url = new URL(pageUrl);
+    return /facebook\.com$/i.test(url.hostname.replace(/^www\./, '')) && /^\/groups\/joins\/?$/i.test(url.pathname);
+  } catch (_) {
+    return /facebook\.com\/groups\/joins\/?/i.test(String(pageUrl || ''));
+  }
+}
+
+function assertPageGroupScanSource(identityName, identityType, scanSourceUrl, options = {}) {
+  if (!isPageIdentityType(identityType)) return;
+  if (isGenericJoinedGroupsUrl(scanSourceUrl) && !options.allowGenericJoinedGroupsForVerifiedPageSwitch) {
+    throw new Error(`Refusing to save Page groups for ${identityName}: scanner landed on the generic account /groups/joins page instead of the Page's own Groups tab.`);
+  }
+}
+
+async function switchFacebookIdentityNative(tabId, identityName, options = {}) {
+  const locate = await sendTabMessageWithRetry(tabId, { type: 'LOCATE_FACEBOOK_IDENTITY_SWITCH_TARGET', identityName, force: options.force === true });
+  if (locate?.already_active) return { switched: false, already_active: true, active_identity: locate.active_identity || identityName, debug: locate };
+  if (!locate?.success || !locate?.found) throw new Error(locate?.error || `Could not locate Facebook identity ${identityName}`);
+  const target = { tabId };
+  await chrome.tabs.update(tabId, { active: true });
+  await sleep(300);
+  await chrome.debugger.attach(target, '1.3');
+  try {
+    await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x: locate.x, y: locate.y, button: 'none' });
+    await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', { type: 'mousePressed', x: locate.x, y: locate.y, button: 'left', clickCount: 1 });
+    await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x: locate.x, y: locate.y, button: 'left', clickCount: 1 });
+  } finally {
+    try { await chrome.debugger.detach(target); } catch (_) {}
+  }
+  await sleep(8000);
+  let active = null;
+  try {
+    const activeRes = await sendTabMessageWithRetry(tabId, { type: 'GET_FACEBOOK_ACTIVE_IDENTITY' });
+    active = activeRes?.activeIdentity || null;
+  } catch (_) {}
+  return { switched: true, active_identity: active || identityName, debug: locate };
+}
+
+async function clickFacebookPageProfileSwitchButton(tabId, identityName) {
+  try {
+    const [probe] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (expectedName) => {
+        const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+        const expected = norm(expectedName).toLowerCase();
+        const visible = (el) => {
+          const box = el?.getBoundingClientRect?.();
+          return !!box && box.width > 0 && box.height > 0 && box.bottom >= 0 && box.right >= 0;
+        };
+        const candidates = [...document.querySelectorAll('[role="button"], button, a[href]')]
+          .filter(visible)
+          .map(el => {
+            let root = el;
+            for (let i = 0; root?.parentElement && i < 5; i++) root = root.parentElement;
+            return { el, text: norm(el.innerText || el.textContent || el.getAttribute('aria-label') || ''), context: norm(root?.innerText || root?.textContent || '') };
+          })
+          .filter(item => /\bSwitch\b/i.test(item.text));
+        const target = candidates.find(item => item.text.toLowerCase().includes(expected) && /switch into|switch to|continue as|use facebook as/i.test(item.text))
+          || candidates.find(item => /^(switch|switch now)$/i.test(item.text) && item.context.toLowerCase().includes(expected) && /switch into|switch to|continue as|use facebook as/i.test(item.context));
+        if (!target) return { found: false, title: document.title, pageUrl: location.href, bodyTextSample: norm(document.body?.innerText || '').slice(0, 1200), candidates: candidates.map(c => c.text).slice(0, 20) };
+        try { target.el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (_) {}
+        const box = target.el.getBoundingClientRect();
+        return { found: true, title: document.title, pageUrl: location.href, text: target.text, x: box.left + box.width / 2, y: box.top + box.height / 2, outerHTML: String(target.el.outerHTML || '').slice(0, 3000), parentHTML: String(target.el.parentElement?.outerHTML || '').slice(0, 5000), bodyTextSample: norm(document.body?.innerText || '').slice(0, 1200), candidates: candidates.map(c => c.text).slice(0, 20) };
+      },
+      args: [identityName]
+    });
+    const info = probe?.result || {};
+    if (!info.found) return { clicked: false, ...info };
+    await chrome.tabs.update(tabId, { active: true });
+    await sleep(500);
+    const target = { tabId };
+    await chrome.debugger.attach(target, '1.3');
+    try {
+      const evalClick = await chrome.debugger.sendCommand(target, 'Runtime.evaluate', { expression: `(() => { const norm=s=>String(s||'').replace(/\\s+/g,' ').trim(); const expected=${JSON.stringify(identityName.toLowerCase())}; const visible=el=>{const b=el&&el.getBoundingClientRect&&el.getBoundingClientRect();return !!b&&b.width>0&&b.height>0}; const els=[...document.querySelectorAll('[role="button"],button,a[href]')].filter(visible); for (const el of els){ let root=el; for(let i=0;root&&root.parentElement&&i<5;i++) root=root.parentElement; const text=norm(el.innerText||el.textContent||el.getAttribute('aria-label')||''); const ctx=norm(root&&root.innerText||root&&root.textContent||''); if (/^(Switch|Switch Now)$/i.test(text) && ctx.toLowerCase().includes(expected) && /switch into|switch to|continue as|use facebook as/i.test(ctx)) { try{el.scrollIntoView({block:'center',inline:'center'}); el.focus&&el.focus(); const r=el.getBoundingClientRect(); const opts={bubbles:true,cancelable:true,view:window,clientX:r.left+r.width/2,clientY:r.top+r.height/2}; for (const t of ['pointerdown','mousedown','pointerup','mouseup','click']) el.dispatchEvent(new MouseEvent(t,opts)); el.click&&el.click(); return {clicked:true,text,ctx:ctx.slice(0,500),x:opts.clientX,y:opts.clientY};}catch(e){return {clicked:false,error:e.message,text,ctx:ctx.slice(0,500)}} } } return {clicked:false}; })()`, returnByValue: true });
+      try { if (evalClick?.result?.value?.x && evalClick?.result?.value?.y) { info.x = evalClick.result.value.x; info.y = evalClick.result.value.y; info.evalClick = evalClick.result.value; } } catch (_) {}
+      await sleep(800);
+      await chrome.debugger.sendCommand(target, 'Page.bringToFront').catch(() => {});
+      for (let n = 0; n < 3; n++) {
+        await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', { type: 'mouseMoved', x: info.x, y: info.y, button: 'none', pointerType: 'mouse' });
+        await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', { type: 'mousePressed', x: info.x, y: info.y, button: 'left', buttons: 1, clickCount: 1, pointerType: 'mouse' });
+        await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', { type: 'mouseReleased', x: info.x, y: info.y, button: 'left', buttons: 0, clickCount: 1, pointerType: 'mouse' });
+        await sleep(700);
+      }
+      for (const key of ['Enter', ' ']) {
+        const code = key === ' ' ? 'Space' : 'Enter';
+        const vk = key === ' ' ? 32 : 13;
+        await chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', { type: 'keyDown', key, code, windowsVirtualKeyCode: vk });
+        await chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: vk });
+        await sleep(1200);
+      }
+    } finally {
+      try { await chrome.debugger.detach(target); } catch (_) {}
+    }
+    await sleep(8000);
+    const [after] = await chrome.scripting.executeScript({ target: { tabId }, func: (expectedName) => {
+      const norm = s => String(s || '').replace(/\s+/g, ' ').trim();
+      const strip = v => norm(v).replace(/\s*['’]\s*s\s+(Timeline|profile|page)$/i, '').replace(/\s+(facebook identity|profile|page)$/i, '').replace(/['’]s$/i, '').trim().toLowerCase();
+      const expected = strip(expectedName);
+      const bad = name => /^(profile picture|photo|your profile|active|facebook|meta|pages?|profiles?|home|watch|marketplace|groups?|notifications?|menu)$/i.test(norm(name || ''));
+      const candidates = [];
+      const push = value => { const n = norm(value); if (n && !bad(n)) candidates.push(n); };
+      document.querySelectorAll('[aria-label="Your profile"], [aria-label*="Your profile"], [aria-label$="profile"], a[aria-label*="profile"], [role="banner"] [aria-label*="profile"]').forEach(el => {
+        push(el.querySelector?.('img[alt]')?.getAttribute('alt'));
+        const label = el.getAttribute?.('aria-label') || '';
+        if (!/Your profile/i.test(label)) push(label);
+      });
+      document.querySelectorAll('[role="dialog"], [role="menu"], [aria-label*="Account"]').forEach(root => {
+        [...root.querySelectorAll('[role="button"], a[href], div')].forEach(el => {
+          const rawText = el.innerText || el.textContent || '';
+          const text = norm(rawText);
+          if (!/See your profile|View your profile|Active/i.test(text)) return;
+          rawText.split('\n').map(norm).filter(Boolean).forEach(push);
+          push(el.querySelector?.('img[alt]')?.getAttribute('alt'));
+        });
+      });
+      const activeIdentity = candidates.find(c => strip(c) === expected) || candidates[0] || null;
+      return { title: document.title, pageUrl: location.href, activeIdentity, verified: !!activeIdentity && strip(activeIdentity) === expected, bodyTextSample: norm(document.body?.innerText || '').slice(0, 1200) };
+    }, args: [identityName] });
+    const afterResult = after?.result || null;
+    return { clicked: true, success: !!afterResult?.verified, active_identity: afterResult?.activeIdentity || null, ...info, after: afterResult };
+  } catch (e) {
+    try { await chrome.debugger.detach({ tabId }); } catch (_) {}
+    return { clicked: false, error: e.message };
+  }
+}
+
 // Job-aware version: updates job progress and result in jsw_post_jobs
 async function importFacebookGroupsForJob(jobId, identityMeta = null, options = {}) {
+  const groupScanGuardVersion = 'fb-groups-scraper-v2';
   const identityName = typeof identityMeta === 'string' ? identityMeta : (identityMeta?.name || identityMeta?.identity_name || null);
   const identityKey = (typeof identityMeta === 'object' && (identityMeta?.key || identityMeta?.identity_key)) ? (identityMeta.key || identityMeta.identity_key) : identityName;
   const identityType = (typeof identityMeta === 'object' && (identityMeta?.type || identityMeta?.identity_type)) ? (identityMeta.type || identityMeta.identity_type) : null;
@@ -1676,45 +2090,92 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null, options = 
   try {
     await updateProgress('Opening your Facebook groups...');
     const isManagedPageUrl = /^page$/i.test(String(identityType || '')) || (!!identityUrl && /^https:\/\/(www\.)?facebook\.com\/profile\.php\?id=\d+/i.test(String(identityUrl)));
+    let pageScanStrategy = null;
+    let allowGenericJoinedGroupsForVerifiedPageSwitch = false;
+    let pageSwitchDebug = null;
     if (isManagedPageUrl) {
-      // Managed Pages discovered from facebook.com/pages may not appear in the
-      // normal account switcher. Do the Page-context navigation from the
-      // background worker instead of inside content.js; if content.js navigates
-      // while replying to SWITCH_FACEBOOK_IDENTITY, Chrome closes the message
-      // channel and the dashboard reports the Page as not scanned.
-      await updateProgress(`Opening ${identityName} page context...`);
-      tab = await chrome.tabs.create({ url: identityUrl, active: false });
+      const pageGroupsUrl = facebookPageGroupsUrl(identityUrl);
+      if (!pageGroupsUrl) throw new Error(`Could not build Page-specific groups URL for ${identityName}`);
+
+      // New scraper path: use the Pages Manager "Switch Now" card first.
+      // Page profiles and /groups/joins are not identity-scoped unless Facebook
+      // has actually switched the acting profile to that Page.
+      await updateProgress(`Switching to ${identityName} from Pages Manager...`);
+      tab = await chrome.tabs.create({ url: 'https://www.facebook.com/pages/?category=your_pages', active: true });
       await sleep(8000);
-      await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/groups/joins/' });
-      await sleep(7000);
-      chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_PROGRESS', text: `Verifying active identity for ${identityName}...` }).catch(() => {});
-      await assertFacebookActiveIdentity(tab.id, identityName, 'group import');
+      let managerSwitch = null;
+      try {
+        managerSwitch = await sendTabMessageWithRetry(tab.id, { type: 'SWITCH_FACEBOOK_MANAGED_PAGE', identityName });
+        pageSwitchDebug = managerSwitch;
+      } catch (switchError) {
+        pageSwitchDebug = { success: false, error: switchError.message, strategy: 'pages_manager_switch' };
+        extLog('warn', `Pages Manager switch failed for ${identityName}: ${switchError.message}`);
+      }
+
+      if (managerSwitch?.success) {
+        await updateProgress(`Opening ${identityName} joined groups...`);
+        await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/groups/joins/?nav_source=tab&ordering=viewer_added' });
+        await sleep(9000);
+        await assertFacebookActiveIdentity(tab.id, identityName, 'page group import');
+        allowGenericJoinedGroupsForVerifiedPageSwitch = true;
+        pageScanStrategy = 'pages_manager_switch_then_joined_groups';
+      } else {
+        // Safe fallback: scrape only the Page-specific Groups tab. If it is empty,
+        // return zero instead of contaminating the Page with account-level groups.
+        await updateProgress(`Opening ${identityName} page groups tab...`);
+        await chrome.tabs.update(tab.id, { url: identityUrl });
+        await sleep(8000);
+        await chrome.tabs.update(tab.id, { url: pageGroupsUrl });
+        await sleep(7000);
+        pageScanStrategy = 'page_groups_tab';
+      }
     } else {
-      tab = await chrome.tabs.create({ url: 'https://www.facebook.com/groups/joins/', active: false });
+      tab = await chrome.tabs.create({ url: 'https://www.facebook.com/groups/joins/?nav_source=tab&ordering=viewer_added', active: true });
       await sleep(5000);
       if (identityName) {
         await updateProgress(`Switching to ${identityName}...`);
         const switchRes = await chrome.tabs.sendMessage(tab.id, { type: 'SWITCH_FACEBOOK_IDENTITY', identityName, identityUrl });
         if (!switchRes?.success) throw new Error(switchRes?.error || `Could not switch to ${identityName}`);
         await sleep(4000);
-        await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/groups/joins/' });
+        await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/groups/joins/?nav_source=tab&ordering=viewer_added' });
         await sleep(5000);
       }
     }
 
     let groups = [];
+    let scanSourceUrl = null;
     let prevCount = -1;
     let passes = 0;
+    let lastDebug = null;
     const MAX_PASSES = 30;
 
-    while (passes < MAX_PASSES && groups.length !== prevCount) {
+    const MIN_PASSES = 5;
+    while (passes < MAX_PASSES && (passes < MIN_PASSES || groups.length !== prevCount)) {
       prevCount = groups.length;
       passes++;
+
+      if (passes <= 2) {
+        const [expanded] = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => {
+            const norm = s => String(s || '').replace(/\s+/g, ' ').trim();
+            const candidates = [...document.querySelectorAll('a[href*="/groups/joins"], [role="button"], button')]
+              .filter(el => /^See all$/i.test(norm(el.innerText || el.textContent || el.getAttribute('aria-label') || '')));
+            const target = candidates.find(el => /groups\/joins/i.test(el.href || '')) || candidates[0];
+            if (!target) return { clicked: false };
+            try { target.scrollIntoView({ block: 'center', inline: 'center' }); } catch (_) {}
+            target.click();
+            return { clicked: true, href: target.href || null, text: norm(target.innerText || target.textContent || target.getAttribute('aria-label') || '') };
+          }
+        });
+        if (expanded?.result?.clicked) await sleep(3500);
+      }
 
       const [result] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: () => {
           const found = new Map();
+          const pageUrl = location.href;
           const skipSlugs = new Set(['discover', 'feed', 'joins', 'create', 'search', 'membership', 'notifications']);
           const cleanName = (text) => {
             const t = (text || '')
@@ -1830,13 +2291,29 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null, options = 
             if (!name || badName(name)) return;
             found.set(slug, { name, url: `https://www.facebook.com/groups/${encodeURIComponent(slug)}/`, group_avatar_url: extractGroupAvatarUrl(a) });
           });
-          return [...found.values()];
+          const rawGroupLinks = [...document.querySelectorAll('a[href*="/groups/"]')]
+            .slice(0, 80)
+            .map(a => ({ text: (a.textContent || '').replace(/\s+/g, ' ').trim().slice(0, 160), href: a.href }));
+          const debug = {
+            title: document.title,
+            pageUrl,
+            bodyTextSample: (document.body?.innerText || '').replace(/\s+/g, ' ').trim().slice(0, 2000),
+            rawGroupLinkCount: rawGroupLinks.length,
+            rawGroupLinks
+          };
+          return { pageUrl, groups: [...found.values()], debug };
         }
       });
 
-      if (result?.result) {
+      if (result?.result?.debug) lastDebug = result.result.debug;
+      if (result?.result?.pageUrl) {
+        scanSourceUrl = result.result.pageUrl;
+        assertPageGroupScanSource(identityName, identityType, scanSourceUrl, { allowGenericJoinedGroupsForVerifiedPageSwitch });
+      }
+      const scrapedGroups = Array.isArray(result?.result) ? result.result : (result?.result?.groups || []);
+      if (scrapedGroups.length) {
         const existingSlugs = new Set(groups.map(g => g.url));
-        groups = [...groups, ...result.result.filter(g => !existingSlugs.has(g.url))];
+        groups = [...groups, ...scrapedGroups.filter(g => !existingSlugs.has(g.url))];
       }
 
       await updateProgress(`Found ${groups.length} groups, scrolling...`);
@@ -1848,8 +2325,40 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null, options = 
     tab = null;
 
     if (groups.length === 0) {
-      await sbUpdateJob(jobId, { status: 'failed', result: { error: 'No groups found — make sure you\'re logged into Facebook' }, completed_at: new Date().toISOString() });
-      return;
+      const emptyResult = {
+        group_scan_guard_version: groupScanGuardVersion,
+        count: 0,
+        avatar_count: 0,
+        identity_name: identityName,
+        identity_key: identityKey,
+        identity_type: identityType || null,
+        scan_source_url: scanSourceUrl,
+        page_scan_strategy: pageScanStrategy || null,
+        warnings: [],
+        debug: { ...(lastDebug || {}), pageSwitchDebug },
+        groups: [],
+        text: `No visible joined groups found for ${identityName}`
+      };
+      if (finalizeJob) {
+        await sbUpdateJob(jobId, { status: 'done', result: emptyResult, completed_at: new Date().toISOString() });
+      }
+      return emptyResult;
+    }
+
+    const groupScanWarnings = [];
+    if (isPageIdentityType(identityType)) {
+      const overlap = await assessAccountLevelGroupOverlap(session, identityName, identityType, groups);
+      const pageSourceProof = pageScanStrategy === 'page_groups_tab' && scanSourceUrl && !isGenericJoinedGroupsUrl(scanSourceUrl);
+      if (overlap?.high_overlap) {
+        groupScanWarnings.push({
+          ...overlap,
+          severity: pageSourceProof ? 'warning' : 'blocked',
+          message: pageSourceProof
+            ? 'Saved because the scrape source was the Page-specific Groups tab, but the URL set overlaps the account-level profile list.'
+            : 'Blocked because the scrape did not have Page-specific source proof and overlapped the account-level profile list.'
+        });
+        if (!pageSourceProof) throw new Error(`same account-level groups returned for ${identityName}`);
+      }
     }
 
     await updateProgress(`Saving ${groups.length} groups...`);
@@ -1885,7 +2394,7 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null, options = 
 
     extLog('info', `Imported ${groups.length} groups via job ${jobId}`);
     const groupAvatarCount = groups.filter(g => !!(g.group_avatar_url || g.avatar_url || g.image_url)).length;
-    const importResult = { count: groups.length, avatar_count: groupAvatarCount, identity_name: identityName, identity_key: identityKey, identity_type: identityType || null, groups, text: `Imported ${groups.length} groups for ${identityName} · ${groupAvatarCount} photos` };
+    const importResult = { group_scan_guard_version: groupScanGuardVersion, count: groups.length, avatar_count: groupAvatarCount, identity_name: identityName, identity_key:identityKey, identity_type: identityType || null, scan_source_url: scanSourceUrl, page_scan_strategy: pageScanStrategy || null, warnings: groupScanWarnings, debug: { ...(lastDebug || {}), pageSwitchDebug }, groups, text: `Imported ${groups.length} groups for ${identityName} · ${groupAvatarCount} photos` };
     if (finalizeJob) {
       await sbUpdateJob(jobId, { status: 'done', result: importResult, completed_at: new Date().toISOString() });
     }
@@ -1923,42 +2432,66 @@ async function importFacebookGroups(identityMeta = null) {
     chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_PROGRESS', text: 'Opening your Facebook groups...' });
 
     const isManagedPageUrl = /^page$/i.test(String(identityType || '')) || (!!identityUrl && /^https:\/\/(www\.)?facebook\.com\/profile\.php\?id=\d+/i.test(String(identityUrl)));
+    let pageScanStrategy = null;
     if (isManagedPageUrl) {
-      chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_PROGRESS', text: `Opening ${identityName} page context...` });
+      const pageGroupsUrl = facebookPageGroupsUrl(identityUrl);
+      if (!pageGroupsUrl) throw new Error(`Could not build Page-specific groups URL for ${identityName}`);
+      chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_PROGRESS', text: `Opening ${identityName} page groups tab...` });
       tab = await chrome.tabs.create({ url: identityUrl, active: false });
       await sleep(8000);
-      await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/groups/joins/' });
+      await chrome.tabs.update(tab.id, { url: pageGroupsUrl });
       await sleep(7000);
+      pageScanStrategy = 'page_groups_tab';
       chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_PROGRESS', text: `Verifying active identity for ${identityName}...` }).catch(() => {});
       await assertFacebookActiveIdentity(tab.id, identityName, 'group import');
     } else {
-      tab = await chrome.tabs.create({ url: 'https://www.facebook.com/groups/joins/', active: false });
+      tab = await chrome.tabs.create({ url: 'https://www.facebook.com/groups/joins/?nav_source=tab&ordering=viewer_added', active: true });
       await sleep(5000);
       if (identityName) {
         chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_PROGRESS', text: `Switching to ${identityName}...` });
         const switchRes = await chrome.tabs.sendMessage(tab.id, { type: 'SWITCH_FACEBOOK_IDENTITY', identityName, identityUrl });
         if (!switchRes?.success) throw new Error(switchRes?.error || `Could not switch to ${identityName}`);
         await sleep(4000);
-        await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/groups/joins/' });
+        await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/groups/joins/?nav_source=tab&ordering=viewer_added' });
         await sleep(5000);
       }
     }
 
     // Scroll and collect — runs multiple passes until no new groups appear
     let groups = [];
+    let scanSourceUrl = null;
     let prevCount = -1;
     let passes = 0;
     const MAX_PASSES = 30;
 
-    while (passes < MAX_PASSES && groups.length !== prevCount) {
+    const MIN_PASSES = 5;
+    while (passes < MAX_PASSES && (passes < MIN_PASSES || groups.length !== prevCount)) {
       prevCount = groups.length;
       passes++;
+
+      if (passes <= 2) {
+        const [expanded] = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => {
+            const norm = s => String(s || '').replace(/\s+/g, ' ').trim();
+            const candidates = [...document.querySelectorAll('a[href*="/groups/joins"], [role="button"], button')]
+              .filter(el => /^See all$/i.test(norm(el.innerText || el.textContent || el.getAttribute('aria-label') || '')));
+            const target = candidates.find(el => /groups\/joins/i.test(el.href || '')) || candidates[0];
+            if (!target) return { clicked: false };
+            try { target.scrollIntoView({ block: 'center', inline: 'center' }); } catch (_) {}
+            target.click();
+            return { clicked: true, href: target.href || null, text: norm(target.innerText || target.textContent || target.getAttribute('aria-label') || '') };
+          }
+        });
+        if (expanded?.result?.clicked) await sleep(3500);
+      }
 
       // Scrape current DOM
       const [result] = await chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: () => {
           const found = new Map();
+          const pageUrl = location.href;
           const skipSlugs = new Set(['discover', 'feed', 'joins', 'create', 'search', 'membership', 'notifications']);
           const cleanName = (text) => {
             const t = (text || '')
@@ -2076,14 +2609,18 @@ async function importFacebookGroups(identityMeta = null) {
             found.set(slug, { name, url: cleanUrl, group_avatar_url: extractGroupAvatarUrl(a) });
           });
 
-          return [...found.values()];
+          return { pageUrl, groups: [...found.values()] };
         }
       });
 
-      if (result?.result) {
-        const fresh = result.result;
+      if (result?.result?.pageUrl) {
+        scanSourceUrl = result.result.pageUrl;
+        assertPageGroupScanSource(identityName, identityType, scanSourceUrl);
+      }
+      const scrapedGroups = Array.isArray(result?.result) ? result.result : (result?.result?.groups || []);
+      if (scrapedGroups.length) {
         const existingSlugs = new Set(groups.map(g => g.url));
-        const newOnes = fresh.filter(g => !existingSlugs.has(g.url));
+        const newOnes = scrapedGroups.filter(g => !existingSlugs.has(g.url));
         groups = [...groups, ...newOnes];
       }
 
@@ -2107,6 +2644,14 @@ async function importFacebookGroups(identityMeta = null) {
     if (groups.length === 0) {
       chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_ERROR', error: 'No groups found — make sure you\'re logged in to Facebook' });
       return;
+    }
+
+    if (isPageIdentityType(identityType)) {
+      const overlap = await assessAccountLevelGroupOverlap(session, identityName, identityType, groups);
+      const pageSourceProof = pageScanStrategy === 'page_groups_tab' && scanSourceUrl && !isGenericJoinedGroupsUrl(scanSourceUrl);
+      if (overlap?.high_overlap && !pageSourceProof) {
+        throw new Error(`same account-level groups returned for ${identityName}`);
+      }
     }
 
     // Save to Supabase — upsert by (user_id, identity_key, group_url)

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Amplr",
   "short_name": "Amplr",
-  "version": "2.2.23",
+  "version": "2.2.73",
   "description": "Post to multiple Facebook groups at once. AI-powered prompts, scheduled posts, dashboard pairing.",
   "author": "JSW Enterprises",
   "icons": {
@@ -40,7 +40,8 @@
     "tabs",
     "notifications",
     "alarms",
-    "cookies"
+    "cookies",
+    "debugger"
   ],
   "host_permissions": [
     "*://*.facebook.com/*",

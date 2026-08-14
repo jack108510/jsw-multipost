@@ -1789,7 +1789,7 @@ function toggleGroupChip(el){
 
 function getSelectedGroups(){
   const identity=getSelectedIdentity();
-  return groupsCache.filter(g=>composeSelectedGroupIds.has(String(g.id))).map(g=>({url:g.group_url,name:g.group_name,identity_name:identity?.name || null,identity_key:identityKey(identity),identity_type:identity?.type || null}));
+  return groupsCache.filter(g=>composeSelectedGroupIds.has(String(g.id))).map(g=>({url:g.group_url,name:g.group_name,identity_name:identity?.name || null,identity_key:identityKey(identity),identity_type:identity?.type || null,identity_url:identity?.url || null}));
 }
 
 /* ============================================================
@@ -2587,7 +2587,7 @@ async function addSchedule(){
   const message = document.getElementById('schedMessage').value.trim();
   if (!message) { toast('Write a message','error'); return; }
   const identity=getSelectedIdentity();
-  const groups = groupsForSelectedIdentity().map(g=>({url:g.group_url,name:g.group_name,identity_name:identity?.name || null,identity_key:identityKey(identity),identity_type:identity?.type || null}));
+  const groups = groupsForSelectedIdentity().map(g=>({url:g.group_url,name:g.group_name,identity_name:identity?.name || null,identity_key:identityKey(identity),identity_type:identity?.type || null,identity_url:identity?.url || null}));
   if (!groups.length) { toast('Add groups first in the Groups tab','error'); return; }
 
   const frequency = document.getElementById('schedFreq').value;
