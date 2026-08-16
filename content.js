@@ -461,7 +461,7 @@
     const banner = document.querySelector('[role="banner"]') || document.body;
     const menuLooksOpen = () => {
       const text = normalizeText(identityMenuRoot()?.innerText || identityMenuRoot()?.textContent || '');
-      return /Quick switch profiles|See all profiles|Settings & privacy|Log out/i.test(text);
+      return /Quick switch profiles|See all profiles|See all pages|Select profile|Pages you manage|Settings & privacy|Log out/i.test(text);
     };
     const topRightVisible = (el) => {
       if (!visible(el)) return false;
@@ -587,7 +587,7 @@
   }
 
   function identityMenuRoot() {
-    const menuTextRe = /Switch to|Continue as|See all profiles|See all pages|Your Pages|See your profile|View your profile|Quick switch profiles|Meta Business Suite|Settings & privacy|Log out/i;
+    const menuTextRe = /Switch to|Continue as|See all profiles|See all pages|Pages you manage|Select profile|Your Pages|See your profile|View your profile|Quick switch profiles|Meta Business Suite|Settings & privacy|Log out/i;
     const textOf = el => normalizeText(el?.innerText || el?.textContent || el?.getAttribute?.('aria-label') || '');
     const goodBox = el => {
       const b = el?.getBoundingClientRect?.();
@@ -599,13 +599,13 @@
     // visible ancestor that contains the account-menu footer/settings rows.
     const anchors = [...document.querySelectorAll('[role="button"], [aria-label], div, span')]
       .filter(visible)
-      .filter(el => /Quick switch profiles|See all profiles|Settings & privacy|Log out/i.test(textOf(el)));
+      .filter(el => /Quick switch profiles|See all profiles|See all pages|Pages you manage|Select profile|Settings & privacy|Log out/i.test(textOf(el)));
     for (const anchor of anchors) {
       let node = anchor;
       let best = null;
       for (let i = 0; node && i < 10; i++, node = node.parentElement) {
         const text = textOf(node);
-        if (menuTextRe.test(text) && /Settings & privacy|Log out|Meta Business Suite/i.test(text) && goodBox(node)) best = node;
+        if (menuTextRe.test(text) && /Settings & privacy|Log out|Meta Business Suite|Select profile|Pages you manage|See all pages/i.test(text) && goodBox(node)) best = node;
       }
       if (best) return best;
     }
@@ -631,7 +631,9 @@
     return true;
   }
 
-  function findSeeAllIdentitiesButton(root=identityMenuRoot()) {
+  function findSeeAllIdentitiesButton(root=identityMenuRoot(), kind='any') {
+    const wantsProfiles = kind === 'profiles';
+    const wantsPages = kind === 'pages';
     return [...root.querySelectorAll('[role="button"], a[href], [aria-label]')]
       .filter(visible)
       .find(el => {
@@ -639,6 +641,8 @@
         const text = normalizeText(el.innerText || el.textContent || '');
         const cleanedLabel = cleanIdentityName(label);
         const cleanedText = cleanIdentityName(text);
+        if (wantsProfiles) return /^See all profiles\b/i.test(cleanedLabel) || /^See all profiles\b/i.test(cleanedText);
+        if (wantsPages) return /^See all pages\b/i.test(cleanedLabel) || /^See all pages\b/i.test(cleanedText);
         return /^(See all profiles|See all pages)\b/i.test(cleanedLabel) || /^(See all profiles|See all pages)\b/i.test(cleanedText);
       }) || null;
   }
@@ -654,6 +658,15 @@
       await sleep(2200);
     }
     return clicked;
+  }
+
+  async function clickSeeAllButton(kind) {
+    const button = findSeeAllIdentitiesButton(identityMenuRoot(), kind);
+    if (!button) return false;
+    log('Clicking Facebook identity switcher button:', normalizeText(button.innerText || button.textContent || button.getAttribute('aria-label') || kind));
+    clickLikeUser(button);
+    await sleep(kind === 'pages' ? 3000 : 1800);
+    return true;
   }
 
   function mergeIdentityLists(...lists) {
@@ -907,6 +920,63 @@
     throw new Error(`Could not find Switch Now card for ${expectedName} on Pages manager. ${bodySample()}`);
   }
 
+  async function switchViaVerifiedFacebookIdentityPath(expectedName) {
+    // Verified manual Facebook path:
+    // profile/avatar menu -> See all profiles -> Select profile -> target OR See all Pages -> Pages you manage -> target.
+    if (!expectedName) throw new Error('Facebook identity name is required');
+
+    const clickAndVerifyTarget = async (target, source) => {
+      if (!target) return null;
+      const before = currentIdentityName();
+      const text = normalizeText(target.innerText || target.textContent || target.getAttribute?.('aria-label') || '').slice(0, 500);
+      log(`Selecting Facebook identity from ${source}:`, text || expectedName);
+      clickLikeUser(target);
+      await sleep(8000);
+      let active = currentIdentityName();
+      if (!identityMatches(active, expectedName)) {
+        const reopened = await openIdentityMenu();
+        if (reopened) {
+          await sleep(1000);
+          active = activeIdentityFromMenu(document, expectedName) || active;
+        }
+      }
+      if (!identityMatches(active, expectedName)) {
+        throw new Error(`Clicked ${expectedName} from ${source}, but active identity did not verify. Before: ${before || 'unknown'}; active: ${active || 'unknown'}.`);
+      }
+      return { switched: true, active_identity: active || expectedName, switched_via_verified_profile_path: source };
+    };
+
+    const opened = await openIdentityMenu();
+    if (!opened) throw new Error('Could not open Facebook profile/avatar menu');
+    await sleep(900);
+
+    // Step 1: open Select profile.
+    await clickSeeAllButton('profiles');
+    await sleep(500);
+
+    // Step 2: if the target is directly visible in Select profile, select it.
+    let target = findIdentityTarget(expectedName);
+    if (target) return await clickAndVerifyTarget(target, 'select_profile');
+
+    // Step 3: otherwise open See all Pages and select from Pages you manage.
+    const openedPages = await clickSeeAllButton('pages');
+    if (!openedPages) {
+      throw new Error(`Could not find ${expectedName}; Select profile did not expose the target or a See all Pages button. ${identitySwitcherDebugSummary()}`);
+    }
+    await sleep(1200);
+
+    target = findIdentityTarget(expectedName);
+    if (target) return await clickAndVerifyTarget(target, 'pages_you_manage');
+
+    // Some Pages manager layouts expose cards with an explicit Switch Now button.
+    try {
+      const managed = await switchManagedPageFromPagesManager(expectedName);
+      return { ...managed, switched_via_verified_profile_path: 'pages_you_manage_switch_now' };
+    } catch (managedError) {
+      throw new Error(`Could not find Facebook Page "${expectedName}" after See all Pages. ${managedError.message}`);
+    }
+  }
+
   async function syncFacebookIdentities() {
     log('Syncing Facebook identities...');
     const activeBefore = currentIdentityName();
@@ -1049,7 +1119,11 @@
     if (!target) {
       const direct = await tryDirectPageUrl('switcher target not found');
       if (direct) return direct;
-      throw new Error(`Could not find Facebook identity "${expectedName}" in switcher. ${identitySwitcherDebugSummary()}`);
+      try {
+        return await switchViaVerifiedFacebookIdentityPath(expectedName);
+      } catch (pathError) {
+        throw new Error(`Could not find Facebook identity "${expectedName}" in switcher or verified See all profiles/pages path. ${pathError.message}. ${identitySwitcherDebugSummary()}`);
+      }
     }
     clickLikeUser(target);
     await sleep(6000);
