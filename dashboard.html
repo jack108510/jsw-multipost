@@ -1426,7 +1426,12 @@ async function syncGroupsForSelectedIdentity(){
     delay:0,
     ai_enabled:false,
     ai_prompt: identity.name || null,
-    groups:[{ identity_name: identity.name || null, identity_key: selectedKey, identity_type: identity.type || null }],
+    groups:[{
+      identity_name: identity.name || null,
+      identity_key: selectedKey,
+      identity_type: identity.type || null,
+      identity_url: identity.url || null
+    }],
     status:'pending'
   }).select();
   if (error) { toast('Could not start group sync: '+error.message,'error'); if(btn) btn.disabled=false; return; }
@@ -1445,7 +1450,12 @@ async function syncGroupsForAllIdentities(){
     delay:0,
     ai_enabled:false,
     ai_prompt: identity.name || null,
-    groups:[{ identity_name: identity.name || null, identity_key: identityKey(identity), identity_type: identity.type || null }],
+    groups:[{
+      identity_name: identity.name || null,
+      identity_key: identityKey(identity),
+      identity_type: identity.type || null,
+      identity_url: identity.url || null
+    }],
     status:'pending'
   }));
   const { data, error } = await sb.from('jsw_post_jobs').insert(jobs).select();
