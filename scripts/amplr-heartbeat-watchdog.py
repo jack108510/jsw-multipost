@@ -225,7 +225,20 @@ def main() -> int:
 
     try:
         heartbeat_at, ext_status, _ = fetch_heartbeat(session)
-    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError) as exc:
+    except urllib.error.HTTPError as exc:
+        body = ""
+        try:
+            body = exc.read().decode("utf-8", "replace")
+        except Exception:
+            body = ""
+        if exc.code == 401 and ("JWT expired" in body or "PGRST303" in body):
+            print(status_line("SESSION_EXPIRED", action="open_extension_popup_and_sign_in", chrome_running=chrome_running(ext_dir)))
+            if not args.no_restart:
+                launch_chrome(args.chrome_app, args.chrome_profile, ext_dir, args.dashboard_url, args.extension_id)
+            return 7
+        print(status_line("CHECK_FAILED", error=f"HTTPError:{exc.code}", chrome_running=chrome_running(ext_dir)))
+        return 3
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
         print(status_line("CHECK_FAILED", error=type(exc).__name__, chrome_running=chrome_running(ext_dir)))
         return 3
 
