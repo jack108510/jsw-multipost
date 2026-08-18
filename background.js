@@ -41,6 +41,161 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
+// ============ IDENTITY TEST LAB (NON-POSTING) ============
+// This path is intentionally separate from the queue and never calls POST_TO_PAGE,
+// creates a dashboard job, types content, attaches media, comments, or clicks Post.
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!['IDENTITY_TEST_LIST', 'IDENTITY_TEST_RUN'].includes(msg?.type)) return;
+
+  (async () => {
+    try {
+      if (msg.type === 'IDENTITY_TEST_LIST') {
+        const session = await getStoredSession();
+        if (!session?.userId) throw new Error('Sign in to Amplr before running an identity test.');
+        const identities = (await getStoredPostingIdentities(session))
+          .filter(isValidPostingIdentityRecord)
+          .map((identity, index) => ({
+            id: identity.id || identity.url || identity.name || `identity-${index + 1}`,
+            name: identity.name || `Identity ${index + 1}`,
+            type: identity.type || 'Facebook identity',
+            url: identity.url || null,
+            is_active: !!identity.is_active
+          }));
+        sendResponse({ success: true, identities });
+        return;
+      }
+
+      const result = await runNonPostingIdentityTest(msg);
+      sendResponse({ success: true, result });
+    } catch (error) {
+      sendResponse({ success: false, error: error?.message || 'Identity test failed before verification.' });
+    }
+  })();
+
+  return true;
+});
+
+function isFacebookUrlForIdentityTest(value) {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && /(^|\.)facebook\.com$/i.test(url.hostname);
+  } catch (_) {
+    return false;
+  }
+}
+
+function isManagedPageIdentityForTest(identity = {}) {
+  const type = String(identity.type || '').toLowerCase();
+  const url = String(identity.url || '');
+  return /(^|\s)(page|facebook page|business)(\s|$)/i.test(type)
+    || /^https:\/\/(www\.)?facebook\.com\/profile\.php\?id=\d+/i.test(url);
+}
+
+async function runNonPostingIdentityTest(msg = {}) {
+  const identity = msg.identity || {};
+  const expectedName = String(identity.name || '').trim();
+  const identityUrl = isFacebookUrlForIdentityTest(identity.url) ? identity.url : null;
+  const groupUrl = msg.group_url ? String(msg.group_url).trim() : null;
+  const keepTabOpen = msg.keep_tab_open === true;
+
+  if (!expectedName) throw new Error('Choose a valid Facebook Page or profile before testing.');
+  if (groupUrl && !isFacebookUrlForIdentityTest(groupUrl)) {
+    throw new Error('Use a full https://www.facebook.com/... group URL, or leave the group field blank.');
+  }
+
+  let tab = null;
+  const result = {
+    passed: false,
+    expected_identity: expectedName,
+    active_identity: null,
+    active_identity_matches: false,
+    switch_reported_success: false,
+    composer_checked: !!groupUrl,
+    composer_identity: null,
+    composer_identity_matches: false,
+    test_page_url: null,
+    summary: 'No post was created.'
+  };
+
+  try {
+    // Start from Facebook home so the test exercises the same identity-switch path
+    // used before production group posts.
+    tab = await chrome.tabs.create({ url: 'https://www.facebook.com/', active: true });
+    await sleep(7000);
+
+    let switchResponse;
+    if (isManagedPageIdentityForTest(identity)) {
+      await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/pages/?category=your_pages', active: true });
+      await sleep(8000);
+      switchResponse = await sendTabMessageWithRetry(tab.id, {
+        type: 'SWITCH_FACEBOOK_MANAGED_PAGE',
+        identityName: expectedName
+      });
+    } else {
+      switchResponse = await sendTabMessageWithRetry(tab.id, {
+        type: 'SWITCH_FACEBOOK_IDENTITY',
+        identityName: expectedName,
+        identityUrl
+      });
+    }
+
+    result.switch_reported_success = !!switchResponse?.success;
+    if (!switchResponse?.success) {
+      throw new Error(switchResponse?.error || `Facebook did not confirm a switch to ${expectedName}.`);
+    }
+
+    await sleep(3500);
+    await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/', active: true });
+    await sleep(6500);
+    const activeResponse = await sendTabMessageWithRetry(tab.id, {
+      type: 'GET_FACEBOOK_ACTIVE_IDENTITY',
+      expectedIdentity: expectedName
+    });
+    result.active_identity = activeResponse?.activeIdentity || null;
+    result.active_identity_matches = !!activeResponse?.success
+      && facebookIdentityNameMatches(result.active_identity, expectedName);
+    if (!result.active_identity_matches) {
+      throw new Error(`Facebook showed ${result.active_identity || 'an unknown identity'} rather than ${expectedName}.`);
+    }
+
+    if (groupUrl) {
+      await chrome.tabs.update(tab.id, { url: groupUrl, active: true });
+      await sleep(7500);
+      const composerResponse = await sendTabMessageWithRetry(tab.id, {
+        type: 'PROBE_GROUP_COMPOSER_IDENTITY',
+        identityName: expectedName,
+        identityUrl,
+        skipSwitch: false
+      });
+      result.composer_identity = composerResponse?.composerIdentity || null;
+      result.composer_identity_matches = !!composerResponse?.success
+        && composerResponse?.composerIdentityVerified === true
+        && facebookIdentityNameMatches(result.composer_identity, expectedName);
+      if (!result.composer_identity_matches) {
+        throw new Error(composerResponse?.error || `The group composer did not verify ${expectedName} as the acting identity.`);
+      }
+    }
+
+    result.passed = true;
+    result.test_page_url = tab.url || (groupUrl || 'https://www.facebook.com/');
+    result.summary = groupUrl
+      ? 'Facebook switched to the expected identity and the group composer verified it. No post was created.'
+      : 'Facebook switched to the expected identity. No group composer was opened and no post was created.';
+  } catch (error) {
+    result.error = error?.message || 'Identity test failed.';
+    result.summary = 'Test failed safely. No post was created.';
+  } finally {
+    if (tab?.id) {
+      result.test_page_url = result.test_page_url || tab.url || null;
+      if (!keepTabOpen) {
+        try { await chrome.tabs.remove(tab.id); } catch (_) {}
+      }
+    }
+  }
+
+  return result;
+}
+
 // ============ POSTING QUEUE ============
 async function runPostingQueue({ message, imageUrl, groups, delay, settings }, sender) {
   let successCount = 0;

@@ -261,6 +261,7 @@ document.addEventListener('DOMContentLoaded', () => {
   on('step2btn', openFacebook);
   on('finishBtn', finishOnboarding);
   on('openDashBtn', () => chrome.tabs.create({ url: 'https://jack108510.github.io/jsw-multipost/dashboard.html' }));
+  on('openIdentityTestBtn', () => chrome.tabs.create({ url: chrome.runtime.getURL('test-lab.html') }));
   on('signOutBtn', signOut);
   on('loginBtn', handleLogin);
 
