@@ -506,9 +506,18 @@
     return false;
   }
 
+  function isPlaceholderIdentityName(name) {
+    return /^(empty slot|unnamed(?: page| profile)?|unknown(?: page| profile)?|new page)$/i.test(cleanIdentityName(name || ''));
+  }
+
+  function facebookProfileIdFromUrl(url) {
+    const match = String(url || '').match(/profile\.php\?id=(\d+)/i);
+    return match?.[1] || null;
+  }
+
   function isForbiddenIdentityName(name) {
     const cleaned = cleanIdentityName(name || '');
-    if (!cleaned) return true;
+    if (!cleaned || isPlaceholderIdentityName(cleaned)) return true;
     if (/^(quick switch profiles?|see all profiles?|see all pages?|settings(?: & privacy)?|help(?: & support)?|report a problem|give feedback|meta verified|meta business suite|display & accessibility|privacy|terms|privacy policy|advertising|ad choices|cookies|more|active|edit|manage|back to previous(?: page)?|select an option|available voices?,?\s*switch|unread chats?|chatsallhas new content.*|log out)$/i.test(cleaned)) return true;
     if (/^(?:[A-Z]\s*){1,3}$/i.test(cleaned.replace(/\./g, ''))) return true; // menu initials like "B B"
     if (/^\d+$/.test(cleaned)) return true;
@@ -680,9 +689,11 @@
         merged.set(key, {
           ...prev,
           ...identity,
-          id: prev.id || identity.id || key,
-          name,
-          url: identity.url || prev.url || null,
+                  id: facebookProfileIdFromUrl(identity.url) || identity.id || facebookProfileIdFromUrl(prev.url) || prev.id || key,
+        name,
+        type: identity.type || prev.type || (facebookProfileIdFromUrl(identity.url || prev.url) ? 'page' : 'facebook identity'),
+        url: identity.url || prev.url || null,
+
           avatar_url: identity.avatar_url || identity.picture_url || identity.profile_picture_url || identity.photo_url || identity.image_url || prev.avatar_url || prev.picture_url || prev.profile_picture_url || prev.photo_url || prev.image_url || null,
           is_active: !!(prev.is_active || identity.is_active)
         });
@@ -804,9 +815,10 @@
       if (/https?:\/\//i.test(name)) return;
       const key = name.toLowerCase();
       const prev = found.get(key) || {};
+      const stablePageId = facebookProfileIdFromUrl(extra.url) || facebookProfileIdFromUrl(prev.url) || extra.id || prev.id || key;
       found.set(key, {
         ...prev,
-        id: prev.id || extra.id || key,
+        id: stablePageId,
         name,
         type: 'page',
         url: extra.url || prev.url || null,
@@ -1079,11 +1091,11 @@
             for (let i = 0; root?.parentElement && i < 5; i++) root = root.parentElement;
             return { el, text: normalizeText(el.innerText || el.textContent || el.getAttribute('aria-label') || ''), context: normalizeText(root?.innerText || root?.textContent || '') };
           })
-          .filter(item => /\bSwitch\b/i.test(item.text));
+          .filter(item => /\b(switch|continue|use facebook as|act as)\b/i.test(`${item.text} ${item.context}`));
         const target = candidates.find(item => {
-          const text = item.text.toLowerCase();
-          return text.includes(expected) && /switch into|switch to|continue as|use facebook as/i.test(item.text);
-        }) || candidates.find(item => /^(switch|switch now)$/i.test(item.text) && item.context.toLowerCase().includes(expected) && /switch into|switch to|continue as|use facebook as/i.test(item.context)) || null;
+          const actionText = `${item.text} ${item.context}`.toLowerCase();
+          return actionText.includes(expected) && /switch into|switch to|continue as|use facebook as|act as/i.test(actionText);
+        }) || candidates.find(item => /^(switch|switch now|continue)$/i.test(item.text) && item.context.toLowerCase().includes(expected) && /switch into|switch to|continue as|use facebook as|act as/i.test(item.context)) || null;
         if (!target) return false;
         log('Clicking Page profile switch button:', target.text);
         clickLikeUser(target.el);
@@ -1103,6 +1115,12 @@
       }
       return null;
     };
+
+    // When the background worker opened a stable Page URL, try its local Page
+    // action before relying on Facebook's account menu. This is more resilient
+    // than text-only menu discovery and preserves a useful Page-specific context.
+    const directAtCurrentPage = await tryDirectPageUrl('initial Page URL');
+    if (directAtCurrentPage) return directAtCurrentPage;
 
     const opened = await openIdentityMenu();
     if (!opened) throw new Error('Could not open Facebook profile switcher to change identity');

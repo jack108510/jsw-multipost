@@ -714,6 +714,25 @@ async function getStoredPostingIdentities(session = null) {
   return Array.isArray(value) ? value : (value?.identities || []);
 }
 
+async function enrichFacebookIdentityTarget(target = {}) {
+  const identityName = target.identity_name || target.identityName || target.profile_name || target.profileName || target.page_name || target.pageName || target.name || null;
+  const identityKey = target.identity_key || target.identityKey || target.profile_key || target.profileKey || target.page_key || target.pageKey || target.key || identityName || null;
+  const stored = identityName || identityKey ? await getPostingIdentityByNameOrKey(identityName, identityKey) : null;
+  const explicitIdentityUrl = target.identity_url || target.identityUrl || target.profile_url || target.profileUrl || target.page_url || target.pageUrl || null;
+  const genericUrl = target.url && /^https:\/\/(www\.)?facebook\.com\/profile\.php\?id=\d+/i.test(String(target.url)) ? target.url : null;
+  const identityUrl = explicitIdentityUrl || genericUrl || stored?.url || null;
+  const identityType = target.identity_type || target.identityType || target.profile_type || target.profileType || target.page_type || target.pageType || target.type || stored?.type || (facebookPageIdFromUrl(identityUrl) ? 'page' : 'facebook identity');
+  const resolvedName = identityName || stored?.name || null;
+  const resolvedKey = identityKey || stored?.id || stored?.url || resolvedName || null;
+  return {
+    ...target,
+    identity_name: resolvedName,
+    identity_key: resolvedKey,
+    identity_type: identityType,
+    identity_url: identityUrl
+  };
+}
+
 function normalizeImportTarget(target) {
   if (!target || typeof target !== 'object') return null;
   const identityName = target.identity_name || target.profile_name || target.page_name || target.name || null;
@@ -1036,10 +1055,14 @@ async function runComposerProbeJob(job, session) {
     try { items = JSON.parse(job.groups); } catch (_) { items = []; }
   }
   if (!Array.isArray(items)) items = [];
-  const identity = items.find(g => g && (g.identity_name || g.identityName)) || {};
+  const resolvedItems = [];
+  for (const item of items) {
+    resolvedItems.push(typeof item === 'string' ? { url: item } : await enrichFacebookIdentityTarget(item));
+  }
+  const identity = resolvedItems.find(g => g && (g.identity_name || g.identityName)) || {};
   const identityName = identity.identity_name || identity.identityName || job.ai_prompt || null;
   const identityUrl = identity.identity_url || identity.identityUrl || null;
-  const targets = items.map(g => typeof g === 'string' ? { url: g } : g).filter(g => g?.url || g?.group_url).slice(0, 5);
+  const targets = resolvedItems.filter(g => g?.url || g?.group_url).slice(0, 5);
   const results = [];
   for (let i = 0; i < targets.length; i++) {
     const target = targets[i];
@@ -1051,18 +1074,20 @@ async function runComposerProbeJob(job, session) {
       if (isPageProbe) {
         tab = await chrome.tabs.create({ url: identityUrl, active: true });
         await sleep(8000);
-        const switchResponse = await clickFacebookPageProfileSwitchButton(tab.id, identityName);
-        // The Page switch card disappears once Facebook already considers the Page
-        // active. Do not fail the no-post probe just because there is no button;
-        // the group composer verification below is the authoritative permission check.
-        if (!switchResponse?.clicked && !switchResponse?.success) {
-          extLog('warn', `No Page switch button for ${identityName}; continuing to composer probe: ${switchResponse?.error || switchResponse?.bodyTextSample || 'button not found'}`);
-        }
-        await sleep(5000);
+        const switchResponse = await sendTabMessageWithRetry(tab.id, { type: 'SWITCH_FACEBOOK_IDENTITY', identityName, identityUrl });
+        let activeResponse = null;
+        try { activeResponse = await sendTabMessageWithRetry(tab.id, { type: 'GET_FACEBOOK_ACTIVE_IDENTITY', expectedIdentity: identityName }); } catch (_) {}
+        const directVerified = !!switchResponse?.success || facebookIdentityNameMatches(activeResponse?.activeIdentity, identityName);
+        // The Page URL is the best context for switching. Once Facebook confirms it,
+        // the group composer is opened as a read-only final check. If it is not yet
+        // confirmed, retain the normal group-side fallback rather than declaring the
+        // selector error itself a final result.
+        if (!directVerified) extLog('warn', `Page switch was not confirmed for ${identityName}; attempting group-side composer recovery.`);
+        await sleep(2500);
         await chrome.tabs.update(tab.id, { url });
         await sleep(8000);
-        const response = await sendTabMessageWithRetry(tab.id, { type: 'PROBE_GROUP_COMPOSER_IDENTITY', identityName, identityUrl, skipSwitch: true });
-        results.push({ group_name: target.name || target.group_name || null, group_url: url, success: !!response?.success, reset_response: target._reset_response || null, reset_error: target._reset_error || null, switch_success: !!switchResponse?.success, switch_response: switchResponse, ...response });
+        const response = await sendTabMessageWithRetry(tab.id, { type: 'PROBE_GROUP_COMPOSER_IDENTITY', identityName, identityUrl, skipSwitch: directVerified });
+        results.push({ group_name: target.name || target.group_name || null, group_url: url, success: !!response?.success, reset_response: target._reset_response || null, reset_error: target._reset_error || null, switch_success: directVerified, switch_response: switchResponse, active_before_group: activeResponse?.activeIdentity || null, ...response });
       } else {
         tab = await chrome.tabs.create({ url, active: true });
         await sleep(7000);
@@ -1104,12 +1129,18 @@ async function runGlobalIdentitySwitchProbeJob(job, session) {
       items = rows?.[0]?.value?.identities || [];
     }
   }
-  const identities = items.map(i => ({
-    name: i.name || i.identity_name || i.identityName,
-    type: i.type || i.identity_type || i.identityType || null,
-    url: i.url || i.identity_url || i.identityUrl || null,
-    key: i.key || i.id || i.identity_key || i.identityKey || null
-  })).filter(i => i.name);
+  const identities = [];
+  for (const item of items) {
+    const resolved = await enrichFacebookIdentityTarget(item || {});
+    const name = resolved.identity_name || resolved.name || null;
+    if (!name || isForbiddenPostingIdentityName(name)) continue;
+    identities.push({
+      name,
+      type: resolved.identity_type || resolved.type || null,
+      url: resolved.identity_url || resolved.url || null,
+      key: resolved.identity_key || resolved.key || resolved.id || null
+    });
+  }
 
   const results = [];
   let tab = null;
@@ -1126,10 +1157,14 @@ async function runGlobalIdentitySwitchProbeJob(job, session) {
       let error = null;
       try {
         const isManagedPage = /^page$/i.test(String(identity.type || '')) || (!!identity.url && /^https:\/\/(www\.)?facebook\.com\/profile\.php\?id=\d+/i.test(String(identity.url)));
-        // For managed Pages, use Facebook's Pages Manager "Switch Now" card.
-        // Visiting the Page URL alone often opens the Page/profile photo without
-        // changing the global acting identity.
-        if (isManagedPage) {
+        if (isManagedPage && identity.url) {
+          // Prefer Facebook's Page profile context when a synchronized stable URL exists.
+          // The content script verifies the active identity after attempting the Page action.
+          await chrome.tabs.update(tab.id, { url: identity.url, active: true });
+          await sleep(8000);
+          switchResponse = await sendTabMessageWithRetry(tab.id, { type: 'SWITCH_FACEBOOK_IDENTITY', identityName: identity.name, identityUrl: identity.url });
+        } else if (isManagedPage) {
+          // Legacy fallback for older records that have no Page URL yet.
           await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/pages/?category=your_pages', active: true });
           await sleep(8000);
           switchResponse = await sendTabMessageWithRetry(tab.id, { type: 'SWITCH_FACEBOOK_MANAGED_PAGE', identityName: identity.name });
@@ -1142,7 +1177,10 @@ async function runGlobalIdentitySwitchProbeJob(job, session) {
         await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/', active: true });
         await sleep(7000);
         verifyHome = await sendTabMessageWithRetry(tab.id, { type: 'GET_FACEBOOK_ACTIVE_IDENTITY', expectedIdentity: identity.name });
-        ok = !!switchResponse?.success && facebookIdentityNameMatches(verifyHome?.activeIdentity, identity.name);
+        // A verified Facebook active identity is authoritative. The switch-control
+        // selector is diagnostic evidence only because Facebook hides that control
+        // once a Page is already active or changes its Pages Manager layout.
+        ok = facebookIdentityNameMatches(verifyHome?.activeIdentity, identity.name);
         if (!ok) error = switchResponse?.error || `Home active identity verified as ${verifyHome?.activeIdentity || 'unknown'}, not ${identity.name}`;
       } catch (e) {
         error = e.message;
@@ -1155,6 +1193,7 @@ async function runGlobalIdentitySwitchProbeJob(job, session) {
         error,
         started_at_url: startedAtUrl,
         switch_response: switchResponse,
+        switch_control_confirmed: !!switchResponse?.success,
         verified_home_identity: verifyHome?.activeIdentity || null,
         verified_home_url: verifyHome?.pageUrl || null
       });
@@ -1715,10 +1754,18 @@ function normalizeIdentityNameForMerge(name) {
   return String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
+function facebookPageIdFromUrl(url) {
+  const match = String(url || '').match(/profile\.php\?id=(\d+)/i);
+  return match?.[1] || null;
+}
+
+function isPlaceholderPostingIdentityName(name) {
+  return /^(empty slot|unnamed(?: page| profile)?|unknown(?: page| profile)?|new page)$/i.test(String(name || '').trim());
+}
 
 function isForbiddenPostingIdentityName(name) {
   const cleaned = String(name || '').trim().replace(/\s+/g, ' ');
-  if (!cleaned) return true;
+  if (!cleaned || isPlaceholderPostingIdentityName(cleaned)) return true;
   if (/^(quick switch profiles?|see all profiles?|see all pages?|settings(?: & privacy)?|help(?: & support)?|report a problem|give feedback|meta verified|meta business suite|display & accessibility|privacy|terms|privacy policy|advertising|ad choices|cookies|more|active|log out)$/i.test(cleaned)) return true;
   if (/^(?:[A-Z]\s*){1,3}$/i.test(cleaned.replace(/\./g, ''))) return true;
   if (/^(facebook|meta|pages?|profiles?|home|watch|marketplace|groups?|notifications?|menu)$/i.test(cleaned)) return true;
@@ -1750,9 +1797,9 @@ function mergePostingIdentities(...lists) {
       merged.set(key, {
         ...prev,
         ...item,
-        id: prev.id || item.id || item.url || key,
+        id: facebookPageIdFromUrl(item.url) || item.id || facebookPageIdFromUrl(prev.url) || prev.id || item.url || key,
         name,
-        type: item.type || prev.type || 'facebook identity',
+        type: item.type || prev.type || (facebookPageIdFromUrl(item.url || prev.url) ? 'page' : 'facebook identity'),
         url: item.url || prev.url || null,
         avatar_url: item.avatar_url || item.picture_url || item.profile_picture_url || item.photo_url || item.image_url || prev.avatar_url || prev.picture_url || prev.profile_picture_url || prev.photo_url || prev.image_url || null,
         is_active: !!(prev.is_active || item.is_active)
