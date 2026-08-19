@@ -32,7 +32,7 @@ const composerProbe = functionBody(background, 'runComposerProbeJob');
 const globalProbe = functionBody(background, 'runGlobalIdentitySwitchProbeJob');
 const switchIdentity = functionBody(content, 'switchToIdentity');
 
-assert(manifest.version === '2.2.76', 'Manifest version was not bumped to the reliability release');
+assert(manifest.version === '2.2.116', 'Manifest version was not bumped to the reliability release');
 assert(content.includes('function isPlaceholderIdentityName'), 'Browser scraper is missing placeholder-identity detection');
 assert(background.includes('function isPlaceholderPostingIdentityName'), 'Background worker is missing placeholder-identity detection');
 assert(/empty slot/i.test(content) && /empty slot/i.test(background), 'Empty Slot is not rejected as a stale placeholder');
