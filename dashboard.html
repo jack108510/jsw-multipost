@@ -1270,7 +1270,7 @@ function isValidPostingIdentity(i){
 function sanitizePostingIdentities(list){
   const seen=new Set();
   return (Array.isArray(list)?list:[]).filter(isValidPostingIdentity).filter(i=>{
-    const key=String(identityKey(i) || i.name || '').toLowerCase();
+    const key=String(i.name || identityKey(i) || '').trim().replace(/\s+/g,' ').toLowerCase();
     if(!key || seen.has(key)) return false;
     seen.add(key);
     return true;
