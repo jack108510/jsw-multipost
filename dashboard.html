@@ -1255,6 +1255,27 @@ window.addEventListener('hashchange', ()=>{
    POSTING IDENTITIES
    ============================================================ */
 function identityKey(i){ return i?.id || i?.url || i?.name || ''; }
+function isValidPostingIdentity(i){
+  const name=String(i?.name || '').trim().replace(/\s+/g,' ');
+  if(!name || name.length>90) return false;
+  if(/^(quick switch profiles?|see all profiles?|see all pages?|settings(?:\s*(?:&|and)?\s*privacy)?|help(?:\s*(?:&|and)?\s*support)?|report a problem|give feedback|meta verified|meta business suite|display & accessibility|privacy|terms|privacy policy|advertising|ad choices|cookies|more|active|edit|manage|back to previous(?: page)?|select an option|available voices?,?\s*switch|unread chats?|chatsallhas new content.*|log out)$/i.test(name)) return false;
+  if(/^(?:[A-Z]\s*){1,3}$/i.test(name.replace(/\./g,''))) return false;
+  if(/^\d+$/.test(name)) return false;
+  if(/^(facebook|facebook menu|meta|pages?|profiles?|home|watch|marketplace|groups?|notifications?|menu|account controls(?: and settings)?|account)$/i.test(name)) return false;
+  if(/\b(number of unread notifications|new notification|notifications?|unread chats?|chat history is missing|available voices|privacy shortcuts|professional dashboard|ad center|create post|composer|search facebook|view all)\b/i.test(name)) return false;
+  if(/^https?:\/\//i.test(name)) return false;
+  const url=String(i?.url || '');
+  return !/(\/settings|\/help|\/privacy|\/policies|\/business|\/ads|\/ad_|\/groups\/|\/marketplace|\/events|\/friends|\/messages|\/notifications)/i.test(url);
+}
+function sanitizePostingIdentities(list){
+  const seen=new Set();
+  return (Array.isArray(list)?list:[]).filter(isValidPostingIdentity).filter(i=>{
+    const key=String(identityKey(i) || i.name || '').toLowerCase();
+    if(!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 function legacyIdentityKey(){ return ''; }
 function validGroupIdentityKey(g){
   const key=String(g?.identity_key || '').trim();
@@ -1284,6 +1305,15 @@ function identityLabelForKey(key){
   return identity?.name || groupsCache.find(g => validGroupIdentityKey(g) === key)?.identity_name || key || 'Unknown channel';
 }
 function identityLabelForGroup(g){ return g?.identity_name || identityLabelForKey(validGroupIdentityKey(g)); }
+function groupSyncRouteLabel(resultOrJob){
+  const r = resultOrJob?.result ? normalizeResult(resultOrJob) : (resultOrJob || {});
+  const strategy = r.page_scan_strategy || r.group_sync_strategy || r.debug?.pageSwitchDebug?.strategy || null;
+  if (strategy === 'verified_profile_switch_then_joined_groups') return 'verified profile switch → /groups/joins';
+  if (strategy === 'pages_manager_switch_then_joined_groups') return 'Pages Manager switch → /groups/joins';
+  if (strategy === 'page_groups_tab') return 'Page Groups tab fallback';
+  if (resultOrJob?.message === '__import_groups__') return 'verified switch → joined groups';
+  return '';
+}
 function organizedGroupBuckets(){
   const seen=new Set();
   const buckets=[];
@@ -1317,7 +1347,7 @@ async function loadPostingIdentities(){
   const { data, error } = await sb.from('amplr_data').select('value').eq('user_id', user.id).eq('key', 'posting_identities').maybeSingle();
   if (error && !isNoTable(error)) { console.warn('posting identity load failed', error); }
   const value=data?.value || {};
-  postingIdentitiesCache = Array.isArray(value) ? value : (value.identities || []);
+  postingIdentitiesCache = sanitizePostingIdentities(Array.isArray(value) ? value : (value.identities || []));
   if (postingIdentitiesCache.length && !getSelectedIdentityKey()) localStorage.setItem('amplr_selected_identity', identityKey(postingIdentitiesCache[0]));
 }
 function identityOptionHtml(identity){
@@ -1366,7 +1396,7 @@ function renderPostingIdentities(){
 async function savePostingIdentitiesFromJob(job){
   const r=normalizeResult(job);
   if (Array.isArray(r.identities)) {
-    postingIdentitiesCache=r.identities;
+    postingIdentitiesCache=sanitizePostingIdentities(r.identities);
     await sb.from('amplr_data').upsert({ user_id:user.id, key:'posting_identities', value:{ identities:postingIdentitiesCache, synced_at:new Date().toISOString() } }, { onConflict:'user_id,key' });
     if (postingIdentitiesCache.length && !getSelectedIdentityKey()) setSelectedIdentity(identityKey(postingIdentitiesCache[0]));
   }
@@ -1430,9 +1460,12 @@ async function syncGroupsForSelectedIdentity(){
       identity_name: identity.name || null,
       identity_key: selectedKey,
       identity_type: identity.type || null,
-      identity_url: identity.url || null
+      identity_url: identity.url || null,
+      group_sync_strategy: 'verified_profile_switch_then_joined_groups',
+      scan_source_url: 'https://www.facebook.com/groups/joins/?nav_source=tab'
     }],
-    status:'pending'
+    status:'pending',
+    result:{ group_sync_strategy:'verified_profile_switch_then_joined_groups', text:`Queued verified profile switch → /groups/joins scan for ${identity.name || 'selected identity'}.` }
   }).select();
   if (error) { toast('Could not start group sync: '+error.message,'error'); if(btn) btn.disabled=false; return; }
   toast(`Group sync queued for ${identity.name}`,'info');
@@ -1454,9 +1487,12 @@ async function syncGroupsForAllIdentities(){
       identity_name: identity.name || null,
       identity_key: identityKey(identity),
       identity_type: identity.type || null,
-      identity_url: identity.url || null
+      identity_url: identity.url || null,
+      group_sync_strategy: 'verified_profile_switch_then_joined_groups',
+      scan_source_url: 'https://www.facebook.com/groups/joins/?nav_source=tab'
     }],
-    status:'pending'
+    status:'pending',
+    result:{ group_sync_strategy:'verified_profile_switch_then_joined_groups', text:`Queued verified profile switch → /groups/joins scan for ${identity.name || 'channel'}.` }
   }));
   const { data, error } = await sb.from('jsw_post_jobs').insert(jobs).select();
   if (error) { toast('Could not start all-channel sync: '+error.message,'error'); if(btn) btn.disabled=false; return; }
@@ -1474,7 +1510,8 @@ function pollGroupSyncJob(jobId, identity, button=null){
       if (button) button.disabled=false;
       if (data.status==='done') {
         await loadGroups(); renderGroupsList(); renderComposeGroups(); renderIdentitySelectors(); renderPostingIdentities();
-        toast(`Synced ${r.count || 0} groups for ${identity.name}`,'success');
+        const route=groupSyncRouteLabel(r);
+        toast(`Synced ${r.count || 0} groups for ${identity.name}${route?' · '+route:''}`,'success');
       } else toast('Group sync failed: '+(r.error || data.error || 'unknown'),'error');
     }
   }, 2500);
@@ -1938,7 +1975,8 @@ async function createPostJob(){
   const aiEnabled = document.getElementById('composeAiEnabled').checked;
   const aiPrompt = document.getElementById('composeAiPrompt').value.trim() || null;
   const identity=getSelectedIdentity();
-  if (postingIdentitiesCache.length && !identity) { toast('Choose a posting identity first','error'); showComposeStep('identity'); return; }
+  const selectedIdentityKey=identityKey(identity);
+  if (!identity || !selectedIdentityKey) { toast('Choose/sync a valid posting identity before queueing anything','error'); showComposeStep('identity'); return; }
 
   const timingMode=getComposeTimingMode();
   const scheduledFor=composeScheduledFor();
@@ -2165,10 +2203,11 @@ function resultBadge(status, warningCount=0){
 }
 
 function jobRow(j){
-  const msg = (j.message||'').substring(0,72);
+  const r=normalizeResult(j);
+  const route=groupSyncRouteLabel(j);
+  const msg = j.message === '__import_groups__' ? 'Group sync' : (j.message||'').substring(0,72);
   const time = new Date(j.created_at).toLocaleString();
   const warnings=collectWarnings(j);
-  const r=normalizeResult(j);
   const counts = [
     Number.isFinite(r.success_count) ? `${r.success_count} posted` : null,
     Number.isFinite(r.failed_count) ? `${r.failed_count} failed` : null,
@@ -2176,7 +2215,7 @@ function jobRow(j){
   ].filter(Boolean).join(' · ');
   return `<div class="job">
     <div class="job-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></div>
-    <div class="job-body"><div class="job-msg">${esc(msg)}${warnings.length?`<span class="warning-chip">${warnings.length} warning${warnings.length>1?'s':''}</span>`:''}</div><div class="job-meta">${time} · ${((j.groups||[])[0]?.identity_name)?esc((j.groups||[])[0].identity_name)+' · ':''}${(j.groups||[]).length} group(s)${counts?' · '+esc(counts):''}</div></div>
+    <div class="job-body"><div class="job-msg">${esc(msg)}${warnings.length?`<span class="warning-chip">${warnings.length} warning${warnings.length>1?'s':''}</span>`:''}</div><div class="job-meta">${time} · ${((j.groups||[])[0]?.identity_name)?esc((j.groups||[])[0].identity_name)+' · ':''}${(j.groups||[]).length} group(s)${counts?' · '+esc(counts):''}${route?' · '+esc(route):''}</div></div>
     ${resultBadge(j.status,warnings.length)}
   </div>`;
 }
@@ -2212,11 +2251,11 @@ async function loadHistory(){
   document.getElementById('histWarnings').textContent = warningJobs;
   if (!jobs.length) { el.innerHTML=emptyState('No post history yet','Run one test post and Amplr will show per-group results here.'); return; }
   el.innerHTML=jobs.map(j=>{
-    const r=normalizeResult(j); const rows=(r.results||[]).map(resultRow).join(''); const warnings=collectWarnings(j);
+    const r=normalizeResult(j); const rows=(r.results||[]).map(resultRow).join(''); const warnings=collectWarnings(j); const route=groupSyncRouteLabel(j); const label=j.message==='__import_groups__'?'Group sync':(j.message||'').substring(0,110);
     return `<div class="job" style="display:block;">
       <div style="display:flex;align-items:center;gap:14px;">
         <div class="job-icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg></div>
-        <div class="job-body"><div class="job-msg">${esc((j.message||'').substring(0,110))}${warnings.length?`<span class="warning-chip">${warnings.length} warning${warnings.length>1?'s':''}</span>`:''}</div><div class="job-meta">${new Date(j.created_at).toLocaleString()} · ${((j.groups||[])[0]?.identity_name)?esc((j.groups||[])[0].identity_name)+' · ':''}${(j.groups||[]).length} group(s)</div></div>
+        <div class="job-body"><div class="job-msg">${esc(label)}${warnings.length?`<span class="warning-chip">${warnings.length} warning${warnings.length>1?'s':''}</span>`:''}</div><div class="job-meta">${new Date(j.created_at).toLocaleString()} · ${((j.groups||[])[0]?.identity_name)?esc((j.groups||[])[0].identity_name)+' · ':''}${(j.groups||[]).length} group(s)${route?' · '+esc(route):''}</div></div>
         ${resultBadge(j.status,warnings.length)}
       </div>
       ${warnings.length?`<div class="result-meta" style="margin-top:10px;color:#facc15;">${warnings.slice(0,4).map(esc).join('<br>')}</div>`:''}
