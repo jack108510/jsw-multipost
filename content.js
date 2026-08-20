@@ -346,6 +346,7 @@
     if (!value || /^(about:blank|chrome-extension:)/i.test(value)) return false;
     if (/static\.xx\.fbcdn\.net\/rsrc/i.test(value)) return false;
     if (/\/emoji\.php|\/images\/emoji|\/assets\/emoji/i.test(value)) return false;
+    if (/\/v\/t39\.30808-6\//i.test(value) && /(?:cstp=mx720|ctp=s720|dst-jpg_tt6)/i.test(value)) return false;
     return /^(https?:|data:image\/)/i.test(value);
   }
 

@@ -1635,8 +1635,14 @@ function identityInitials(name=''){
   const parts=String(name||'').trim().split(/\s+/).filter(Boolean);
   return (parts.length ? parts.slice(0,2).map(p=>p[0]).join('') : '?').toUpperCase();
 }
+function validIdentityImageUrl(url){
+  const value=String(url || '').trim();
+  if(!/^(https?:|data:image\/)/i.test(value)) return false;
+  if(/\/v\/t39\.30808-6\//i.test(value) && /(?:cstp=mx720|ctp=s720|dst-jpg_tt6)/i.test(value)) return false;
+  return true;
+}
 function identityImageUrl(identity){
-  return identity?.avatar_url || identity?.picture_url || identity?.profile_picture_url || identity?.photo_url || identity?.image_url || null;
+  return [identity?.avatar_url, identity?.picture_url, identity?.profile_picture_url, identity?.photo_url, identity?.image_url].find(validIdentityImageUrl) || null;
 }
 function identityAvatarHtml(identity, sizeClass=''){
   const name=identity?.name || 'Identity';
