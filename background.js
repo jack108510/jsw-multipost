@@ -1696,8 +1696,9 @@ function isForbiddenPostingIdentityName(name) {
   if (/^(quick switch profiles?|see all profiles?|see all pages?|settings(?:\s*(?:&|and)?\s*privacy)?|help(?:\s*(?:&|and)?\s*support)?|report a problem|give feedback|meta verified|meta business suite|display & accessibility|privacy|terms|privacy policy|advertising|ad choices|cookies|more|active|edit|manage|back to previous(?: page)?|select an option|available voices?,?\s*switch|unread chats?|chatsallhas new content.*|log out)$/i.test(cleaned)) return true;
   if (/^(?:[A-Z]\s*){1,3}$/i.test(cleaned.replace(/\./g, ''))) return true;
   if (/^\d+$/.test(cleaned)) return true;
-  if (/^(facebook|facebook menu|meta|pages?|profiles?|home|watch|marketplace|groups?|notifications?|menu|account controls(?: and settings)?|account)$/i.test(cleaned)) return true;
-  if (/\b(number of unread notifications|new notification|notifications?|unread chats?|chat history is missing|available voices|privacy shortcuts|professional dashboard|ad center|create post|composer|search facebook|view all)\b/i.test(cleaned)) return true;
+  if (/^\d+\s*(?:m|h|d|w|mo|y)$/i.test(cleaned)) return true;
+  if (/^(facebook|facebook menu|meta|pages?|profiles?|home|watch|marketplace|groups?|notifications?|menu|account controls(?: and settings)?|account|your)$/i.test(cleaned)) return true;
+  if (/\b(number of unread notifications|new notification|notifications?|unread chats?|chat history is missing|available voices|privacy shortcuts|professional dashboard|ad center|create post|composer|search facebook|view all|sponsored|contacts|meta ai|profile photo|profile picture|online status indicator)\b/i.test(cleaned)) return true;
   if (/^https?:\/\//i.test(cleaned)) return true;
   return false;
 }
@@ -1707,7 +1708,7 @@ function postingIdentityUrlAllowed(url) {
   try {
     const u = new URL(url, 'https://www.facebook.com');
     if (!/facebook\.com$/i.test(u.hostname.replace(/^www\./, ''))) return false;
-    return !/(\/settings|\/help|\/privacy|\/policies|\/business|\/ads|\/ad_|\/groups\/|\/marketplace|\/events|\/friends|\/messages|\/notifications)/i.test(u.pathname);
+    return !/(\/settings|\/help|\/privacy|\/policies|\/business|\/ads|\/ad_|\/groups\/|\/marketplace|\/events|\/friends|\/messages|\/notifications|\/stories\/)/i.test(u.pathname);
   } catch (_) { return true; }
 }
 
