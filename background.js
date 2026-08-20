@@ -42,96 +42,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 });
 
 // ============ POSTING QUEUE ============
-async function runPostingQueue({ message, imageUrl, groups, delay, settings }, sender) {
-  let successCount = 0;
-
-  for (let i = 0; i < groups.length; i++) {
-    const groupUrl = groups[i];
-
-    // Determine final post text
-    let finalText = message;
-
-    if (settings?.aiEnabled && settings?.apiKey) {
-      sendProgress({
-        text: `AI refining for ${groupUrl.split('/').pop()}... (${i + 1}/${groups.length})`,
-        progress: ((i / groups.length) * 100).toFixed(0),
-        done: false
-      }, sender);
-
-      try {
-        finalText = await callAI(message, settings, settings.aiVariations ? i : 0);
-      } catch (e) {
-        sendProgress({
-          text: `AI failed for ${groupUrl.split('/').pop()}, using original — ${e.message}`,
-          progress: ((i / groups.length) * 100).toFixed(0),
-          done: false
-        }, sender);
-        // Fall back to original message
-      }
-    }
-
-    sendProgress({
-      text: `Posting to ${groupUrl.split('/').pop()}... (${i + 1}/${groups.length})`,
-      progress: ((i / groups.length) * 100).toFixed(0),
-      done: false
-    }, sender);
-
-    try {
-      const tab = await chrome.tabs.create({ url: groupUrl, active: true });
-      await sleep(5000);
-
-      const response = await chrome.tabs.sendMessage(tab.id, {
-        type: 'POST_TO_PAGE',
-        message: finalText,
-        imageUrl
-      });
-
-      if (response?.success) {
-        successCount++;
-        sendProgress({
-          text: `✓ Posted to ${groupUrl.split('/').pop()}`,
-          progress: (((i + 1) / groups.length) * 100).toFixed(0),
-          done: false
-        }, sender);
-      } else {
-        sendProgress({
-          text: `✗ Failed: ${groupUrl.split('/').pop()} — ${response?.error || 'unknown'}`,
-          progress: (((i + 1) / groups.length) * 100).toFixed(0),
-          done: false
-        }, sender);
-      }
-
-      await sleep(1000);
-      await chrome.tabs.remove(tab.id);
-
-    } catch (error) {
-      sendProgress({
-        text: `✗ Error: ${groupUrl.split('/').pop()} — ${error.message}`,
-        progress: (((i + 1) / groups.length) * 100).toFixed(0),
-        done: false
-      }, sender);
-    }
-
-    if (i < groups.length - 1) {
-      const waitSeconds = randomAntiBotDelaySeconds(delay || settings?.delay || 0);
-      sendProgress({
-        text: `Anti-bot wait ${waitSeconds}s before next...`,
-        progress: (((i + 1) / groups.length) * 100).toFixed(0),
-        done: false
-      }, sender);
-      await sleep(waitSeconds * 1000);
-    }
-  }
-
+async function runPostingQueue(_payload, sender) {
+  // Legacy popup posting is disabled because it has no identity contract.
+  // Real posting must flow through dashboard jobs, where every group target carries
+  // identity_name / identity_key / identity_url and the content script verifies the
+  // composer actor before clicking Post.
   sendProgress({
-    text: `Complete — ${successCount}/${groups.length} posted`,
+    text: 'Posting disabled here — use the dashboard queue so Amplr can switch and verify the selected Facebook identity first.',
     progress: '100',
     done: true,
-    success: true,
-    successCount
+    success: false,
+    error_code: 'posting_disabled_identity_verified_queue_required'
   }, sender);
-
-  notify(`Done — ${successCount}/${groups.length} groups posted successfully.`);
+  notify('Posting disabled here — use the dashboard queue with a selected Facebook identity.');
+  return;
 }
 
 function sendProgress(data) {
@@ -1086,12 +1010,12 @@ async function runComposerProbeJob(job, session) {
         await sleep(2500);
         await chrome.tabs.update(tab.id, { url });
         await sleep(8000);
-        const response = await sendTabMessageWithRetry(tab.id, { type: 'PROBE_GROUP_COMPOSER_IDENTITY', identityName, identityUrl, skipSwitch: directVerified });
+        const response = await sendTabMessageWithRetry(tab.id, { type: 'PROBE_GROUP_COMPOSER_IDENTITY', identityName, identityUrl, identityType: identity.identity_type || identity.identityType || identity.type || null, skipSwitch: directVerified });
         results.push({ group_name: target.name || target.group_name || null, group_url: url, success: !!response?.success, reset_response: target._reset_response || null, reset_error: target._reset_error || null, switch_success: directVerified, switch_response: switchResponse, active_before_group: activeResponse?.activeIdentity || null, ...response });
       } else {
         tab = await chrome.tabs.create({ url, active: true });
         await sleep(7000);
-        const response = await sendTabMessageWithRetry(tab.id, { type: 'PROBE_GROUP_COMPOSER_IDENTITY', identityName, identityUrl });
+        const response = await sendTabMessageWithRetry(tab.id, { type: 'PROBE_GROUP_COMPOSER_IDENTITY', identityName, identityUrl, identityType: identity.identity_type || identity.identityType || identity.type || null });
         results.push({ group_name: target.name || target.group_name || null, group_url: url, success: !!response?.success, ...response });
       }
     } catch (e) {
@@ -1398,6 +1322,7 @@ async function executeDashJob(job) {
     const identityKey = target.identity_key || job.identity_key || (identityName || '__legacy__');
     const storedIdentity = identityName ? await getPostingIdentityByNameOrKey(identityName, identityKey) : null;
     const identityUrl = target.identity_url || job.identity_url || storedIdentity?.url || null;
+    const identityType = target.identity_type || job.identity_type || storedIdentity?.type || null;
     let finalText = job.message;
 
     if (!identityName || isForbiddenPostingIdentityName(identityName)) {
@@ -1476,10 +1401,11 @@ async function executeDashJob(job) {
         message: finalText,
         imageUrl: job.image_url || '',
         identityName,
-        identityUrl
+        identityUrl,
+        identityType
       });
 
-      if (response?.success) {
+      if (response?.success && response?.composerIdentityVerified === true) {
         successCount++;
         const postedAt = new Date().toISOString();
         const postUrl = response?.postUrl || null;

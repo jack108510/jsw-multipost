@@ -35,7 +35,7 @@ const switchIdentity = functionBody(content, 'switchToIdentity');
 assert(manifest.version === '2.2.116', 'Manifest version was not bumped to the reliability release');
 assert(content.includes('function isPlaceholderIdentityName'), 'Browser scraper is missing placeholder-identity detection');
 assert(background.includes('function isPlaceholderPostingIdentityName'), 'Background worker is missing placeholder-identity detection');
-assert(/empty slot/i.test(content) && /empty slot/i.test(background), 'Empty Slot is not rejected as a stale placeholder');
+assert(!/empty slot/i.test(content) && !/empty slot/i.test(background), 'Empty Slot must not be treated as a stale placeholder; it is a real posting identity');
 assert(content.includes('function facebookProfileIdFromUrl'), 'Browser scraper does not extract stable Facebook Page IDs');
 assert(background.includes('function facebookPageIdFromUrl'), 'Background worker does not extract stable Facebook Page IDs');
 assert(background.includes('async function enrichFacebookIdentityTarget'), 'Background worker does not enrich saved group targets with synchronized metadata');

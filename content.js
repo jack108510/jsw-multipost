@@ -1034,7 +1034,7 @@
   }
 
   function identityMatches(actual, expected) {
-    if (!expected) return true;
+    if (!expected) return false;
     actual = cleanIdentityName(actual || '').toLowerCase();
     expected = cleanIdentityName(expected || '').toLowerCase();
     if (!actual || !expected) return false;
@@ -1298,8 +1298,12 @@
   }
 
   // ============ MAIN ============
+  function isManagedPageIdentity(identityUrl, identityType=null) {
+    return /page/i.test(String(identityType || '')) || /^https:\/\/(www\.)?facebook\.com\/profile\.php\?id=\d+/i.test(String(identityUrl || ''));
+  }
+
   function isManagedPageIdentityUrl(identityUrl) {
-    return /^https:\/\/(www\.)?facebook\.com\/profile\.php\?id=\d+/i.test(String(identityUrl || ''));
+    return isManagedPageIdentity(identityUrl, null);
   }
 
   function closeComposerDialog(dialog) {
@@ -1333,7 +1337,7 @@
     return { dialog, identityCheck };
   }
 
-  async function postToGroup(message, imageUrl, identityName, identityUrl=null) {
+  async function postToGroup(message, imageUrl, identityName, identityUrl=null, identityType=null) {
     log('=== START POST ===');
     const groupPageUrl = location.href;
     assertNoFacebookDefenseSignal();
@@ -1346,7 +1350,7 @@
     // switch can visually land on the Page but still leave the group composer as
     // another actor. First verify the actual group composer. If this group was
     // joined by the requested Page, this succeeds without a fragile global switch.
-    if (isManagedPageIdentityUrl(identityUrl)) {
+    if (isManagedPageIdentity(identityUrl, identityType)) {
       try {
         const opened = await openVerifiedComposerDialog(identityName);
         dialog = opened.dialog;
@@ -1433,13 +1437,13 @@
     };
   }
 
-  async function probeGroupComposerIdentity(identityName, identityUrl=null, skipSwitch=false) {
+  async function probeGroupComposerIdentity(identityName, identityUrl=null, skipSwitch=false, identityType=null) {
     const groupPageUrl = location.href;
     let identitySwitch = { switched: false, active_identity: currentIdentityName(), skipped: !!skipSwitch };
     let dialog = null;
     let identityCheck = null;
 
-    if (skipSwitch || isManagedPageIdentityUrl(identityUrl)) {
+    if (skipSwitch || isManagedPageIdentity(identityUrl, identityType)) {
       try {
         const opened = await openVerifiedComposerDialog(identityName);
         dialog = opened.dialog;
@@ -1572,7 +1576,7 @@
       log('Received composer identity probe command');
       (async () => {
         try {
-          const result = await probeGroupComposerIdentity(msg.identityName || msg.identity_name || null, msg.identityUrl || msg.identity_url || null, msg.skipSwitch === true);
+          const result = await probeGroupComposerIdentity(msg.identityName || msg.identity_name || null, msg.identityUrl || msg.identity_url || null, msg.skipSwitch === true, msg.identityType || msg.identity_type || null);
           sendResponse({ success: true, ...result });
         } catch (error) {
           log('COMPOSER PROBE ERROR:', error.message);
@@ -1594,7 +1598,7 @@
     log('Received post command');
     (async () => {
       try {
-        const result = await postToGroup(msg.message, msg.imageUrl, msg.identityName || msg.identity_name || null, msg.identityUrl || msg.identity_url || null);
+        const result = await postToGroup(msg.message, msg.imageUrl, msg.identityName || msg.identity_name || null, msg.identityUrl || msg.identity_url || null, msg.identityType || msg.identity_type || null);
         sendResponse({ success: true, ...result });
       } catch (error) {
         log('ERROR:', error.message);
