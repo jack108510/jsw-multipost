@@ -1760,15 +1760,18 @@ function facebookPageIdFromUrl(url) {
 }
 
 function isPlaceholderPostingIdentityName(name) {
-  return /^(empty slot|unnamed(?: page| profile)?|unknown(?: page| profile)?|new page)$/i.test(String(name || '').trim());
+  return /^(unnamed(?: page| profile)?|unknown(?: page| profile)?|new page)$/i.test(String(name || '').trim());
 }
 
 function isForbiddenPostingIdentityName(name) {
   const cleaned = String(name || '').trim().replace(/\s+/g, ' ');
   if (!cleaned || isPlaceholderPostingIdentityName(cleaned)) return true;
-  if (/^(quick switch profiles?|see all profiles?|see all pages?|settings(?: & privacy)?|help(?: & support)?|report a problem|give feedback|meta verified|meta business suite|display & accessibility|privacy|terms|privacy policy|advertising|ad choices|cookies|more|active|log out)$/i.test(cleaned)) return true;
+  if (cleaned.length > 90) return true;
+  if (/^(quick switch profiles?|see all profiles?|see all pages?|settings(?:\s*(?:&|and)?\s*privacy)?|help(?:\s*(?:&|and)?\s*support)?|report a problem|give feedback|meta verified|meta business suite|display & accessibility|privacy|terms|privacy policy|advertising|ad choices|cookies|more|active|edit|manage|back to previous(?: page)?|select an option|available voices?,?\s*switch|unread chats?|chatsallhas new content.*|log out)$/i.test(cleaned)) return true;
   if (/^(?:[A-Z]\s*){1,3}$/i.test(cleaned.replace(/\./g, ''))) return true;
-  if (/^(facebook|meta|pages?|profiles?|home|watch|marketplace|groups?|notifications?|menu)$/i.test(cleaned)) return true;
+  if (/^\d+$/.test(cleaned)) return true;
+  if (/^(facebook|facebook menu|meta|pages?|profiles?|home|watch|marketplace|groups?|notifications?|menu|account controls(?: and settings)?|account)$/i.test(cleaned)) return true;
+  if (/\b(number of unread notifications|new notification|notifications?|unread chats?|chat history is missing|available voices|privacy shortcuts|professional dashboard|ad center|create post|composer|search facebook|view all)\b/i.test(cleaned)) return true;
   if (/^https?:\/\//i.test(cleaned)) return true;
   return false;
 }
@@ -1778,12 +1781,22 @@ function postingIdentityUrlAllowed(url) {
   try {
     const u = new URL(url, 'https://www.facebook.com');
     if (!/facebook\.com$/i.test(u.hostname.replace(/^www\./, ''))) return false;
-    return !/(\/settings|\/help|\/privacy|\/policies|\/business|\/ads|\/ad_|\/groups\/|\/marketplace|\/events)/i.test(u.pathname);
+    return !/(\/settings|\/help|\/privacy|\/policies|\/business|\/ads|\/ad_|\/groups\/|\/marketplace|\/events|\/friends|\/messages|\/notifications)/i.test(u.pathname);
   } catch (_) { return true; }
 }
 
+function hasStrongPostingIdentityEvidence(item) {
+  const url = String(item?.url || '');
+  if (item?.source === 'pages_manager') return /profile\.php\?id=\d+/i.test(url);
+  if (item?.source === 'account_switcher' || item?.source === 'active_account') return true;
+  return !!item?.is_active && !!item?.name;
+}
+
 function isValidPostingIdentityRecord(item) {
-  return !!item && !isForbiddenPostingIdentityName(item.name) && postingIdentityUrlAllowed(item.url || '');
+  return !!item
+    && !isForbiddenPostingIdentityName(item.name)
+    && postingIdentityUrlAllowed(item.url || '')
+    && hasStrongPostingIdentityEvidence(item);
 }
 
 function mergePostingIdentities(...lists) {
@@ -1861,18 +1874,11 @@ async function syncFacebookIdentitiesForJob(jobId) {
       extLog('warn', 'Managed Pages scrape failed: ' + (pagesResponse.error || 'unknown'));
     }
 
-    // Do not preserve stale junk identities from older scraper versions. Merge
-    // only valid existing rows, and require current scrape evidence for a row to
-    // survive unless it has a strong Facebook URL/avatar signal.
-    const existingStored = await getPostingIdentityByNameOrKey(null, '__load_all__');
-    const existingIdentities = (Array.isArray(existingStored?.__all) ? existingStored.__all : []).filter(isValidPostingIdentityRecord);
+    // Hard reset the saved identity list from current Facebook evidence only.
+    // Older scraper versions over-collected account-menu junk; preserving existing
+    // rows keeps those bad Pages/profiles alive forever.
     const scrapedIdentities = [...(switcherResponse.identities || []), ...(pagesResponse?.pages || [])].filter(isValidPostingIdentityRecord);
-    const scrapedNames = new Set(scrapedIdentities.map(i => normalizeIdentityNameForMerge(i.name)));
-    const keepExisting = existingIdentities.filter(i => {
-      const key = normalizeIdentityNameForMerge(i.name);
-      return scrapedNames.has(key) || (!!i.url && !!(i.avatar_url || i.picture_url || i.profile_picture_url || i.photo_url || i.image_url));
-    });
-    const combined = mergePostingIdentities(keepExisting, scrapedIdentities);
+    const combined = mergePostingIdentities(scrapedIdentities);
     const identities = combined.filter(isValidPostingIdentityRecord).map((i, idx) => ({
       id: i.id || i.url || i.name || `identity-${idx + 1}`,
       name: i.name || `Identity ${idx + 1}`,

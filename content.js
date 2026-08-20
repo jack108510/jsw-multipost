@@ -507,7 +507,7 @@
   }
 
   function isPlaceholderIdentityName(name) {
-    return /^(empty slot|unnamed(?: page| profile)?|unknown(?: page| profile)?|new page)$/i.test(cleanIdentityName(name || ''));
+    return /^(unnamed(?: page| profile)?|unknown(?: page| profile)?|new page)$/i.test(cleanIdentityName(name || ''));
   }
 
   function facebookProfileIdFromUrl(url) {
@@ -518,11 +518,12 @@
   function isForbiddenIdentityName(name) {
     const cleaned = cleanIdentityName(name || '');
     if (!cleaned || isPlaceholderIdentityName(cleaned)) return true;
-    if (/^(quick switch profiles?|see all profiles?|see all pages?|settings(?: & privacy)?|help(?: & support)?|report a problem|give feedback|meta verified|meta business suite|display & accessibility|privacy|terms|privacy policy|advertising|ad choices|cookies|more|active|edit|manage|back to previous(?: page)?|select an option|available voices?,?\s*switch|unread chats?|chatsallhas new content.*|log out)$/i.test(cleaned)) return true;
+    if (cleaned.length > 90) return true;
+    if (/^(quick switch profiles?|see all profiles?|see all pages?|settings(?:\s*(?:&|and)?\s*privacy)?|help(?:\s*(?:&|and)?\s*support)?|report a problem|give feedback|meta verified|meta business suite|display & accessibility|privacy|terms|privacy policy|advertising|ad choices|cookies|more|active|edit|manage|back to previous(?: page)?|select an option|available voices?,?\s*switch|unread chats?|chatsallhas new content.*|log out)$/i.test(cleaned)) return true;
     if (/^(?:[A-Z]\s*){1,3}$/i.test(cleaned.replace(/\./g, ''))) return true; // menu initials like "B B"
     if (/^\d+$/.test(cleaned)) return true;
-    if (/^(facebook|meta|pages?|profiles?|home|watch|marketplace|groups?|notifications?|menu)$/i.test(cleaned)) return true;
-    if (/\b(number of unread notifications|new notification|notifications?|unread chats?|chat history is missing|available voices)\b/i.test(cleaned)) return true;
+    if (/^(facebook|facebook menu|meta|pages?|profiles?|home|watch|marketplace|groups?|notifications?|menu|account controls(?: and settings)?|account)$/i.test(cleaned)) return true;
+    if (/\b(number of unread notifications|new notification|notifications?|unread chats?|chat history is missing|available voices|privacy shortcuts|professional dashboard|ad center|create post|composer|search facebook|view all)\b/i.test(cleaned)) return true;
     return false;
   }
 
@@ -531,7 +532,7 @@
     try {
       const u = new URL(url, location.href);
       if (!/facebook\.com$/i.test(u.hostname.replace(/^www\./, ''))) return false;
-      return !/(\/settings|\/help|\/privacy|\/policies|\/business|\/ads|\/ad_|\/groups\/|\/marketplace|\/events)/i.test(u.pathname);
+      return !/(\/settings|\/help|\/privacy|\/policies|\/business|\/ads|\/ad_|\/groups\/|\/marketplace|\/events|\/friends|\/messages|\/notifications)/i.test(u.pathname);
     } catch (_) { return true; }
   }
 
@@ -788,16 +789,17 @@
       const hasSwitcherVerb = /Switch to|Continue as|Use Facebook as/i.test(combined);
       const avatarUrl = extractAvatarUrl(el);
       const hasAvatar = !!avatarUrl;
-      const hasIdentityText = /facebook identity|profile|page|active|switch to|continue as|use facebook as/i.test(combined);
-      const looksLikeIdentityRow = hasSwitcherVerb || hasIdentityText || (hasAvatar && /profile\.php\?id=\d+|\/pages\//i.test(el.href || el.closest?.('a[href]')?.href || ''));
+      const url = el.href || el.closest?.('a[href]')?.href || null;
+      const hasActorUrl = /profile\.php\?id=\d+|\/pages\/|\/people\//i.test(url || '');
+      const isCurrentAccountRow = /See your profile|View your profile|Active/i.test(combined);
+      const looksLikeIdentityRow = hasSwitcherVerb || isCurrentAccountRow || hasActorUrl || (hasAvatar && hasActorUrl);
       if (!looksLikeIdentityRow) continue;
 
-      const url = el.href || el.closest?.('a[href]')?.href || null;
-      add(name, { label: combined, url, avatar_url: avatarUrl, type: /page|business/i.test(combined) ? 'page' : undefined });
+      add(name, { label: combined, url, avatar_url: avatarUrl, type: /page|business/i.test(combined) ? 'page' : undefined, source: 'account_switcher' });
     }
 
     const active = activeIdentityFromMenu(root) || currentIdentityName();
-    if (active) add(active, { is_active: true, label: 'active profile' });
+    if (active) add(active, { is_active: true, label: 'active profile', source: 'active_account' });
     return [...found.values()].map(i => ({ ...i, is_active: i.name === active || i.is_active }));
   }
 
