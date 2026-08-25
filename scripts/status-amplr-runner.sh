@@ -53,7 +53,7 @@ if [[ -x "$WATCHDOG" || -f "$WATCHDOG" ]]; then
     --chrome-user-data-dir "$CHROME_USER_DATA_DIR" \
     --chrome-profile "${AMPLR_CHROME_PROFILE:-Default}" \
     --dashboard-url "${AMPLR_DASHBOARD_URL:-https://jack108510.github.io/jsw-multipost/dashboard.html}" \
-    --extension-id "${AMPLR_EXTENSION_ID:-fignfifoniblkonapihmkfakmlgkbkcf}" \
+    --extension-id "${AMPLR_EXTENSION_ID:-nglcanaclcaahancoecenliekemolfgp}" \
     --stale-seconds "${AMPLR_HEARTBEAT_STALE_SECONDS:-150}" \
     --no-restart || true
 fi

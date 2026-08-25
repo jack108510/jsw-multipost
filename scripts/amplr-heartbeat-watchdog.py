@@ -27,7 +27,7 @@ from pathlib import Path
 
 SB_URL = "https://xacehhtgvubcqdoltazg.supabase.co"
 SB_ANON_KEY = "sb_publishable_1TNu5hqotJ7GGQXfjliivQ_ttK51EAA"
-DEFAULT_EXTENSION_ID = "fignfifoniblkonapihmkfakmlgkbkcf"
+DEFAULT_EXTENSION_ID = "nglcanaclcaahancoecenliekemolfgp"
 
 
 def utc_now() -> dt.datetime:
