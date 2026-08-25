@@ -27,7 +27,7 @@ from pathlib import Path
 
 SB_URL = "https://xacehhtgvubcqdoltazg.supabase.co"
 SB_ANON_KEY = "sb_publishable_1TNu5hqotJ7GGQXfjliivQ_ttK51EAA"
-DEFAULT_EXTENSION_ID = "nglcanaclcaahancoecenliekemolfgp"
+DEFAULT_EXTENSION_ID = "fignfifoniblkonapihmkfakmlgkbkcf"
 
 
 def utc_now() -> dt.datetime:
@@ -86,10 +86,9 @@ def find_sessions(raw: str) -> list[dict]:
     return sessions
 
 
-def latest_session(extension_id: str, chrome_profile: str) -> dict | None:
+def latest_session(extension_id: str, chrome_user_data_dir: str, chrome_profile: str) -> dict | None:
     storage_dir = (
-        Path.home()
-        / "Library/Application Support/Google/Chrome"
+        Path(chrome_user_data_dir).expanduser()
         / chrome_profile
         / "Local Extension Settings"
         / extension_id
@@ -164,8 +163,7 @@ def amplr_chrome_roots(ext_dir: str) -> list[int]:
             continue
         cmd = parts[2]
         if (
-            ppid == 1
-            and cmd.startswith("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome ")
+            cmd.startswith("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome ")
             and f"--load-extension={ext_dir}" in cmd
         ):
             roots.append(pid)
@@ -196,13 +194,13 @@ def terminate_chrome(ext_dir: str) -> None:
     time.sleep(2)
 
 
-def launch_chrome(chrome_app: str, chrome_profile: str, ext_dir: str, dashboard_url: str, extension_id: str) -> None:
+def launch_chrome(chrome_app: str, chrome_user_data_dir: str, chrome_profile: str, ext_dir: str, dashboard_url: str, extension_id: str) -> None:
     popup_url = f"chrome-extension://{extension_id}/popup.html"
     chrome_bin = str(Path(chrome_app) / "Contents/MacOS/Google Chrome")
     subprocess.Popen(
         [
             chrome_bin,
-            f"--user-data-dir={Path.home() / 'Library/Application Support/Google/Chrome'}",
+            f"--user-data-dir={Path(chrome_user_data_dir).expanduser()}",
             f"--profile-directory={chrome_profile}",
             "--no-first-run",
             "--disable-features=Translate",
@@ -228,6 +226,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--ext-dir", required=True)
     parser.add_argument("--chrome-app", default="/Applications/Google Chrome.app")
+    parser.add_argument("--chrome-user-data-dir", default=str(Path.home() / "Library/Application Support/Amplr/ChromeProfile"))
     parser.add_argument("--chrome-profile", default="Default")
     parser.add_argument("--dashboard-url", default="https://jack108510.github.io/jsw-multipost/dashboard.html")
     parser.add_argument("--extension-id", default=DEFAULT_EXTENSION_ID)
@@ -239,11 +238,11 @@ def main() -> int:
     ext_dir = str(Path(args.ext_dir).expanduser().resolve())
     now = utc_now()
 
-    session = latest_session(args.extension_id, args.chrome_profile)
+    session = latest_session(args.extension_id, args.chrome_user_data_dir, args.chrome_profile)
     if not session:
         print(status_line("NO_SESSION", chrome_running=chrome_running(ext_dir)))
         if not args.no_restart:
-            launch_chrome(args.chrome_app, args.chrome_profile, ext_dir, args.dashboard_url, args.extension_id)
+            launch_chrome(args.chrome_app, args.chrome_user_data_dir, args.chrome_profile, ext_dir, args.dashboard_url, args.extension_id)
         return 2
 
     try:
@@ -257,11 +256,11 @@ def main() -> int:
         if exc.code == 401 and ("JWT expired" in body or "PGRST303" in body):
             print(status_line("SESSION_EXPIRED", action="open_extension_popup_and_sign_in", chrome_running=chrome_running(ext_dir)))
             if not args.no_restart:
-                launch_chrome(args.chrome_app, args.chrome_profile, ext_dir, args.dashboard_url, args.extension_id)
+                launch_chrome(args.chrome_app, args.chrome_user_data_dir, args.chrome_profile, ext_dir, args.dashboard_url, args.extension_id)
             return 7
         print(status_line("CHECK_FAILED", error=f"HTTPError:{exc.code}", chrome_running=chrome_running(ext_dir)))
         return 3
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+    except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
         print(status_line("CHECK_FAILED", error=type(exc).__name__, chrome_running=chrome_running(ext_dir)))
         return 3
 
@@ -277,10 +276,10 @@ def main() -> int:
         return 4
 
     terminate_chrome(ext_dir)
-    launch_chrome(args.chrome_app, args.chrome_profile, ext_dir, args.dashboard_url, args.extension_id)
+    launch_chrome(args.chrome_app, args.chrome_user_data_dir, args.chrome_profile, ext_dir, args.dashboard_url, args.extension_id)
     time.sleep(args.restart_wait_seconds)
 
-    session = latest_session(args.extension_id, args.chrome_profile) or session
+    session = latest_session(args.extension_id, args.chrome_user_data_dir, args.chrome_profile) or session
     try:
         heartbeat_at, ext_status, _ = fetch_heartbeat(session)
     except Exception as exc:

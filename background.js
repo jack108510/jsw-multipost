@@ -315,14 +315,16 @@ async function getStoredSession() {
     return session;
   } catch (e) {
     console.warn('[JSW] Supabase session refresh failed:', e.message);
-    // If the token is already expired and refresh failed, continuing with the
-    // stale access token only makes heartbeat/job calls fail silently. Clear the
-    // paired session so the popup shows login instead of a fake connected state.
+    // Keep the refresh token for passwordless reconnect/retry. Clearing storage
+    // on a transient Supabase/Auth outage forces Jack back through a password
+    // form even though the browser still has a reusable refresh token.
+    const transient = /Failed to fetch|NetworkError|timeout|522|5\d\d/i.test(String(e?.message || e));
     if (expiresMs && expiresMs <= Date.now()) {
-      await writeExtensionStatus(session, 'offline', { error: 'Supabase session expired and refresh failed' });
-      await chrome.storage.local.remove(['jsw_session']);
-      dashSession = null;
-      return null;
+      await writeExtensionStatus(session, 'offline', { error: transient ? 'Supabase auth temporarily unavailable; will retry saved session' : 'Supabase session expired and refresh failed' });
+      session = { ...session, refreshPending: transient, refreshError: String(e?.message || e), lastRefreshAttempt: Date.now() };
+      await chrome.storage.local.set({ jsw_session: session });
+      dashSession = transient ? session : null;
+      return transient ? session : null;
     }
     dashSession = session;
     return session;

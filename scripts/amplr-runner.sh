@@ -4,12 +4,13 @@ set -euo pipefail
 EXT_DIR="${AMPLR_EXT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 CHROME_APP="${AMPLR_CHROME_APP:-/Applications/Google Chrome.app}"
 CHROME_BIN="$CHROME_APP/Contents/MacOS/Google Chrome"
+CHROME_USER_DATA_DIR="${AMPLR_CHROME_USER_DATA_DIR:-$HOME/Library/Application Support/Amplr/ChromeProfile}"
 CHROME_PROFILE="${AMPLR_CHROME_PROFILE:-Default}"
 DASHBOARD_URL="${AMPLR_DASHBOARD_URL:-https://jack108510.github.io/jsw-multipost/dashboard.html}"
 CHECK_INTERVAL="${AMPLR_RUNNER_INTERVAL:-30}"
 HEARTBEAT_STALE_SECONDS="${AMPLR_HEARTBEAT_STALE_SECONDS:-150}"
 HEARTBEAT_CHECK_EVERY="${AMPLR_HEARTBEAT_CHECK_EVERY:-60}"
-EXTENSION_ID="${AMPLR_EXTENSION_ID:-nglcanaclcaahancoecenliekemolfgp}"
+EXTENSION_ID="${AMPLR_EXTENSION_ID:-fignfifoniblkonapihmkfakmlgkbkcf}"
 LOG_DIR="$HOME/Library/Logs/Amplr"
 WATCH_LOG="$LOG_DIR/runner.watch.log"
 WATCHDOG="$EXT_DIR/scripts/amplr-heartbeat-watchdog.py"
@@ -36,19 +37,22 @@ else
   log "Heartbeat watchdog not found: $WATCHDOG"
 fi
 
-log "Amplr runner started ext=$EXT_DIR profile=$CHROME_PROFILE interval=${CHECK_INTERVAL}s heartbeat_stale=${HEARTBEAT_STALE_SECONDS}s"
+mkdir -p "$CHROME_USER_DATA_DIR"
+
+log "Amplr runner started ext=$EXT_DIR user_data_dir=$CHROME_USER_DATA_DIR profile=$CHROME_PROFILE interval=${CHECK_INTERVAL}s heartbeat_stale=${HEARTBEAT_STALE_SECONDS}s"
 last_heartbeat_check=0
 
 launch_chrome() {
   # Launch Chrome directly. `open -a/-na` can attach to an existing singleton
   # session and ignore --load-extension, leaving the MV3 worker stale.
   "$CHROME_BIN" \
-    --user-data-dir="$HOME/Library/Application Support/Google/Chrome" \
+    --user-data-dir="$CHROME_USER_DATA_DIR" \
     --profile-directory="$CHROME_PROFILE" \
     --no-first-run \
     --disable-features=Translate \
     --remote-debugging-address=127.0.0.1 \
     --remote-debugging-port=9223 \
+    --disable-extensions-except="$EXT_DIR" \
     --load-extension="$EXT_DIR" \
     "chrome-extension://$EXTENSION_ID/popup.html" \
     "$DASHBOARD_URL" >/dev/null 2>&1 &
@@ -69,6 +73,7 @@ while true; do
     if output=$(python3 "$WATCHDOG" \
       --ext-dir "$EXT_DIR" \
       --chrome-app "$CHROME_APP" \
+      --chrome-user-data-dir "$CHROME_USER_DATA_DIR" \
       --chrome-profile "$CHROME_PROFILE" \
       --dashboard-url "$DASHBOARD_URL" \
       --extension-id "$EXTENSION_ID" \

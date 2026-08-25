@@ -71,7 +71,9 @@ async function ensureFreshSession(session) {
     await chrome.storage.local.set({ jsw_session: refreshed });
     return refreshed;
   } catch(e) {
-    return null;
+    // Transient Supabase/Auth outages should not wipe the saved refresh token.
+    // Keep the extension paired/offline-retryable instead of forcing a password login.
+    return { ...session, refreshPending: true, refreshError: String(e?.message || e), lastRefreshAttempt: Date.now() };
   }
 }
 
