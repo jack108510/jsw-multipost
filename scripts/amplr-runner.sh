@@ -54,9 +54,14 @@ launch_chrome() {
     "$DASHBOARD_URL" >/dev/null 2>&1 &
 }
 
+chrome_running() {
+  # Match only root Chrome browser processes, not helper renderers or this shell's command line.
+  ps -axo command= | grep -F "$CHROME_BIN" | grep -F -- "--load-extension=$EXT_DIR" >/dev/null 2>&1
+}
+
 while true; do
   now=$(date +%s)
-  if ! pgrep -f "Google Chrome.*--load-extension=$EXT_DIR" >/dev/null 2>&1; then
+  if ! chrome_running; then
     log "Chrome with Amplr extension is not running; launching"
     launch_chrome
   elif [[ -x "$WATCHDOG" && $((now - last_heartbeat_check)) -ge $HEARTBEAT_CHECK_EVERY ]]; then
