@@ -1086,6 +1086,13 @@
     const opened = await openIdentityMenu();
     if (!opened) return { found: false, active_identity: active || null, error: 'Could not open Facebook profile switcher', pageUrl: location.href };
     await sleep(1000);
+
+    // Always open the full Facebook profile/Page selector before locating the
+    // actor. The compact quick-switcher can show stale or partial identities;
+    // the full "See all profiles" path is the stable source of truth.
+    await clickSeeAllButton('profiles');
+    await sleep(800);
+
     let target = findIdentityTarget(expectedName);
     if (!target) {
       const expanded = await expandAllIdentitiesIfPresent();
@@ -1156,43 +1163,16 @@
     const directAtCurrentPage = await tryDirectPageUrl('initial Page URL');
     if (directAtCurrentPage) return directAtCurrentPage;
 
-    const opened = await openIdentityMenu();
-    if (!opened) throw new Error('Could not open Facebook profile switcher to change identity');
-    await sleep(1000);
-
-    let target = findIdentityTarget(expectedName);
-    if (!target) {
-      const expanded = await expandAllIdentitiesIfPresent();
-      if (expanded) {
-        await sleep(800);
-        target = findIdentityTarget(expectedName);
-      }
-    }
-    if (!target) {
-      const direct = await tryDirectPageUrl('switcher target not found');
+    // Always use the verified path first: avatar menu -> See all profiles ->
+    // target, then See all Pages/Pages manager if needed. The quick-switcher is
+    // intentionally skipped because Facebook can leave it on an old/stale list.
+    try {
+      return await switchViaVerifiedFacebookIdentityPath(expectedName, identityUrl);
+    } catch (pathError) {
+      const direct = await tryDirectPageUrl('verified See all profiles path failed');
       if (direct) return direct;
-      try {
-        return await switchViaVerifiedFacebookIdentityPath(expectedName, identityUrl);
-      } catch (pathError) {
-        throw new Error(`Could not find Facebook identity "${expectedName}" in switcher or verified See all profiles/pages path. ${pathError.message}. ${identitySwitcherDebugSummary()}`);
-      }
+      throw new Error(`Could not find Facebook identity "${expectedName}" via verified See all profiles/pages path. ${pathError.message}. ${identitySwitcherDebugSummary()}`);
     }
-    clickLikeUser(target);
-    await sleep(6000);
-    active = currentIdentityName();
-    if (!identityMatches(active, expectedName)) {
-      const reopened = await openIdentityMenu();
-      if (reopened) {
-        await sleep(1000);
-        active = activeIdentityFromMenu() || active;
-      }
-    }
-    if (!identityMatches(active, expectedName)) {
-      const direct = await tryDirectPageUrl('switcher click did not verify active identity');
-      if (direct) return direct;
-      throw new Error(`Facebook identity switch did not verify as "${expectedName}". Active identity: ${active || 'unknown'}. ${identitySwitcherDebugSummary()}`);
-    }
-    return { switched: true, active_identity: active || expectedName };
   }
 
   function extractComposerIdentity(dialog) {
