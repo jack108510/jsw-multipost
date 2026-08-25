@@ -610,6 +610,9 @@ input[type="range"]::-webkit-slider-thumb{
           <span id="authBtnText">Sign In</span>
         </button>
       </form>
+      <button type="button" class="btn btn-ghost btn-block" id="restoreSessionBtn" style="margin-top:10px;display:none;" onclick="restoreStoredSessionWithoutPassword()">
+        Continue without password
+      </button>
       <p id="authError" style="color:var(--red); font-size:12px; margin-top:14px; min-height:16px;"></p>
     </div>
   </div>
@@ -1188,6 +1191,18 @@ async function onAuthSuccess(s){
   document.getElementById('authScreen').style.display='none';
   document.getElementById('app').classList.add('active');
 
+  if (session?.access_token && session?.refresh_token) {
+    localStorage.setItem('jsw_session', JSON.stringify({
+      userId: user?.id,
+      email: user?.email,
+      accessToken: session.access_token,
+      refreshToken: session.refresh_token,
+      expiresAt: session.expires_at,
+      refreshedAt: Date.now()
+    }));
+    window.dispatchEvent(new StorageEvent('storage', { key: 'jsw_session', newValue: localStorage.getItem('jsw_session') }));
+  }
+
   // Check if tables exist
   await checkSchema();
   // Load everything
@@ -1195,6 +1210,68 @@ async function onAuthSuccess(s){
   navigate(location.hash.slice(1) && PAGE_TITLES[location.hash.slice(1)] ? location.hash.slice(1) : 'home');
   // Start global job watcher
   startGlobalJobWatcher();
+}
+
+function normalizeStoredDashboardSession(raw){
+  if (!raw) return null;
+  try {
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    const candidates = [parsed, parsed?.session, parsed?.currentSession, parsed?.value, parsed?.value?.session].filter(Boolean);
+    for (const s of candidates) {
+      const accessToken = s.accessToken || s.access_token;
+      const refreshToken = s.refreshToken || s.refresh_token;
+      const userId = s.userId || s.user_id || s.user?.id;
+      const email = s.email || s.user?.email;
+      const expiresAt = s.expiresAt || s.expires_at;
+      if (refreshToken && (accessToken || userId || email)) return { accessToken, refreshToken, userId, email, expiresAt };
+    }
+  } catch (_) {}
+  return null;
+}
+
+function findStoredDashboardSession(){
+  const direct = normalizeStoredDashboardSession(localStorage.getItem('jsw_session'));
+  if (direct) return direct;
+  for (let i = 0; i < localStorage.length; i += 1) {
+    const key = localStorage.key(i);
+    if (!key || !/^sb-.*-auth-token$/.test(key)) continue;
+    const parsed = normalizeStoredDashboardSession(localStorage.getItem(key));
+    if (parsed) return parsed;
+  }
+  return null;
+}
+
+async function restoreStoredSessionWithoutPassword(){
+  const errEl = document.getElementById('authError');
+  const btn = document.getElementById('restoreSessionBtn');
+  const stored = findStoredDashboardSession();
+  if (!stored?.refreshToken) {
+    if (errEl) errEl.textContent = 'No saved session found. Sign in once, then passwordless reconnect will be available.';
+    return false;
+  }
+  if (errEl) { errEl.style.color = 'var(--text-2)'; errEl.textContent = 'Reconnecting saved session…'; }
+  if (btn) btn.disabled = true;
+  try {
+    const { data, error } = await sb.auth.setSession({
+      access_token: stored.accessToken || '',
+      refresh_token: stored.refreshToken
+    });
+    if (error) throw error;
+    if (!data?.session) throw new Error('Saved session could not be refreshed.');
+    await onAuthSuccess(data);
+    toast('Reconnected without password', 'success');
+    return true;
+  } catch (err) {
+    if (errEl) { errEl.style.color = 'var(--red)'; errEl.textContent = err.message || 'Saved session reconnect failed'; }
+    return false;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function updateRestoreSessionButton(){
+  const btn = document.getElementById('restoreSessionBtn');
+  if (btn) btn.style.display = findStoredDashboardSession() ? 'block' : 'none';
 }
 
 async function signOut(){
@@ -2972,9 +3049,17 @@ function toast(msg, type='info'){
    ============================================================ */
 (async ()=>{
   if (!sb) return;
+  updateRestoreSessionButton();
   const { data } = await sb.auth.getSession();
   if (data.session && data.user) {
     await onAuthSuccess(data);
+    return;
+  }
+  // If the browser still has a refresh token from a previous dashboard session,
+  // reconnect from that saved session instead of forcing Jack through the
+  // password form again. This is also what primes the extension bridge.
+  if (findStoredDashboardSession()) {
+    await restoreStoredSessionWithoutPassword();
   }
 })();
 </script>
