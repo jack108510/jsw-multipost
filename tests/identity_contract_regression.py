@@ -157,6 +157,21 @@ def test_managed_page_switch_uses_exact_page_fallback_not_stale_current_page() -
                 "global Page probe must fall back to Pages manager when direct Page URL is wrong")
 
 
+def test_page_switch_requires_see_all_profiles_before_target_selection() -> None:
+    body = function_body(CONTENT, "switchViaVerifiedFacebookIdentityPath")
+    open_idx = body.find("const openedProfiles = await clickSeeAllButton('profiles')")
+    guard_idx = body.find("if (!openedProfiles)")
+    stale_idx = body.find("Refusing stale quick-switcher path")
+    target_idx = body.find("let target = findIdentityTarget(expectedName)")
+    source_idx = body.find("see_all_profiles_select_profile")
+    assert_true(open_idx >= 0 and guard_idx > open_idx and stale_idx > guard_idx,
+                "Page/profile switching must fail closed when See all profiles does not open")
+    assert_true(open_idx < target_idx and guard_idx < target_idx,
+                "target lookup/selection must happen only after See all profiles opens")
+    assert_true(source_idx > target_idx,
+                "switch result must record the See all profiles selection path")
+
+
 def test_group_import_uses_verified_switch_then_joined_groups_not_page_tab_first() -> None:
     body = function_body(BACKGROUND, "importFacebookGroupsForJob")
     switch_idx = body.find("SWITCH_FACEBOOK_IDENTITY")

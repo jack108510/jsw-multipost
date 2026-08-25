@@ -996,13 +996,19 @@
     if (!opened) throw new Error('Could not open Facebook profile/avatar menu');
     await sleep(900);
 
-    // Step 1: open Select profile.
-    await clickSeeAllButton('profiles');
+    // Step 1: open Select profile via Facebook's full identity switcher.
+    // This is a hard safety gate: never select a Page/profile from the stale
+    // quick-switcher rows. The operator requirement is profile/avatar menu
+    // -> See all profiles -> select target (or See all Pages -> target).
+    const openedProfiles = await clickSeeAllButton('profiles');
+    if (!openedProfiles) {
+      throw new Error(`Could not open See all profiles before switching to ${expectedName}. Refusing stale quick-switcher path. ${identitySwitcherDebugSummary()}`);
+    }
     await sleep(500);
 
-    // Step 2: if the target is directly visible in Select profile, select it.
+    // Step 2: only after See all profiles is open, select a directly visible target.
     let target = findIdentityTarget(expectedName);
-    if (target) return await clickAndVerifyTarget(target, 'select_profile');
+    if (target) return await clickAndVerifyTarget(target, 'see_all_profiles_select_profile');
 
     // Step 3: otherwise open See all Pages and select from Pages you manage.
     const openedPages = await clickSeeAllButton('pages');
