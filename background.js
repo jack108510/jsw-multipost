@@ -2489,24 +2489,19 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null, options = 
     let allowGenericJoinedGroupsForVerifiedPageSwitch = false;
     let pageSwitchDebug = null;
     if (isManagedPageUrl) {
-      const pageGroupsUrl = buildPageGroupsUrl(identityUrl);
-      if (!pageGroupsUrl) throw new Error(`Could not build Page-specific groups URL for ${identityName}`);
-
-      // Page identities must not use the generic /groups/joins page as the
-      // primary source. Facebook often bounces Pages back to the account-level
-      // joined-groups surface there, which contaminates Page-owned group lists.
-      // Actor-first for Pages means: switch/confirm the Page context, then scan
-      // the Page profile's own Groups tab and keep that Page-specific source URL
-      // as proof. Composer probes remain the final posting gate.
+      // Actor-first Page import: switch to the selected Page/profile first,
+      // then open the generic joined-groups surface and verify Facebook still
+      // shows the intended actor there. This avoids saving account-level groups
+      // unless the joined-groups route has explicit active-identity proof.
       await updateProgress(`Switching to ${identityName}...`);
       tab = await chrome.tabs.create({ url: 'https://www.facebook.com/', active: true });
       await sleep(5000);
       let managerSwitch = null;
       try {
         managerSwitch = await sendTabMessageWithRetry(tab.id, { type: 'SWITCH_FACEBOOK_IDENTITY', identityName, identityUrl });
-        pageSwitchDebug = { ...managerSwitch, strategy: 'page_groups_tab_after_identity_switch' };
+        pageSwitchDebug = { ...managerSwitch, strategy: 'verified_profile_switch_then_joined_groups' };
       } catch (switchError) {
-        pageSwitchDebug = { success: false, error: switchError.message, strategy: 'page_groups_tab_after_identity_switch' };
+        pageSwitchDebug = { success: false, error: switchError.message, strategy: 'verified_profile_switch_then_joined_groups' };
         extLog('warn', `Verified profile/Page switch failed for ${identityName}: ${switchError.message}`);
       }
 
@@ -2516,22 +2511,21 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null, options = 
         await sleep(8000);
         try {
           managerSwitch = await sendTabMessageWithRetry(tab.id, { type: 'SWITCH_FACEBOOK_MANAGED_PAGE', identityName, identityUrl });
-          pageSwitchDebug = { ...managerSwitch, strategy: 'page_groups_tab_after_pages_manager_switch', fallback_from: pageSwitchDebug };
+          pageSwitchDebug = { ...managerSwitch, strategy: 'pages_manager_switch_then_joined_groups', fallback_from: pageSwitchDebug };
         } catch (switchError) {
-          pageSwitchDebug = { success: false, error: switchError.message, strategy: 'page_groups_tab_after_pages_manager_switch', fallback_from: pageSwitchDebug };
+          pageSwitchDebug = { success: false, error: switchError.message, strategy: 'pages_manager_switch_then_joined_groups', fallback_from: pageSwitchDebug };
           extLog('warn', `Pages Manager switch failed for ${identityName}: ${switchError.message}`);
         }
       }
 
-      await updateProgress(`Opening ${identityName} page groups tab...`);
-      await chrome.tabs.update(tab.id, { url: identityUrl });
-      await sleep(managerSwitch?.success ? 5000 : 8000);
-      await chrome.tabs.update(tab.id, { url: pageGroupsUrl });
+      if (!managerSwitch?.success) throw new Error(`Could not switch to ${identityName}`);
+      await updateProgress(`Opening ${identityName} joined groups...`);
+      await chrome.tabs.update(tab.id, { url: joinedGroupsUrl });
       await sleep(8000);
-      allowGenericJoinedGroupsForVerifiedPageSwitch = false;
-      pageScanStrategy = managerSwitch?.success
-        ? (managerSwitch?.fallback_from ? 'page_groups_tab_after_pages_manager_switch' : 'page_groups_tab_after_identity_switch')
-        : 'page_groups_tab_without_verified_switch';
+      const identityAssert = await assertFacebookActiveIdentity(tab.id, identityName, 'joined groups import');
+      allowGenericJoinedGroupsForVerifiedPageSwitch = !!identityAssert?.verified;
+      pageScanStrategy = managerSwitch?.fallback_from ? 'pages_manager_switch_then_joined_groups' : 'verified_profile_switch_then_joined_groups';
+      pageSwitchDebug = { ...(pageSwitchDebug || {}), joined_groups_identity_assert: identityAssert };
     } else {
       tab = await chrome.tabs.create({ url: joinedGroupsUrl, active: true });
       await sleep(5000);

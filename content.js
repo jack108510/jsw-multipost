@@ -883,18 +883,32 @@
     return [...found.values()];
   }
 
-  async function switchManagedPageFromPagesManager(expectedName) {
+  async function switchManagedPageFromPagesManager(expectedName, expectedUrl = null) {
     if (!expectedName) throw new Error('Managed Page name is required');
+    const expectedId = String(expectedUrl || '').match(/profile\.php\?id=(\d+)/i)?.[1] || null;
     const bodySample = () => normalizeText(document.body?.innerText || document.body?.textContent || '').slice(0, 1600);
+    const pageOwnerVerified = () => {
+      const body = normalizeText(document.body?.innerText || document.body?.textContent || '');
+      return body.toLowerCase().includes(normalizeText(expectedName).toLowerCase())
+        && (/\b(Manage Page|Professional dashboard|Meta Business Suite|Switch into|Comment as)\b/i.test(body));
+    };
+    const findPageLink = () => {
+      if (!expectedId) return null;
+      return [...document.querySelectorAll('a[href*="/profile.php"], a[href*="facebook.com/profile.php"]')]
+        .filter(visible)
+        .find(a => (a.href || '').includes(expectedId)) || null;
+    };
     const findCard = () => {
       const main = document.querySelector('[role="main"]') || document.body || document;
       const cards = [...main.querySelectorAll('[role="article"], [role="listitem"], div')].filter(visible);
       for (const card of cards) {
         const text = normalizeText(card.innerText || card.textContent || '');
         if (!/\bSwitch Now\b/i.test(text)) continue;
+        const href = card.querySelector?.('a[href*="/profile.php"], a[href*="facebook.com/profile.php"]')?.href || '';
         const lines = (card.innerText || card.textContent || '').split('\n').map(cleanIdentityName).filter(Boolean);
         const hasPageName = lines.some(line => identityMatches(line, expectedName)) || identityMatches(text, expectedName);
-        if (!hasPageName) continue;
+        const hasPageId = expectedId && href.includes(expectedId);
+        if (!hasPageName && !hasPageId) continue;
         const switchButton = [...card.querySelectorAll('[role="button"], button, a[href], [aria-label]')]
           .filter(visible)
           .find(el => /^Switch Now$/i.test(cleanIdentityName(el.innerText || el.textContent || el.getAttribute('aria-label') || '')))
@@ -906,7 +920,14 @@
       return null;
     };
 
+    if (pageOwnerVerified()) {
+      return { switched: true, already_active: true, active_identity: expectedName, page_url: location.href, body_sample: bodySample() };
+    }
+
     for (let pass = 0; pass < 5; pass++) {
+      if (pageOwnerVerified()) {
+        return { switched: true, already_active: true, active_identity: expectedName, page_url: location.href, body_sample: bodySample() };
+      }
       const hit = findCard();
       if (hit) {
         clickLikeUser(hit.switchButton);
@@ -919,6 +940,7 @@
             active = activeIdentityFromMenu(document, expectedName) || active;
           }
         }
+        if (!identityMatches(active, expectedName) && pageOwnerVerified()) active = expectedName;
         if (!identityMatches(active, expectedName)) {
           throw new Error(`Clicked Switch Now for ${expectedName}, but active identity did not verify. Active: ${active || 'unknown'}.`);
         }
@@ -930,13 +952,21 @@
           body_sample: bodySample()
         };
       }
+      const link = findPageLink();
+      if (link) {
+        clickLikeUser(link);
+        await sleep(6000);
+        if (pageOwnerVerified()) {
+          return { switched: true, active_identity: expectedName, page_url: location.href, opened_page_link: true, body_sample: bodySample() };
+        }
+      }
       window.scrollBy(0, window.innerHeight * 1.5);
       await sleep(1200);
     }
     throw new Error(`Could not find Switch Now card for ${expectedName} on Pages manager. ${bodySample()}`);
   }
 
-  async function switchViaVerifiedFacebookIdentityPath(expectedName) {
+  async function switchViaVerifiedFacebookIdentityPath(expectedName, expectedUrl = null) {
     // Verified manual Facebook path:
     // profile/avatar menu -> See all profiles -> Select profile -> target OR See all Pages -> Pages you manage -> target.
     if (!expectedName) throw new Error('Facebook identity name is required');
@@ -986,7 +1016,7 @@
 
     // Some Pages manager layouts expose cards with an explicit Switch Now button.
     try {
-      const managed = await switchManagedPageFromPagesManager(expectedName);
+      const managed = await switchManagedPageFromPagesManager(expectedName, expectedUrl);
       return { ...managed, switched_via_verified_profile_path: 'pages_you_manage_switch_now' };
     } catch (managedError) {
       throw new Error(`Could not find Facebook Page "${expectedName}" after See all Pages. ${managedError.message}`);
@@ -1142,7 +1172,7 @@
       const direct = await tryDirectPageUrl('switcher target not found');
       if (direct) return direct;
       try {
-        return await switchViaVerifiedFacebookIdentityPath(expectedName);
+        return await switchViaVerifiedFacebookIdentityPath(expectedName, identityUrl);
       } catch (pathError) {
         throw new Error(`Could not find Facebook identity "${expectedName}" in switcher or verified See all profiles/pages path. ${pathError.message}. ${identitySwitcherDebugSummary()}`);
       }
@@ -1453,7 +1483,11 @@
       } catch (firstError) {
         closeComposerDialog(document.querySelector('[role="dialog"]'));
         await sleep(500);
-        if (skipSwitch) throw firstError;
+        // Page/group access is group-specific. If the group page itself says Join/Pending,
+        // do not fall back to the global account switcher and mislabel the problem as a
+        // profile-switch failure. A Page can be globally switchable while still not being
+        // accepted into a particular group.
+        if (skipSwitch || firstError.code === 'not_group_member') throw firstError;
       }
     }
 
@@ -1564,7 +1598,7 @@
       log('Received managed Page switch command');
       (async () => {
         try {
-          const result = await switchManagedPageFromPagesManager(msg.identityName || msg.identity_name);
+          const result = await switchManagedPageFromPagesManager(msg.identityName || msg.identity_name, msg.identityUrl || msg.identity_url || null);
           sendResponse({ success: true, ...result });
         } catch (error) {
           log('MANAGED PAGE SWITCH ERROR:', error.message);

@@ -146,52 +146,75 @@ def chrome_pattern(ext_dir: str) -> str:
     return f"Google Chrome.*--load-extension={ext_dir}"
 
 
+def amplr_chrome_roots(ext_dir: str) -> list[int]:
+    """Return only root Chrome browser processes launched with Amplr's extension path.
+
+    Avoid pgrep -f because it can match helper shells/commands. Renderer/helper
+    processes are children of the root and die with it.
+    """
+    result = run(["ps", "-axo", "pid=,ppid=,command="])
+    roots: list[int] = []
+    for line in result.stdout.splitlines():
+        parts = line.strip().split(None, 2)
+        if len(parts) < 3:
+            continue
+        try:
+            pid = int(parts[0]); ppid = int(parts[1])
+        except ValueError:
+            continue
+        cmd = parts[2]
+        if (
+            ppid == 1
+            and cmd.startswith("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome ")
+            and f"--load-extension={ext_dir}" in cmd
+        ):
+            roots.append(pid)
+    return roots
+
+
 def chrome_running(ext_dir: str) -> bool:
-    return run(["pgrep", "-f", chrome_pattern(ext_dir)]).returncode == 0
+    return bool(amplr_chrome_roots(ext_dir))
 
 
 def terminate_chrome(ext_dir: str) -> None:
-    result = run(["pgrep", "-f", chrome_pattern(ext_dir)])
-    pids = [int(x) for x in result.stdout.split() if x.strip().isdigit()]
-    own_pid = os.getpid()
+    pids = amplr_chrome_roots(ext_dir)
     for pid in pids:
-        if pid == own_pid:
-            continue
         try:
             os.kill(pid, signal.SIGTERM)
         except ProcessLookupError:
             pass
-    time.sleep(3)
+    deadline = time.time() + 12
+    while time.time() < deadline and any(pid in amplr_chrome_roots(ext_dir) for pid in pids):
+        time.sleep(0.5)
     for pid in pids:
-        if pid == own_pid:
-            continue
-        try:
-            os.kill(pid, 0)
-        except ProcessLookupError:
+        if pid not in amplr_chrome_roots(ext_dir):
             continue
         try:
             os.kill(pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
+    time.sleep(2)
 
 
 def launch_chrome(chrome_app: str, chrome_profile: str, ext_dir: str, dashboard_url: str, extension_id: str) -> None:
     popup_url = f"chrome-extension://{extension_id}/popup.html"
-    run(
+    chrome_bin = str(Path(chrome_app) / "Contents/MacOS/Google Chrome")
+    subprocess.Popen(
         [
-            "open",
-            "-na",
-            chrome_app,
-            "--args",
+            chrome_bin,
             f"--user-data-dir={Path.home() / 'Library/Application Support/Google/Chrome'}",
             f"--profile-directory={chrome_profile}",
             "--no-first-run",
             "--disable-features=Translate",
+            "--remote-debugging-address=127.0.0.1",
+            "--remote-debugging-port=9223",
             f"--load-extension={ext_dir}",
             popup_url,
             dashboard_url,
         ],
-        timeout=20,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
     )
 
 

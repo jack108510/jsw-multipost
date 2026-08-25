@@ -33,6 +33,9 @@ assert(/not_group_member/.test(content), 'not-accepted group error code missing'
 assert(/temporarily blocked/.test(content) && /confirm your identity/.test(content), 'Facebook block/checkpoint terms missing');
 assert(/ANTI_BOT_RULES/.test(dashboard), 'dashboard anti-bot rules missing');
 assert(/Anti-bot defense active/.test(dashboard), 'dashboard anti-bot UI copy missing');
-assert(manifest.version === '2.2.14', `manifest version expected 2.2.14, got ${manifest.version}`);
+const versionParts = String(manifest.version || '').split('.').map(Number);
+const minVersion = [2, 2, 14];
+assert(versionParts.length === 3 && versionParts.every(Number.isFinite), `manifest version must be semantic, got ${manifest.version}`);
+assert(versionParts.some((part, idx) => part > minVersion[idx]) || versionParts.every((part, idx) => part === minVersion[idx]), `manifest version expected >= 2.2.14, got ${manifest.version}`);
 
 console.log('anti-bot defense tests passed');

@@ -40,12 +40,18 @@ log "Amplr runner started ext=$EXT_DIR profile=$CHROME_PROFILE interval=${CHECK_
 last_heartbeat_check=0
 
 launch_chrome() {
-  open -a "$CHROME_APP" --args \
+  # Launch Chrome directly. `open -a/-na` can attach to an existing singleton
+  # session and ignore --load-extension, leaving the MV3 worker stale.
+  "$CHROME_BIN" \
+    --user-data-dir="$HOME/Library/Application Support/Google/Chrome" \
     --profile-directory="$CHROME_PROFILE" \
-    --load-extension="$EXT_DIR" \
     --no-first-run \
     --disable-features=Translate \
-    "$DASHBOARD_URL" || log "Failed to launch Chrome"
+    --remote-debugging-address=127.0.0.1 \
+    --remote-debugging-port=9223 \
+    --load-extension="$EXT_DIR" \
+    "chrome-extension://$EXTENSION_ID/popup.html" \
+    "$DASHBOARD_URL" >/dev/null 2>&1 &
 }
 
 while true; do
