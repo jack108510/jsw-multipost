@@ -226,7 +226,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--ext-dir", required=True)
     parser.add_argument("--chrome-app", default="/Applications/Google Chrome.app")
-    parser.add_argument("--chrome-user-data-dir", default=str(Path.home() / "Library/Application Support/Google/Chrome"))
+    parser.add_argument("--chrome-user-data-dir", default=str(Path.home() / "Library/Application Support/Amplr/ChromeProfile"))
     parser.add_argument("--chrome-profile", default="Default")
     parser.add_argument("--dashboard-url", default="https://jack108510.github.io/jsw-multipost/dashboard.html")
     parser.add_argument("--extension-id", default=DEFAULT_EXTENSION_ID)

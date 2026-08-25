@@ -4,7 +4,7 @@ set -euo pipefail
 EXT_DIR="${AMPLR_EXT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 CHROME_APP="${AMPLR_CHROME_APP:-/Applications/Google Chrome.app}"
 CHROME_BIN="$CHROME_APP/Contents/MacOS/Google Chrome"
-CHROME_USER_DATA_DIR="${AMPLR_CHROME_USER_DATA_DIR:-$HOME/Library/Application Support/Google/Chrome}"
+CHROME_USER_DATA_DIR="${AMPLR_CHROME_USER_DATA_DIR:-$HOME/Library/Application Support/Amplr/ChromeProfile}"
 CHROME_PROFILE="${AMPLR_CHROME_PROFILE:-Default}"
 DASHBOARD_URL="${AMPLR_DASHBOARD_URL:-https://jack108510.github.io/jsw-multipost/dashboard.html}"
 CHECK_INTERVAL="${AMPLR_RUNNER_INTERVAL:-30}"

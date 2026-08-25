@@ -3,7 +3,7 @@ set -euo pipefail
 
 LABEL="com.amplr.runner"
 EXT_DIR="${AMPLR_EXT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-CHROME_USER_DATA_DIR="${AMPLR_CHROME_USER_DATA_DIR:-$HOME/Library/Application Support/Google/Chrome}"
+CHROME_USER_DATA_DIR="${AMPLR_CHROME_USER_DATA_DIR:-$HOME/Library/Application Support/Amplr/ChromeProfile}"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG_DIR="$HOME/Library/Logs/Amplr"
 
