@@ -217,6 +217,14 @@ def test_dashboard_queues_local_fallback_when_supabase_insert_fails() -> None:
         assert_true(needle in DASHBOARD_BRIDGE, f"dashboard bridge missing extension relay: {needle}")
 
 
+def test_dashboard_queues_group_join_local_fallback_when_supabase_insert_fails() -> None:
+    body = function_body(DASHBOARD, "queueJoinCandidate")
+    assert_true("message:'__join_groups__'" in body, "group finder must create join-groups jobs")
+    assert_true("queueLocalFallbackJob(payload" in body, "group joins must use local fallback when Supabase insert fails")
+    assert_true("group join queued locally" in body, "dashboard must tell operator local group join fallback is active")
+    assert_true("pollLocalFallbackJobStatus(localJob.id)" in body, "dashboard must track local group join fallback status")
+
+
 def test_manifest_version_bumped_for_reload_visibility() -> None:
     m = re.search(r'"version"\s*:\s*"(\d+)\.(\d+)\.(\d+)"', MANIFEST)
     if m is None:

@@ -1631,7 +1631,7 @@ async function queueJoinCandidate(id){
     join_source: 'dashboard_group_finder'
   };
   if (!target.group_url && !target.search_url && !target.facebook_search_url) { toast('Candidate is missing a Facebook group/search URL','error'); return; }
-  const { data, error } = await sb.from('jsw_post_jobs').insert({
+  const payload={
     user_id:user.id,
     message:'__join_groups__',
     delay:0,
@@ -1640,8 +1640,17 @@ async function queueJoinCandidate(id){
     groups:[target],
     status:'pending',
     result:{ text:`Queued actor-first join for ${target.group_name || 'candidate group'} as ${identity.name || 'selected identity'}.`, join_source:'dashboard_group_finder' }
-  }).select();
-  if (error) { toast('Could not queue group join: '+error.message,'error'); return; }
+  };
+  const { data, error } = await sb.from('jsw_post_jobs').insert(payload).select();
+  if (error) {
+    const localJob = await queueLocalFallbackJob(payload, error.message || 'Supabase is temporarily down');
+    c.status='requested'; c.updated_at=new Date().toISOString();
+    try { await saveGroupCandidates(); renderFinderCandidates(); } catch(_) {}
+    toast('Supabase is temporarily down — group join queued locally for the extension','info');
+    setExtensionStatus('idle','Queued local group join',`Waiting for extension to join ${target.group_name || 'candidate group'} as ${identity.name || 'selected identity'}.`);
+    pollLocalFallbackJobStatus(localJob.id);
+    return;
+  }
   c.status='requested'; c.updated_at=new Date().toISOString();
   try { await saveGroupCandidates(); renderFinderCandidates(); } catch(_) {}
   toast(`Join queued for ${target.group_name || 'candidate group'}`,'info');
