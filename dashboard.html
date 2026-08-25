@@ -944,7 +944,7 @@ input[type="range"]::-webkit-slider-thumb{
           <div>
             <div class="card">
               <h3>Safe Group Finder</h3>
-              <div class="desc">Find and score candidate groups for the selected channel. Amplr saves them as a review queue — it does not auto-join blindly.</div>
+              <div class="desc">Find, score, and queue actor-first joins for candidate groups on the selected channel. Amplr switches to the profile/Page first, joins only through Facebook UI, then verifies/saves the group.</div>
               <div class="field">
                 <label>Finder channel</label>
                 <select id="finderIdentitySelect" onchange="setSelectedIdentity(this.value); renderFinderCandidates();" style="width:100%;background:var(--card-2);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;"></select>
@@ -1536,6 +1536,61 @@ function pollAllGroupSyncJobs(jobIds, button=null){
     }
   }, 3000);
 }
+async function queueJoinCandidate(id){
+  const identity=getSelectedIdentity();
+  const c=groupCandidatesCache.find(x=>x.id===id);
+  if (!identity || !c) { toast('Select an identity and candidate first','error'); return; }
+  const selectedKey=identityKey(identity);
+  if (!selectedKey) { toast('Selected identity is missing its key. Sync identities again.','error'); return; }
+  const target={
+    identity_name: identity.name || c.identity_name || null,
+    identity_key: selectedKey,
+    identity_type: identity.type || c.identity_type || null,
+    identity_url: identity.url || c.identity_url || null,
+    group_name: c.group_name || c.title || c.query || null,
+    group_url: c.group_url || c.url || null,
+    search_url: c.search_url || c.facebook_search_url || null,
+    facebook_search_url: c.facebook_search_url || c.search_url || null,
+    join_source: 'dashboard_group_finder'
+  };
+  if (!target.group_url && !target.search_url && !target.facebook_search_url) { toast('Candidate is missing a Facebook group/search URL','error'); return; }
+  const { data, error } = await sb.from('jsw_post_jobs').insert({
+    user_id:user.id,
+    message:'__join_groups__',
+    delay:0,
+    ai_enabled:false,
+    ai_prompt: identity.name || null,
+    groups:[target],
+    status:'pending',
+    result:{ text:`Queued actor-first join for ${target.group_name || 'candidate group'} as ${identity.name || 'selected identity'}.`, join_source:'dashboard_group_finder' }
+  }).select();
+  if (error) { toast('Could not queue group join: '+error.message,'error'); return; }
+  c.status='requested'; c.updated_at=new Date().toISOString();
+  try { await saveGroupCandidates(); renderFinderCandidates(); } catch(_) {}
+  toast(`Join queued for ${target.group_name || 'candidate group'}`,'info');
+  pollJoinGroupJob(data[0].id, id);
+}
+function pollJoinGroupJob(jobId, candidateId=null){
+  const timer=setInterval(async()=>{
+    const { data } = await sb.from('jsw_post_jobs').select('*').eq('id',jobId).maybeSingle();
+    if (!data) return;
+    const r=normalizeResult(data);
+    if (r.text) setExtensionStatus(data.status==='processing'?'processing':'idle', 'Joining group', r.text);
+    if (['done','failed'].includes(data.status)) {
+      clearInterval(timer);
+      if (data.status==='done') {
+        if (candidateId) {
+          const c=groupCandidatesCache.find(x=>x.id===candidateId);
+          if (c) { c.status=(r.pending_count||0)>0?'requested':'joined'; c.updated_at=new Date().toISOString(); try { await saveGroupCandidates(); } catch(_) {} }
+        }
+        await loadGroups(); renderFinderCandidates(); renderGroupsList(); renderComposeGroups(); renderIdentitySelectors();
+        toast(r.text || 'Group join complete','success');
+      } else {
+        toast('Group join failed: '+(r.error || data.error || 'unknown'),'error');
+      }
+    }
+  }, 2500);
+}
 
 /* ============================================================
    GROUPS
@@ -1971,6 +2026,47 @@ function restorePreviousRewrite(){
   updateRiskPanels();
 }
 
+function sendAmplrBridgeMessage(type, payload={}, timeoutMs=5000){
+  return new Promise((resolve, reject)=>{
+    const requestId=`amplr_${Date.now()}_${Math.random().toString(36).slice(2,8)}`;
+    const timer=setTimeout(()=>{
+      window.removeEventListener('message', onMessage);
+      reject(new Error('Extension bridge timed out'));
+    }, timeoutMs);
+    function onMessage(event){
+      if (event.source !== window || event.origin !== window.location.origin) return;
+      const msg=event.data || {};
+      if (msg.source !== 'amplr-dashboard-bridge' || msg.requestId !== requestId) return;
+      clearTimeout(timer);
+      window.removeEventListener('message', onMessage);
+      resolve(msg);
+    }
+    window.addEventListener('message', onMessage);
+    window.postMessage({ source:'amplr-dashboard-page', type, requestId, ...payload }, window.location.origin);
+  });
+}
+
+async function queueLocalFallbackJob(payload, reason='Supabase is temporarily down'){
+  const localJob={
+    ...payload,
+    id:`local_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
+    local_fallback:true,
+    local_fallback_synced:false,
+    created_at:new Date().toISOString(),
+    result:{ text:`Queued locally because ${reason}.` }
+  };
+  const jobs=JSON.parse(localStorage.getItem('amplr_local_fallback_jobs') || '[]');
+  jobs.push(localJob);
+  localStorage.setItem('amplr_local_fallback_jobs', JSON.stringify(jobs.slice(-100)));
+  try {
+    const response = await sendAmplrBridgeMessage('QUEUE_LOCAL_FALLBACK_JOB', { job:localJob });
+    if (!response?.ok) throw new Error(response?.error || 'extension did not accept local fallback job');
+  } catch (err) {
+    console.warn('Could not hand local fallback job to extension yet', err);
+  }
+  return localJob;
+}
+
 async function createPostJob(){
   const message = document.getElementById('composeMessage').value.trim();
   const groups = getSelectedGroups();
@@ -2009,7 +2105,14 @@ async function createPostJob(){
 
   const { data, error } = await sb.from('jsw_post_jobs').insert(payload).select();
 
-  if (error) { toast('Failed to create job: '+error.message,'error'); btn.disabled=false; return; }
+  if (error) {
+    const localJob = await queueLocalFallbackJob(payload, error.message || 'Supabase is temporarily down');
+    toast('Supabase is temporarily down — queued locally for the extension','info');
+    showWaiting('Queued in local fallback mode','The Chrome extension will run this from local storage while Supabase recovers. Results are kept locally and can sync later.');
+    pollLocalFallbackJobStatus(localJob.id);
+    btn.disabled=false;
+    return;
+  }
 
   const job = data[0];
   if (isScheduled) {
@@ -2034,6 +2137,40 @@ function showWaiting(text, sub){
 
 function hideWaiting(){
   document.getElementById('composeWaiting').classList.remove('active');
+}
+
+function pollLocalFallbackJobStatus(jobId){
+  if (activeJobPoller) clearInterval(activeJobPoller);
+  activeJobPoller = setInterval(async ()=>{
+    let job=null;
+    try {
+      const response = await sendAmplrBridgeMessage('GET_LOCAL_FALLBACK_JOB', { jobId });
+      job = response?.job || null;
+      if (job) {
+        const jobs=JSON.parse(localStorage.getItem('amplr_local_fallback_jobs') || '[]');
+        const next=jobs.map(j=>j.id===jobId ? job : j);
+        localStorage.setItem('amplr_local_fallback_jobs', JSON.stringify(next.length ? next : [job]));
+      }
+    } catch (_) {
+      const jobs=JSON.parse(localStorage.getItem('amplr_local_fallback_jobs') || '[]');
+      job=jobs.find(j=>j.id===jobId);
+    }
+    if (!job) return;
+    const status=job.status;
+    setExtensionStatus(status==='processing'?'processing':(status==='pending'?'idle':'idle'),
+      status==='pending' ? 'Waiting for extension...' :
+      status==='processing' ? 'Posting from local fallback queue...' :
+      status==='done' ? 'Post complete' :
+      status==='failed' ? 'Post failed' : 'Idle', job.error||'');
+    if (status==='pending') showWaiting('Queued in local fallback mode','Waiting for the Chrome extension to run the local job.');
+    else if (status==='processing') showWaiting('Extension is posting...','Running from local storage because Supabase is temporarily down.');
+    else if (status==='done' || status==='failed') {
+      clearInterval(activeJobPoller);
+      hideWaiting();
+      toast(status==='done' ? 'Local fallback job complete' : 'Local fallback job failed', status==='done'?'success':'error');
+      if (status==='done') resetComposeWizard();
+    }
+  }, 2500);
 }
 
 function pollJobStatus(jobId){
@@ -2456,6 +2593,7 @@ function renderFinderCandidates(){
           <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
             <a class="btn btn-ghost" style="padding:6px 10px;text-decoration:none;" href="${esc(c.facebook_search_url)}" target="_blank">Facebook search</a>
             <a class="btn btn-ghost" style="padding:6px 10px;text-decoration:none;" href="${esc(c.web_search_url)}" target="_blank">Web search</a>
+            <button class="btn btn-primary" style="padding:6px 10px;" onclick="queueJoinCandidate('${c.id}')">Join via Amplr</button>
             <button class="btn btn-ghost" style="padding:6px 10px;" onclick="updateCandidateStatus('${c.id}','safe')">Safe</button>
             <button class="btn btn-ghost" style="padding:6px 10px;" onclick="updateCandidateStatus('${c.id}','requested')">Requested</button>
             <button class="btn btn-primary" style="padding:6px 10px;" onclick="updateCandidateStatus('${c.id}','joined')">Joined</button>

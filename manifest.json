@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Amplr",
   "short_name": "Amplr",
-  "version": "2.2.116",
+  "version": "2.2.121",
   "description": "Post to multiple Facebook groups at once. AI-powered prompts, scheduled posts, dashboard pairing.",
   "author": "JSW Enterprises",
   "icons": {
@@ -23,6 +23,16 @@
     "service_worker": "background.js"
   },
   "content_scripts": [
+    {
+      "matches": [
+        "https://jack108510.github.io/jsw-multipost/*",
+        "https://jack108510.github.io/fb-autoposter/*"
+      ],
+      "js": [
+        "dashboard_bridge.js"
+      ],
+      "run_at": "document_idle"
+    },
     {
       "matches": [
         "*://*.facebook.com/*"
