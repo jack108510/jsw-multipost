@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="dashboard_group_campaign.js"></script>
 <style>
 /* ============================================================
    JSW MULTI-POST DASHBOARD — PREMIUM DARK UI
@@ -516,6 +517,25 @@ input[type="range"]::-webkit-slider-thumb{
 .clean-section-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:14px;}
 .clean-section-head h2{font-size:20px;letter-spacing:-.4px;}
 .clean-section-head p{color:var(--text-3);font-size:12px;margin-top:3px;}
+.delight-panel{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(260px,.9fr);gap:14px;margin:18px 0;}
+.delight-card{position:relative;overflow:hidden;border:1px solid rgba(255,255,255,.1);background:linear-gradient(145deg,rgba(255,255,255,.055),rgba(255,255,255,.025));}
+.delight-card::after{content:'';position:absolute;inset:auto -20% -45% 35%;height:120px;background:radial-gradient(circle,rgba(99,102,241,.22),transparent 64%);pointer-events:none;}
+.launch-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,170px),1fr));gap:10px;margin-top:14px;position:relative;z-index:1;}
+.launch-chip{padding:13px;border-radius:13px;background:var(--card-2);border:1px solid var(--border);text-align:left;transition:all .18s;}
+.launch-chip:hover{transform:translateY(-2px);border-color:rgba(99,102,241,.45);box-shadow:0 12px 30px rgba(0,0,0,.24);}
+.launch-chip strong{display:block;font-size:13px;margin-bottom:3px;}
+.launch-chip span{display:block;color:var(--text-3);font-size:11px;line-height:1.35;}
+.vibe-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:13px;position:relative;z-index:1;}
+.vibe-pill{padding:8px 11px;border-radius:999px;background:var(--card-2);border:1px solid var(--border);color:var(--text-2);font-size:12px;font-weight:650;transition:all .18s;}
+.vibe-pill.active{color:#fff;border-color:rgba(236,72,153,.45);background:linear-gradient(135deg,rgba(99,102,241,.32),rgba(236,72,153,.28));box-shadow:0 0 0 1px rgba(255,255,255,.04) inset;}
+.pulse-stack{display:grid;gap:9px;margin-top:13px;position:relative;z-index:1;}
+.pulse-item{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 11px;border-radius:12px;background:rgba(255,255,255,.035);border:1px solid var(--border);font-size:12px;color:var(--text-2);}
+.pulse-item b{color:var(--text);font-size:12px;}
+.pulse-badge{border-radius:999px;padding:4px 8px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.4px;background:rgba(34,197,94,.12);color:var(--green);border:1px solid rgba(34,197,94,.25);white-space:nowrap;}
+.pulse-badge.warn{background:rgba(234,179,8,.12);color:var(--yellow);border-color:rgba(234,179,8,.25);}
+body[data-amplr-vibe='bold']{--accent:#f97316;--accent-2:#f43f5e;--grad:linear-gradient(135deg,#f97316,#f43f5e);--grad-subtle:linear-gradient(135deg,rgba(249,115,22,.14),rgba(244,63,94,.12));}
+body[data-amplr-vibe='calm']{--accent:#14b8a6;--accent-2:#38bdf8;--grad:linear-gradient(135deg,#14b8a6,#38bdf8);--grad-subtle:linear-gradient(135deg,rgba(20,184,166,.12),rgba(56,189,248,.12));}
+@media(max-width:900px){.delight-panel{grid-template-columns:1fr;}}
 .advanced-nav{margin-top:12px;padding-top:12px;border-top:1px solid var(--border);}
 .advanced-nav details{color:var(--text-3);font-size:12px;}
 .advanced-nav summary{cursor:pointer;padding:8px 10px;border-radius:8px;}
@@ -745,6 +765,30 @@ input[type="range"]::-webkit-slider-thumb{
           <div class="flow-card ready"><div class="flow-num">4</div><strong>Post safely</strong><span>Use the New Post flow.</span></div>
         </div>
 
+        <div class="delight-panel">
+          <div class="card delight-card">
+            <div class="clean-section-head"><div><h2>Quick launch</h2><p>Pick a simple campaign starter. Amplr fills the draft and moves you to New Post.</p></div></div>
+            <div class="launch-grid">
+              <button class="launch-chip" onclick="startQuickCampaign('rose')"><strong>Rose intro</strong><span>Soft local-business pitch for AI front desk demos.</span></button>
+              <button class="launch-chip" onclick="startQuickCampaign('emptyslot')"><strong>Empty Slot</strong><span>Pet-owner group copy for last-minute vet openings.</span></button>
+              <button class="launch-chip" onclick="startQuickCampaign('local')"><strong>Local service</strong><span>Clean neighborhood post for plumbers, locators, clinics, shops.</span></button>
+            </div>
+          </div>
+          <div class="card delight-card">
+            <div class="clean-section-head"><div><h2>Desk mood</h2><p>Tiny cosmetic toggle. Makes the dashboard feel less dead.</p></div></div>
+            <div class="vibe-row" id="vibeRow">
+              <button class="vibe-pill" data-vibe="classic" onclick="setAmplrVibe('classic')">Classic</button>
+              <button class="vibe-pill" data-vibe="bold" onclick="setAmplrVibe('bold')">Bold</button>
+              <button class="vibe-pill" data-vibe="calm" onclick="setAmplrVibe('calm')">Calm</button>
+            </div>
+            <div class="pulse-stack">
+              <div class="pulse-item"><span>Safe posting checks</span><b class="pulse-badge">On</b></div>
+              <div class="pulse-item"><span>Supabase fallback</span><b class="pulse-badge">Live</b></div>
+              <div class="pulse-item"><span>Runner control port</span><b class="pulse-badge warn">Needs check</b></div>
+            </div>
+          </div>
+        </div>
+
         <div class="grid-2">
           <div class="card">
             <div class="clean-section-head"><div><h2>Next best action</h2><p id="homeNextActionSub">Amplr will suggest the simplest next step.</p></div></div>
@@ -964,6 +1008,24 @@ input[type="range"]::-webkit-slider-thumb{
                 <button class="btn btn-ghost" onclick="seedFinderFromChannel()">Use Channel Profile</button>
               </div>
               <div class="result-meta" style="margin-bottom:10px;">Workflow: candidate → safe to request → requested → joined. Keep unsafe or off-niche groups out of posting.</div>
+              <details style="margin:12px 0;padding:12px;border:1px solid var(--border);border-radius:12px;background:var(--card-2);">
+                <summary style="cursor:pointer;font-weight:700;">Scheduled join campaign</summary>
+                <div class="desc" style="margin:8px 0 12px;">Queues only candidates marked Safe. Amplr schedules actor-first <code>__join_groups__</code> batches, max 10 groups/job, and skips joined/requested/unsafe rows.</div>
+                <div class="grid-3" style="gap:8px;">
+                  <div class="field"><label>Total target</label><input id="joinCampaignTotal" type="number" min="1" max="100" value="100" style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;"></div>
+                  <div class="field"><label>Groups per job</label><input id="joinCampaignBatchSize" type="number" min="1" max="10" value="10" style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;"></div>
+                  <div class="field"><label>Jobs per day</label><input id="joinCampaignJobsPerDay" type="number" min="1" max="2" value="1" style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;"></div>
+                </div>
+                <div class="grid-2" style="gap:8px;">
+                  <div class="field"><label>Start</label><input id="joinCampaignStart" type="datetime-local" style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;"></div>
+                  <div class="field"><label>Campaign name</label><input id="joinCampaignName" type="text" placeholder="Empty Slot US pet-owner groups" style="width:100%;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:13px;"></div>
+                </div>
+                <div id="joinCampaignPreview" class="result-meta" style="margin:8px 0 10px;"></div>
+                <div class="action-grid">
+                  <button class="btn btn-ghost" onclick="previewJoinCampaign()">Preview Campaign</button>
+                  <button class="btn btn-primary" onclick="scheduleJoinCampaign()">Schedule Safe Joins</button>
+                </div>
+              </details>
               <div id="finderResults"></div>
             </div>
           </div>
@@ -1305,6 +1367,40 @@ async function checkSchema(){
    NAVIGATION
    ============================================================ */
 const PAGE_TITLES = {home:'Home',compose:'New Post',groups:'Groups',schedule:'Schedules',history:'History',settings:'Profiles',ops:'Advanced Ops'};
+const QUICK_CAMPAIGNS = {
+  rose: `Local business owners — if your website is getting visitors but not enough people are actually reaching out, I can show you a quick AI front desk demo.\n\nRose can answer common questions, collect lead details, and hand you a clean summary instead of letting people leave without contacting you.\n\nIf you want to see what it would look like on your site, send me your website link.`,
+  emptyslot: `Pet owners — would you want a simple alert when a local vet has a last-minute opening?\n\nEmpty Slot is being built to help clinics fill cancellations and help pet owners find sooner appointment times without calling around all day.\n\nIf you want early access, comment or send me a message and I’ll add you to the list.`,
+  local: `Quick local question — for anyone running a service business, how are you handling missed calls, quote requests, and follow-ups right now?\n\nI’m testing simple AI tools that can answer basic questions, collect the right details, and pass the lead to the owner without making the customer wait.\n\nHappy to show a quick example if useful.`
+};
+
+function setAmplrVibe(vibe='classic'){
+  const allowed=['classic','bold','calm'];
+  const next=allowed.includes(vibe) ? vibe : 'classic';
+  document.body.dataset.amplrVibe = next === 'classic' ? '' : next;
+  localStorage.setItem('amplr_vibe', next);
+  document.querySelectorAll('.vibe-pill').forEach(btn=>btn.classList.toggle('active', btn.dataset.vibe === next));
+}
+
+function startQuickCampaign(kind){
+  const message = QUICK_CAMPAIGNS[kind] || QUICK_CAMPAIGNS.local;
+  navigate('compose');
+  setTimeout(()=>{
+    const messageEl=document.getElementById('composeMessage');
+    if (messageEl) {
+      messageEl.value=message;
+      updateRiskPanels();
+      renderComposeReview();
+    }
+    showComposeStep('message');
+    toast('Draft starter loaded — pick profile/groups when ready','success');
+  }, 0);
+}
+
+function bootDelightUi(){
+  setAmplrVibe(localStorage.getItem('amplr_vibe') || 'classic');
+}
+
+bootDelightUi();
 
 function navigate(route){
   document.querySelectorAll('.page').forEach(p=>p.classList.remove('active'));
@@ -1655,6 +1751,73 @@ async function queueJoinCandidate(id){
   try { await saveGroupCandidates(); renderFinderCandidates(); } catch(_) {}
   toast(`Join queued for ${target.group_name || 'candidate group'}`,'info');
   pollJoinGroupJob(data[0].id, id);
+}
+function joinCampaignStartDate(){
+  const raw=document.getElementById('joinCampaignStart')?.value;
+  if (raw) return new Date(raw);
+  const d=new Date(Date.now()+10*60*1000);
+  d.setSeconds(0,0);
+  return d;
+}
+function selectedJoinCampaignCandidates(){
+  return candidatesForSelectedIdentity().filter(c => window.AmplrGroupJoinCampaign?.isSchedulableCandidate?.(c));
+}
+function buildSelectedJoinCampaignJobs(){
+  if (!window.AmplrGroupJoinCampaign) throw new Error('Join campaign scheduler is not loaded');
+  const identity=getSelectedIdentity();
+  const selectedKey=identityKey(identity);
+  if (!identity || !selectedKey) throw new Error('Sync/select a posting identity first');
+  return window.AmplrGroupJoinCampaign.buildGroupJoinCampaignJobs({
+    userId:user?.id,
+    identity:{...identity, key:selectedKey},
+    candidates:candidatesForSelectedIdentity(),
+    totalTarget:document.getElementById('joinCampaignTotal')?.value || 100,
+    batchSize:document.getElementById('joinCampaignBatchSize')?.value || 10,
+    jobsPerDay:document.getElementById('joinCampaignJobsPerDay')?.value || 1,
+    startAt:joinCampaignStartDate(),
+    spacingHours:4,
+    campaignName:(document.getElementById('joinCampaignName')?.value || `${identity.name} group join campaign`).trim()
+  });
+}
+function previewJoinCampaign(){
+  const el=document.getElementById('joinCampaignPreview');
+  try {
+    const safeCount=selectedJoinCampaignCandidates().length;
+    const jobs=buildSelectedJoinCampaignJobs();
+    const first=new Date(jobs[0].scheduled_for).toLocaleString([], {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'});
+    const last=new Date(jobs[jobs.length-1].scheduled_for).toLocaleString([], {month:'short', day:'numeric', hour:'numeric', minute:'2-digit'});
+    if (el) el.innerHTML=`${jobs.length} scheduled job${jobs.length===1?'':'s'} · ${jobs.reduce((n,j)=>n+j.groups.length,0)} safe groups · ${safeCount} safe available · ${first} → ${last}`;
+    return jobs;
+  } catch(e) {
+    if (el) el.innerHTML=`<span style="color:var(--red);">${esc(e.message)}</span>`;
+    toast(e.message,'error');
+    return [];
+  }
+}
+async function scheduleJoinCampaign(){
+  const jobs=previewJoinCampaign();
+  if (!jobs.length) return;
+  const total=jobs.reduce((n,j)=>n+j.groups.length,0);
+  const identity=getSelectedIdentity();
+  if (!confirm(`Schedule ${total} safe group join requests for ${identity?.name || 'selected identity'} across ${jobs.length} paced job${jobs.length===1?'':'s'}?`)) return;
+  let inserted=[];
+  let local=[];
+  try {
+    const { data, error } = await sb.from('jsw_post_jobs').insert(jobs).select();
+    if (error) throw error;
+    inserted=data || [];
+  } catch(e) {
+    for (const job of jobs) local.push(await queueLocalFallbackJob(job, e.message || 'Supabase is temporarily down'));
+  }
+  const queuedIds=new Set(jobs.flatMap(j=>j.groups.map(g=>g.candidate_id).filter(Boolean)));
+  groupCandidatesCache.forEach(c=>{
+    if (queuedIds.has(c.id)) { c.status='requested'; c.updated_at=new Date().toISOString(); c.campaign_name=jobs[0]?.result?.campaign_name || null; }
+  });
+  try { await saveGroupCandidates(); renderFinderCandidates(); } catch(_) {}
+  const ids=[...inserted.map(j=>j.id), ...local.map(j=>j.id)].filter(Boolean);
+  if (ids.length) ids.slice(0,3).forEach(id=>pollJoinGroupJob(id));
+  setExtensionStatus('idle','Scheduled group join campaign',`${total} safe groups queued for ${identity?.name || 'selected identity'} across ${jobs.length} paced job${jobs.length===1?'':'s'}.`);
+  toast(local.length ? `Supabase down — ${local.length} join campaign jobs queued locally` : `Scheduled ${jobs.length} join campaign jobs`, 'success');
 }
 function pollJoinGroupJob(jobId, candidateId=null){
   const timer=setInterval(async()=>{
@@ -2139,7 +2302,7 @@ async function queueLocalFallbackJob(payload, reason='Supabase is temporarily do
     local_fallback:true,
     local_fallback_synced:false,
     created_at:new Date().toISOString(),
-    result:{ text:`Queued locally because ${reason}.` }
+    result:{ ...(payload.result || {}), text:payload.result?.text || `Queued locally because ${reason}.`, local_fallback_reason:reason }
   };
   const jobs=JSON.parse(localStorage.getItem('amplr_local_fallback_jobs') || '[]');
   jobs.push(localJob);
