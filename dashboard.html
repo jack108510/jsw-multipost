@@ -1200,6 +1200,29 @@ let groupCandidatesCache=[];
 let postingIdentitiesCache=[];
 let settingsCache={};
 let rewriteHistory=[];
+let supabaseDegraded=false;
+
+function setSupabaseHealth(degraded, detail=''){
+  supabaseDegraded=!!degraded;
+  const banner=document.getElementById('supabaseOutageBanner') || document.createElement('div');
+  banner.id='supabaseOutageBanner';
+  banner.style.cssText='position:sticky;top:0;z-index:9999;margin:0;padding:10px 14px;border-bottom:1px solid rgba(234,179,8,.45);background:rgba(234,179,8,.14);color:var(--text);font-size:13px;display:none;';
+  banner.innerHTML=`<strong>Supabase degraded</strong> · Amplr will queue runnable jobs locally in the Chrome extension until the backend recovers.${detail?` <span style="color:var(--text-2);">${esc(detail).slice(0,180)}</span>`:''}`;
+  if (!banner.parentNode) document.body.prepend(banner);
+  banner.style.display=degraded?'block':'none';
+}
+
+async function safeSupabaseQuery(label, fn){
+  try {
+    const res=await fn();
+    if (res?.error) setSupabaseHealth(true, `${label}: ${res.error.message || 'backend error'}`);
+    else if (supabaseDegraded) setSupabaseHealth(false);
+    return res;
+  } catch(e) {
+    setSupabaseHealth(true, `${label}: ${e.message || e}`);
+    return { data:null, error:e };
+  }
+}
 
 try {
   sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
@@ -3042,7 +3065,7 @@ async function addSchedule(){
   renderRiskBox('scheduleRiskBox', riskWarnings);
   if (!acknowledgeRiskIfNeeded(riskWarnings, 'Create this schedule anyway?')) return;
 
-  const { error } = await sb.from('jsw_post_jobs').insert({
+  const payload={
     user_id:user.id,
     message,
     groups,
@@ -3052,9 +3075,17 @@ async function addSchedule(){
     status: 'pending',
     scheduled_for: scheduledFor.toISOString(),
     repeat_days: repeatDays,
-    repeat_time: postTime
-  });
-  if (error) { toast('Error: '+error.message,'error'); return; }
+    repeat_time: postTime,
+    result:{ text:`Queued schedule for ${scheduledFor.toLocaleString()}${repeatDays.length?' with repeat enabled':''}.` }
+  };
+  const { error } = await safeSupabaseQuery('create schedule', () => sb.from('jsw_post_jobs').insert(payload));
+  if (error) {
+    const localJob=await queueLocalFallbackJob(payload, error.message || 'Supabase is temporarily down');
+    document.getElementById('schedMessage').value='';
+    toast('Supabase is down — schedule queued locally for the extension','info');
+    pollLocalFallbackJobStatus(localJob.id);
+    return;
+  }
   document.getElementById('schedMessage').value='';
   await renderSchedules();
   toast('Schedule created','success');
