@@ -522,9 +522,9 @@
     if (cleaned.length > 90) return true;
     if (/^(quick switch profiles?|see all profiles?|see all pages?|settings(?:\s*(?:&|and)?\s*privacy)?|help(?:\s*(?:&|and)?\s*support)?|report a problem|give feedback|meta verified|meta business suite|display & accessibility|privacy|terms|privacy policy|advertising|ad choices|cookies|more|active|edit|manage|back to previous(?: page)?|select an option|available voices?,?\s*switch|unread chats?|chatsallhas new content.*|log out)$/i.test(cleaned)) return true;
     if (/^(?:[A-Z]\s*){1,3}$/i.test(cleaned.replace(/\./g, ''))) return true; // menu initials like "B B"
-    if (/^\d+$/.test(cleaned)) return true;
+    if (/^\d+\+?$/.test(cleaned)) return true;
     if (/^\d+\s*(?:m|h|d|w|mo|y)$/i.test(cleaned)) return true;
-    if (/^(facebook|facebook menu|meta|pages?|profiles?|home|watch|marketplace|groups?|notifications?|menu|account controls(?: and settings)?|account|your)$/i.test(cleaned)) return true;
+    if (/^(facebook|facebook menu|meta|pages?|profiles?|home|watch|marketplace|groups?|notifications?|menu|account controls(?: and settings)?|account|your|your feed|feed)$/i.test(cleaned)) return true;
     if (/\b(number of unread notifications|new notification|notifications?|unread chats?|chat history is missing|available voices|privacy shortcuts|professional dashboard|ad center|create post|composer|search facebook|view all|sponsored|contacts|meta ai|profile photo|profile picture|online status indicator)\b/i.test(cleaned)) return true;
     return false;
   }

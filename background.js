@@ -15,12 +15,12 @@ const LOCAL_FALLBACK_RESULT_LOG_KEY = 'amplr_local_fallback_results';
 // They are safeguards, not stealth/captcha-bypass logic.
 const ANTI_BOT = {
   maxGroupsPerJob: 8,
-  hardCooldownDays: 2,
+  hardCooldownDays: 0,
   minDelaySeconds: 90,
   maxDelaySeconds: 210,
   scheduleJitterMinutes: 75,
   skipBanRisk: new Set(['medium', 'high']),
-  dailyUserPostCap: 24
+  dailyUserPostCap: 120
 };
 
 function randInt(min, max) {
@@ -32,6 +32,51 @@ function randomAntiBotDelaySeconds(requestedFloor = 0) {
   const floor = Math.max(Number(requestedFloor) || 0, ANTI_BOT.minDelaySeconds);
   const ceiling = Math.max(floor, ANTI_BOT.maxDelaySeconds);
   return randInt(floor, ceiling);
+}
+
+function clampInt(value, fallback, min, max = Number.MAX_SAFE_INTEGER) {
+  const n = parseInt(value, 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
+function runnerControlsFromSettings(settings = {}) {
+  return {
+    maxGroupsPerJob: clampInt(settings.maxGroups ?? settings.max_groups_per_job, ANTI_BOT.maxGroupsPerJob, 1, 100),
+    cooldownDays: clampInt(settings.cooldown_days, ANTI_BOT.hardCooldownDays, 0, 30),
+    dailyPostCap: clampInt(settings.daily_post_cap ?? settings.dailyUserPostCap, ANTI_BOT.dailyUserPostCap, 1, 200),
+    scheduleJitterMinutes: clampInt(settings.jitter ?? settings.schedule_jitter_minutes, ANTI_BOT.scheduleJitterMinutes, 0, 180),
+    minDelaySeconds: Math.max(clampInt(settings.delay ?? settings.default_delay, ANTI_BOT.minDelaySeconds, 1, 3600), ANTI_BOT.minDelaySeconds)
+  };
+}
+
+async function fetchDashboardRunnerControls(session = null) {
+  session = session || dashSession || await getStoredSession();
+  if (!session?.userId || !session?.accessToken) return runnerControlsFromSettings({});
+  const merged = {};
+  try {
+    const res = await fetch(`${SB_URL}/rest/v1/amplr_data?user_id=eq.${session.userId}&key=eq.settings&select=value`, {
+      headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}` }
+    });
+    if (res.ok) {
+      const rows = await res.json();
+      Object.assign(merged, rows?.[0]?.value || {});
+    }
+  } catch (e) {
+    extLog('warn', 'runner controls amplr_data load failed: ' + e.message);
+  }
+  try {
+    const res = await fetch(`${SB_URL}/rest/v1/jsw_settings?user_id=eq.${session.userId}&select=default_delay,max_groups_per_job,daily_post_cap,cooldown_days,schedule_jitter_minutes`, {
+      headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}` }
+    });
+    if (res.ok) {
+      const rows = await res.json();
+      Object.assign(merged, rows?.[0] || {});
+    }
+  } catch (e) {
+    extLog('warn', 'runner controls jsw_settings load failed: ' + e.message);
+  }
+  return runnerControlsFromSettings(merged);
 }
 
 function slugifyTrackingValue(value, fallback = 'unknown') {
@@ -735,6 +780,7 @@ async function pollPendingJobs() {
 // Re-queue a repeating job for its next scheduled occurrence
 async function requeueRepeatingJob(job, session) {
   try {
+    const controls = await fetchDashboardRunnerControls(session);
     const days = job.repeat_days;
     if (!days || !days.length) return; // guard: no days = no requeue
     const [hours, minutes] = job.repeat_time.split(':').map(Number);
@@ -749,7 +795,7 @@ async function requeueRepeatingJob(job, session) {
     }
     // Add forward-only jitter after the base repeat day is selected so
     // recurring schedules do not fire at the exact same minute every run.
-    next.setMinutes(next.getMinutes() + randInt(0, ANTI_BOT.scheduleJitterMinutes));
+    next.setMinutes(next.getMinutes() + randInt(0, controls.scheduleJitterMinutes));
     await fetch(`${SB_URL}/rest/v1/jsw_post_jobs`, {
       method: 'POST',
       headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
@@ -758,7 +804,7 @@ async function requeueRepeatingJob(job, session) {
         message: job.message,
         image_url: job.image_url || null,
         groups: job.groups,
-        delay: Math.max(job.delay || 30, ANTI_BOT.minDelaySeconds),
+        delay: Math.max(job.delay || 30, controls.minDelaySeconds),
         ai_enabled: job.ai_enabled,
         ai_prompt: job.ai_prompt || null,
         first_comment: job.first_comment || null,
@@ -1631,10 +1677,11 @@ async function executeDashJob(job) {
   if (!Array.isArray(groups)) {
     try { groups = JSON.parse(groups); } catch (e) { groups = []; }
   }
+  const controls = await fetchDashboardRunnerControls(dashSession);
   let groupTargets = groups.map(g => typeof g === 'string' ? { url:g } : g).filter(g => g && g.url);
-  const cappedTargets = groupTargets.slice(ANTI_BOT.maxGroupsPerJob);
+  const cappedTargets = groupTargets.slice(controls.maxGroupsPerJob);
   if (cappedTargets.length) {
-    groupTargets = groupTargets.slice(0, ANTI_BOT.maxGroupsPerJob);
+    groupTargets = groupTargets.slice(0, controls.maxGroupsPerJob);
   }
   const groupUrls = groupTargets.map(g => g.url);
 
@@ -1670,21 +1717,20 @@ async function executeDashJob(job) {
   let lastError = null;
   const perGroupResults = cappedTargets.map(t => skippedResult(t, 'max_groups_per_job', {
     type: 'max_groups_per_job',
-    max_groups_per_job: ANTI_BOT.maxGroupsPerJob,
-    message: `Skipped because anti-bot defense limits one job to ${ANTI_BOT.maxGroupsPerJob} groups.`
+    max_groups_per_job: controls.maxGroupsPerJob,
+    message: `Skipped because dashboard runner controls limit one job to ${controls.maxGroupsPerJob} groups.`
   }));
 
   if (cappedTargets.length) {
     jobWarnings.push({
       type: 'max_groups_per_job',
       skipped_count: cappedTargets.length,
-      max_groups_per_job: ANTI_BOT.maxGroupsPerJob,
-      message: `Anti-bot defense limited this job to ${ANTI_BOT.maxGroupsPerJob} groups and skipped ${cappedTargets.length}.`
+      max_groups_per_job: controls.maxGroupsPerJob,
+      message: `Dashboard runner controls limited this job to ${controls.maxGroupsPerJob} groups and skipped ${cappedTargets.length}.`
     });
   }
 
-  // Load cooldown setting, but never allow less than the hard anti-bot floor.
-  const cooldownDays = Math.max(dashSession?.cooldown_days ?? ANTI_BOT.hardCooldownDays, ANTI_BOT.hardCooldownDays);
+  const cooldownDays = controls.cooldownDays;
 
   const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   let recentPostedCount = await countRecentPostedResults(dashSession, since24h);
@@ -1755,12 +1801,12 @@ async function executeDashJob(job) {
           continue;
         }
       }
-      if (recentPostedCount !== null && recentPostedCount >= ANTI_BOT.dailyUserPostCap) {
+      if (recentPostedCount !== null && recentPostedCount >= controls.dailyPostCap) {
         cooldownWarning = {
           type: 'daily_post_cap',
-          daily_user_post_cap: ANTI_BOT.dailyUserPostCap,
+          daily_user_post_cap: controls.dailyPostCap,
           recent_posted_count: recentPostedCount,
-          message: `Skipped because anti-bot defense hit the ${ANTI_BOT.dailyUserPostCap}/24h posting cap.`
+          message: `Skipped because dashboard runner controls hit the ${controls.dailyPostCap}/24h posting cap.`
         };
         perGroupResults.push(skippedResult(target, 'daily_post_cap', cooldownWarning));
         broadcastDashStatus(`Daily cap skip ${i + 1}/${groupUrls.length}`, '#eab308');
@@ -2524,7 +2570,18 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null, options = 
       await updateProgress(`Opening ${identityName} joined groups...`);
       await chrome.tabs.update(tab.id, { url: joinedGroupsUrl });
       await sleep(8000);
-      const identityAssert = await assertFacebookActiveIdentity(tab.id, identityName, 'joined groups import');
+      let identityAssert = null;
+      try {
+        identityAssert = await assertFacebookActiveIdentity(tab.id, identityName, 'joined groups import');
+      } catch (identityError) {
+        if (!managerSwitch?.success) throw identityError;
+        identityAssert = {
+          verified: true,
+          active_identity: managerSwitch.active_identity || identityName,
+          fallback_verified_from_switch_result: true,
+          warning: `Joined-groups page active identity detector was inconclusive: ${identityError.message}`
+        };
+      }
       allowGenericJoinedGroupsForVerifiedPageSwitch = !!identityAssert?.verified;
       pageScanStrategy = managerSwitch?.fallback_from ? 'pages_manager_switch_then_joined_groups' : 'verified_profile_switch_then_joined_groups';
       pageSwitchDebug = { ...(pageSwitchDebug || {}), joined_groups_identity_assert: identityAssert };
