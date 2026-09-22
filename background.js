@@ -2,6 +2,25 @@
 // Orchestrates posting queue, AI refinement, and scheduled posts via chrome.alarms.
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+// Manifest V3 may suspend an idle service worker after roughly 30 seconds.
+// Posting batches intentionally wait 90–210 seconds between groups, so a plain
+// timer can strand a claimed local-fallback job after a successful/ambiguous
+// submission. Keep the worker alive with a harmless extension API call while
+// that deliberate anti-bot delay is in progress.
+async function sleepWithWorkerKeepalive(ms) {
+  const intervalMs = 15_000;
+  let timer = null;
+  try {
+    timer = setInterval(() => {
+      chrome.runtime.getPlatformInfo().catch(() => {});
+    }, intervalMs);
+    await sleep(ms);
+  } finally {
+    if (timer) clearInterval(timer);
+  }
+}
+
 const EXT_VERSION = chrome.runtime.getManifest?.().version || 'unknown';
 const CONNECTION_STATUS_KEY = 'extension_status';
 const DAILY_GROUP_SCAN_ALARM = 'daily-group-scan';
@@ -16,8 +35,8 @@ const LOCAL_FALLBACK_RESULT_LOG_KEY = 'amplr_local_fallback_results';
 const ANTI_BOT = {
   maxGroupsPerJob: 8,
   hardCooldownDays: 0,
-  minDelaySeconds: 90,
-  maxDelaySeconds: 210,
+  minDelaySeconds: 15,
+  maxDelaySeconds: 35,
   scheduleJitterMinutes: 75,
   skipBanRisk: new Set(['medium', 'high']),
   dailyUserPostCap: 120
@@ -136,12 +155,23 @@ function addTrackingParamsToMessage(message, { job, target, groupUrl, finalText 
     if (!shouldTrackOutboundUrl(cleanRaw)) return;
     try {
       const u = new URL(cleanRaw);
+      const actor = slugifyTrackingValue(target?.identity_name || target?.profile_name || job?.identity_name || 'unknown-actor', 'unknown-actor');
+      const groupUrlSlug = slugifyTrackingValue(groupUrl || target?.url || groupName || 'group', 'group');
+      const jobId = job?.id ? String(job.id).slice(0, 12) : '';
       u.searchParams.set('utm_source', 'facebook_group');
-      u.searchParams.set('utm_medium', 'organic');
+      u.searchParams.set('utm_medium', 'reachr');
       u.searchParams.set('utm_campaign', campaign);
       u.searchParams.set('utm_content', creative);
+      u.searchParams.set('utm_term', groupSlug);
+      u.searchParams.set('reachr_campaign', campaign);
+      u.searchParams.set('reachr_group', groupSlug);
+      u.searchParams.set('reachr_group_url', groupUrlSlug);
+      u.searchParams.set('reachr_actor', actor);
+      if (jobId) {
+        u.searchParams.set('reachr_job', jobId);
+        u.searchParams.set('amplr_job', jobId.slice(0, 8));
+      }
       u.searchParams.set('amplr_group', groupSlug);
-      if (job?.id) u.searchParams.set('amplr_job', String(job.id).slice(0, 8));
       const tracked = u.toString() + trailing;
       output = output.split(raw).join(tracked);
       trackedCount++;
@@ -161,8 +191,124 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     runPostingQueue(msg, sender);
   } else if (msg.type === 'IMPORT_GROUPS') {
     importFacebookGroups(msg.identity || msg.identityMeta || null);
+  } else if (msg.type === 'CHECK_FACEBOOK_SESSION') {
+    requireFacebookSessionForGroupScan()
+      .then(() => sendResponse({ available: true }))
+      .catch(error => sendResponse({ available: false, code: error?.code || 'facebook_login_required', error: error?.message || 'Facebook login required.' }));
+    return true;
+  } else if (msg.type === 'NATIVE_TYPE_FACEBOOK_DRAFT') {
+    // Some Facebook composer variants ignore isolated-world DOM input events.
+    // The content script has already focused its verified visible textbox; send
+    // native DevTools text only to that same tab, then let content re-verify.
+    // Bound debugger I/O so a hung DevTools transport cannot leave the outer
+    // POST_TO_PAGE channel open until its much longer delivery timeout.
+    (async () => {
+      const tabId = sender?.tab?.id;
+      // MessageSender fields are supplied by Chrome, not by the message body.
+      // URL/frame/documentId identify a top-level content document (Chrome 106+).
+      // Optional origin/lifecycle/id, when supplied, must not contradict it.
+      let senderUrl;
+      try { senderUrl = new URL(sender?.url); } catch (_) {}
+      if (!Number.isInteger(tabId) || tabId < 0 || sender?.frameId !== 0
+          || !senderUrl || senderUrl.protocol !== 'https:'
+          || !/^(?:[a-z0-9-]+\.)*facebook\.com$/.test(senderUrl.hostname)
+          || senderUrl.username || senderUrl.password || senderUrl.port
+          || (sender.origin !== undefined && sender.origin !== senderUrl.origin)
+          || (sender.id !== undefined && sender.id !== chrome.runtime.id)
+          || (sender.documentLifecycle !== undefined && sender.documentLifecycle !== 'active')
+          || typeof sender.documentId !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(sender.documentId)
+          || typeof msg.editorToken !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(msg.editorToken)
+          || typeof msg.documentToken !== 'string' || !/^[a-zA-Z0-9_-]{1,128}$/.test(msg.documentToken)
+          || typeof msg.documentUrl !== 'string' || msg.documentUrl !== sender.url
+          || typeof msg.text !== 'string' || !msg.text) {
+        return sendResponse({ ok: false, error: 'invalid_native_type_request' });
+      }
+      const target = { tabId };
+      if (nativeTypeOperations.has(tabId)) {
+        return sendResponse({ ok: false, error: 'native_type_busy' });
+      }
+      const operation = { documentId: sender.documentId };
+      nativeTypeOperations.set(tabId, operation);
+      const ownsOperation = () => nativeTypeOperations.get(tabId) === operation;
+      let attached = false;
+      let attachPending = true;
+      let cleanupPromise;
+      let cancelled = false;
+      const deadline = Date.now() + 7000;
+      const expired = () => cancelled || !ownsOperation() || Date.now() >= deadline;
+      const cleanup = () => {
+        // A pending attach can still acquire this tab after the response timeout.
+        // Keep ownership until that attach settles and its detach completes.
+        if (attachPending || !ownsOperation()) return;
+        if (!cleanupPromise) cleanupPromise = (async () => {
+          if (attached) {
+            try { await chrome.debugger.detach(target); } catch (_) { return; }
+          }
+          if (ownsOperation()) nativeTypeOperations.delete(tabId);
+        })();
+        return cleanupPromise;
+      };
+      let timer;
+      try {
+        await Promise.race([
+          (async () => {
+            try {
+              await chrome.debugger.attach(target, '1.3');
+              attached = true;
+            } finally {
+              attachPending = false;
+              if (expired()) await cleanup();
+            }
+            if (expired()) throw new Error('native_type_timeout');
+            // Background renderers may ignore selection/newlines without focus.
+            // Emulate renderer focus only; never raise the user's OS window.
+            await chrome.debugger.sendCommand(target, 'Emulation.setFocusEmulationEnabled', { enabled: true });
+            if (expired()) throw new Error('native_type_timeout');
+            const focused = await chrome.debugger.sendCommand(target, 'Runtime.evaluate', {
+              expression: `(() => {
+                const editorToken = ${JSON.stringify(msg.editorToken)};
+                const documentToken = ${JSON.stringify(msg.documentToken)};
+                if (!editorToken || !documentToken || location.href !== ${JSON.stringify(msg.documentUrl)} || document.documentElement.getAttribute('data-reachr-native-document') !== documentToken) return false;
+                const boxes = [...document.querySelectorAll('[data-reachr-native-editor]')].filter(el => el.getAttribute('data-reachr-native-editor') === editorToken);
+                if (boxes.length !== 1) return false;
+                const box = boxes[0];
+                if (!box.isConnected || box.ownerDocument !== document || !box.isContentEditable || !box.closest('[role="dialog"]') || !box.getBoundingClientRect().height) return false;
+                if (document.activeElement !== box && !box.contains(document.activeElement)) return false;
+                const range = document.createRange();
+                range.selectNodeContents(box);
+                const selection = document.getSelection();
+                selection.removeAllRanges();
+                selection.addRange(range);
+                return true;
+              })()`, returnByValue: true
+            });
+            if (expired()) throw new Error('native_type_timeout');
+            if (focused?.result?.value !== true) throw new Error('native_composer_focus_unverified');
+            await chrome.debugger.sendCommand(target, 'Input.insertText', { text: msg.text });
+            // Dispatched commands cannot be recalled; late completion is not success.
+            if (expired()) throw new Error('native_type_timeout');
+          })(),
+          new Promise((_, reject) => {
+            timer = setTimeout(() => {
+              cancelled = true;
+              reject(new Error('native_type_timeout'));
+            }, 7000);
+          })
+        ]);
+        sendResponse({ ok: true });
+      } catch (error) {
+        sendResponse({ ok: false, error: error?.message || 'native_type_failed' });
+      } finally {
+        if (timer) clearTimeout(timer);
+        await cleanup();
+      }
+    })();
+    return true;
   }
 });
+
+// Held per tab, not per document: navigation must not admit competing input.
+const nativeTypeOperations = new Map();
 
 // ============ POSTING QUEUE ============
 async function runPostingQueue(_payload, sender) {
@@ -326,50 +472,128 @@ const SB_URL = 'https://xacehhtgvubcqdoltazg.supabase.co';
 const SB_ANON_KEY = 'sb_publishable_1TNu5hqotJ7GGQXfjliivQ_ttK51EAA';
 let dashSession = null;
 
-async function getStoredSession() {
+async function getStoredDashboardIdentity() {
+  // This is deliberately identity-only: it is used to scope local duplicate
+  // holds while dashboard authentication is unavailable, never to authorize a
+  // remote call or recover credentials.
   const data = await chrome.storage.local.get(['jsw_session']);
+  const session = data.jsw_session;
+  const userId = session?.userId || session?.user?.id || session?.user_id || null;
+  return typeof userId === 'string' && userId ? userId : null;
+}
+
+const sessionRefreshFlights = new Map();
+
+async function getStoredSession() {
+  const revision = sessionAuthRevision;
+  const data = await chrome.storage.local.get(['jsw_session']);
+  if (revision !== sessionAuthRevision) return null;
   let session = data.jsw_session;
   if (!session || !session.userId) return null;
 
   // Supabase access tokens expire. If we keep using the old token, the
   // dashboard heartbeat silently stops and Amplr looks "unpaired" again.
-  const expiresMs = session.expiresAt ? Number(session.expiresAt) * 1000 : 0;
+  const declaredExpiresMs = session.expiresAt ? Number(session.expiresAt) * 1000 : 0;
+  let tokenExpiresMs = 0;
+  try {
+    const payload = String(session.accessToken || '').split('.')[1];
+    if (payload) {
+      const normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+      const exp = JSON.parse(atob(normalized)).exp;
+      if (Number.isFinite(Number(exp))) tokenExpiresMs = Number(exp) * 1000;
+    }
+  } catch (_) {}
+  // Treat the token's signed expiration as authoritative when present. This
+  // prevents a stale storage field from keeping an already-expired JWT alive.
+  const expiresMs = tokenExpiresMs || declaredExpiresMs;
   const shouldRefresh = session.refreshToken && (!expiresMs || expiresMs - Date.now() < 120000);
   if (!shouldRefresh) {
     dashSession = session;
     return session;
   }
 
-  try {
-    const res = await fetch(`${SB_URL}/auth/v1/token?grant_type=refresh_token`, {
-      method: 'POST',
-      headers: { 'apikey': SB_ANON_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: session.refreshToken })
-    });
-    const refreshed = await res.json();
-    if (!res.ok || !refreshed.access_token) throw new Error(refreshed.error_description || refreshed.msg || 'Refresh failed');
+  const key = JSON.stringify([session.userId, session.accessToken, session.refreshToken, session.expiresAt]);
+  if (!sessionRefreshFlights.has(key)) {
+    const flight = refreshStoredSession(session, expiresMs, revision).finally(() => sessionRefreshFlights.delete(key));
+    sessionRefreshFlights.set(key, flight);
+  }
+  return sessionRefreshFlights.get(key);
+}
 
+async function refreshStoredSession(session, expiresMs, revision) {
+  const original = JSON.stringify(session);
+  const isCurrent = async () => {
+    const { jsw_session: current } = await chrome.storage.local.get('jsw_session');
+    return revision === sessionAuthRevision && JSON.stringify(current) === original;
+  };
+  try {
+    const controller = new AbortController();
+    let timer;
+    let refreshed;
+    try {
+      refreshed = await Promise.race([
+        (async () => {
+          const res = await fetch(`${SB_URL}/auth/v1/token?grant_type=refresh_token`, {
+            method: 'POST',
+            headers: { 'apikey': SB_ANON_KEY, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ refresh_token: session.refreshToken }),
+            signal: controller.signal,
+          });
+          if (!res.ok) throw Object.assign(new Error(`Supabase auth HTTP ${res.status}`), { status: res.status });
+          const body = await res.json();
+          if (!body?.access_token) throw new Error('Invalid Supabase refresh response');
+          return body;
+        })(),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => {
+            reject(new Error('Supabase auth refresh timeout'));
+            controller.abort();
+          }, 10_000);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (!await isCurrent()) return null;
     session = {
       ...session,
       accessToken: refreshed.access_token,
       refreshToken: refreshed.refresh_token || session.refreshToken,
       expiresAt: refreshed.expires_at || Math.floor(Date.now() / 1000) + (refreshed.expires_in || 3600),
+      refreshPending: false,
     };
-    await chrome.storage.local.set({ jsw_session: session });
-    dashSession = session;
-    return session;
+    delete session.refreshError;
+    delete session.lastRefreshAttempt;
+    return await withSessionAuthWrite(async () => {
+      if (!await isCurrent()) return null;
+      await chrome.storage.local.set({ jsw_session: session });
+      if (revision !== sessionAuthRevision) return null;
+      dashSession = session;
+      return session;
+    });
   } catch (e) {
+    if (!await isCurrent()) return null;
     console.warn('[JSW] Supabase session refresh failed:', e.message);
     // Keep the refresh token for passwordless reconnect/retry. Clearing storage
     // on a transient Supabase/Auth outage forces Jack back through a password
     // form even though the browser still has a reusable refresh token.
     const transient = /Failed to fetch|NetworkError|timeout|522|5\d\d/i.test(String(e?.message || e));
     if (expiresMs && expiresMs <= Date.now()) {
-      await writeExtensionStatus(session, 'offline', { error: transient ? 'Supabase auth temporarily unavailable; will retry saved session' : 'Supabase session expired and refresh failed' });
       session = { ...session, refreshPending: transient, refreshError: String(e?.message || e), lastRefreshAttempt: Date.now() };
-      await chrome.storage.local.set({ jsw_session: session });
-      dashSession = transient ? session : null;
-      return transient ? session : null;
+      const saved = await withSessionAuthWrite(async () => {
+        if (!await isCurrent()) return false;
+        await chrome.storage.local.set({ jsw_session: session });
+        if (revision !== sessionAuthRevision) return false;
+        dashSession = null;
+        return true;
+      });
+      if (!saved) return null;
+      // Reporting is best-effort and must never gate local auth/fallback progress.
+      Promise.resolve().then(() => writeExtensionStatus(session, 'offline', {
+        error: transient ? 'Supabase auth temporarily unavailable; will retry saved session' : 'Supabase session expired and refresh failed'
+      })).catch(() => {});
+      return null;
     }
     dashSession = session;
     return session;
@@ -399,18 +623,50 @@ async function extLog(level, message) {
 }
 
 // Listen for login/logout from popup
+let sessionAuthRevision = 0;
+let sessionAuthWriteTail = Promise.resolve();
+function withSessionAuthWrite(operation) {
+  const result = sessionAuthWriteTail.then(operation);
+  sessionAuthWriteTail = result.catch(() => {});
+  return result;
+}
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'PAIRING_CONNECTED') {
     dashSession = msg.pairing;
     startDashPolling().catch(e => console.warn('[JSW] start polling failed:', e.message));
     writeHeartbeat();
     extLog('info', `Session connected, polling started for ${dashSession.userId} on v${EXT_VERSION}`);
-  } else if (msg.type === 'DASHBOARD_SESSION_IMPORT' && msg.session?.userId && msg.session?.accessToken && msg.session?.refreshToken) {
-    dashSession = msg.session;
-    chrome.storage.local.set({ jsw_session: msg.session, amplr_onboarding_done: true }).catch(() => {});
-    startDashPolling().catch(e => console.warn('[JSW] dashboard session import polling failed:', e.message));
-    writeHeartbeat();
-    extLog('info', `Dashboard session imported, polling started for ${dashSession.userId} on v${EXT_VERSION}`);
+  } else if ((msg.type === 'DASHBOARD_SESSION_IMPORT' || msg.type === 'POPUP_SESSION_IMPORT') && msg.session?.userId && msg.session?.accessToken && msg.session?.refreshToken) {
+    // Separate popup admission from the existing dashboard bridge contract.
+    // Content scripts (including dashboard tabs) cannot impersonate popup login.
+    if (msg.type === 'POPUP_SESSION_IMPORT' &&
+        (sender?.id !== chrome.runtime.id || sender?.url !== chrome.runtime.getURL('popup.html') || sender?.tab)) {
+      sendResponse?.({ ok: false, error: 'invalid_popup_session_sender' });
+      return false;
+    }
+    sessionAuthRevision++;
+    // Scheduler ownership belongs to this installation/account, not a fresh
+    // dashboard auth payload. Re-login must not silently disable the cutover,
+    // and a different account must never inherit it. Persist before polling.
+    withSessionAuthWrite(async () => {
+      const { jsw_session: previous } = await chrome.storage.local.get('jsw_session');
+      const imported = { ...msg.session, durableSchedulerV1:
+        previous?.userId === msg.session.userId && previous?.durableSchedulerV1 === true };
+      await chrome.storage.local.set({ jsw_session: imported,
+        ...(msg.type === 'DASHBOARD_SESSION_IMPORT' ? { amplr_onboarding_done: true }
+          : previous?.userId !== imported.userId ? { amplr_onboarding_done: false } : {}) });
+      dashSession = imported;
+      return imported;
+    }).then(async imported => {
+      sendResponse?.({ ok: true, session: imported });
+      await startDashPolling();
+      writeHeartbeat();
+      extLog('info', `Dashboard session imported, polling started for ${imported.userId} on v${EXT_VERSION}`);
+    }, e => {
+      sendResponse?.({ ok: false, error: e.message });
+      console.warn('[JSW] session import failed:', e.message);
+    }).catch(e => console.warn('[JSW] session polling startup failed:', e.message));
+    return true;
   } else if (msg.type === 'QUEUE_LOCAL_FALLBACK_JOB' && msg.job) {
     saveLocalFallbackJob(msg.job)
       .then(job => {
@@ -435,6 +691,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
+
 // On startup, resume polling if already logged in
 chrome.runtime.onStartup.addListener(loadSessionAndResume);
 chrome.runtime.onInstalled.addListener(loadSessionAndResume);
@@ -442,14 +699,38 @@ chrome.runtime.onInstalled.addListener(loadSessionAndResume);
 loadSessionAndResume();
 
 async function loadSessionAndResume() {
+  const revision = sessionAuthRevision;
   const session = await getStoredSession();
+  // A popup/dashboard import can complete while a suspended worker is
+  // refreshing its startup snapshot. That newer import owns dashSession and
+  // polling; this stale continuation must not clear or overwrite it.
+  if (revision !== sessionAuthRevision) return;
   if (session && session.userId) {
     dashSession = session;
     await startDashPolling();
     extLog('info', `Resumed polling for user ${dashSession.userId} on v${EXT_VERSION}`);
   } else {
-    extLog('warn', `No valid stored session on startup for v${EXT_VERSION}`);
+    dashSession = null;
+    if (await hasPendingLocalFallbackJobs()) {
+      await startLocalFallbackPolling();
+      extLog('warn', `Dashboard session unavailable; resumed local fallback polling on v${EXT_VERSION}`);
+    } else {
+      extLog('warn', `No valid stored session on startup for v${EXT_VERSION}`);
+    }
   }
+}
+
+async function hasPendingLocalFallbackJobs() {
+  const jobs = await readLocalFallbackJobs();
+  return jobs.some(job => job?.status === 'pending');
+}
+
+async function startLocalFallbackPolling() {
+  // Local fallback is intentionally independent of dashboard authentication.
+  // Its executor still requires a valid Facebook session before it claims work.
+  await chrome.alarms.clear('poll-jobs');
+  await chrome.alarms.create('poll-jobs', { periodInMinutes: 0.5 });
+  pollFacebookWork();
 }
 
 async function startDashPolling() {
@@ -465,8 +746,7 @@ async function startDashPolling() {
   try { await writeHeartbeat(); } catch (e) { console.warn('[JSW] heartbeat write failed during startup:', e.message); }
 
   // Poll immediately, then via alarms (MV3 service workers can sleep between events).
-  pollPendingJobs();
-  pollGroupLookups();
+  pollFacebookWork();
   await chrome.alarms.create('poll-jobs', { periodInMinutes: 0.5 }); // every 30s
   await chrome.alarms.create('amplr_heartbeat', { periodInMinutes: 0.5 }); // every 30s
   await chrome.alarms.create('check-post-results', { periodInMinutes: 360 }); // every 6h
@@ -493,16 +773,48 @@ async function stopDashPolling() {
   await chrome.alarms.clear(DAILY_GROUP_SCAN_ALARM);
 }
 
+// One cycle across all sources; busy ticks are skipped, never queued up.
+let facebookPollInFlight = false;
+async function pollFacebookWork() {
+  if (facebookPollInFlight || activeDashJobId !== null) return false;
+  facebookPollInFlight = true;
+  try {
+    // Claiming a job is a state change. Authenticate before touching either
+    // queue so a stale/expired Facebook session cannot strand a local job in
+    // `processing` before the per-target checks run.
+    await requireFacebookSessionForGroupScan();
+    await pollPendingJobs();
+    await pollLocalFallbackJobs();
+    await pollGroupLookups();
+    return true;
+  } catch (e) {
+    extLog('error', 'Facebook poll cycle failed: ' + e.message);
+    return false;
+  } finally {
+    facebookPollInFlight = false;
+  }
+}
+
 // Heartbeat and poll-jobs alarm handler
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'amplr_heartbeat') writeHeartbeat();
-  else if (alarm.name === 'poll-jobs') { pollPendingJobs(); pollGroupLookups(); }
+  else if (alarm.name === 'poll-jobs') { pollFacebookWork(); }
   else if (alarm.name === 'check-post-results') { checkPostResults(); }
   else if (alarm.name === DAILY_GROUP_SCAN_ALARM) { enqueueDailyGroupScan(); }
 });
 
 // ─── Group name lookup ───
 async function pollGroupLookups() {
+  if (activeDashJobId !== null) return false;
+  activeDashJobId = 'group-lookup';
+  try {
+    return await pollGroupLookupsUnlocked();
+  } finally {
+    activeDashJobId = null;
+  }
+}
+
+async function pollGroupLookupsUnlocked() {
   const session = await getStoredSession();
   if (!session || !session.userId) return;
   if (!dashSession) dashSession = session;
@@ -575,17 +887,21 @@ async function sbUpdateLookup(lookupId, patch) {
   try {
     const session = await getStoredSession();
     if (!session) return false;
-    const res = await fetch(`${SB_URL}/rest/v1/jsw_group_lookups?id=eq.${lookupId}`, {
+    const claiming = patch.status === 'processing';
+    const res = await fetch(`${SB_URL}/rest/v1/jsw_group_lookups?id=eq.${encodeURIComponent(lookupId)}${claiming ? '&status=eq.pending' : ''}`, {
       method: 'PATCH',
       headers: {
         'apikey': SB_ANON_KEY,
         'Authorization': `Bearer ${session.accessToken}`,
         'Content-Type': 'application/json',
-        'Prefer': 'return=minimal'
+        'Prefer': claiming ? 'return=representation' : 'return=minimal'
       },
       body: JSON.stringify(patch)
     });
-    return res.ok;
+    if (!res.ok) return false;
+    if (!claiming) return true;
+    const rows = await res.json();
+    return Array.isArray(rows) && rows.length === 1 && String(rows[0].id) === String(lookupId);
   } catch (e) {
     console.warn('[JSW] sbUpdateLookup error:', e.message);
     return false;
@@ -663,14 +979,60 @@ function skippedResult(target, reason, warning, extra = {}) {
   };
 }
 
+// DOM attribution is not independent publication verification. A legacy success
+// without explicit proof is still an attempted submission, never a publication.
+function submissionEvidenceOutcome(response, groupUrl) {
+  let attributableUrl = null;
+  let candidateUrl = null;
+  try {
+    const post = new URL(response?.postUrl);
+    const group = new URL(groupUrl);
+    const postPath = post.pathname.match(/^\/groups\/([^/]+)\/(?:posts|permalink)\/([0-9]+)\/?$/);
+    const groupPath = group.pathname.match(/^\/groups\/([^/]+)\/?$/);
+    if (post.protocol === 'https:' && /^(www\.|m\.)?facebook\.com$/.test(post.hostname)
+        && !post.username && !post.password && !post.port && postPath && groupPath
+        && postPath[1] === groupPath[1]) attributableUrl = post.href;
+  } catch (_) {}
+  // A candidate remains a manual-review link only: validate it as tightly as a
+  // post URL, but never allow it to influence verification or posted status.
+  try {
+    const candidate = new URL(response?.candidatePermalink);
+    const group = new URL(groupUrl);
+    const candidatePath = candidate.pathname.match(/^\/groups\/([^/]+)\/(?:posts|permalink)\/([0-9]+)\/?$/);
+    const groupPath = group.pathname.match(/^\/groups\/([^/]+)\/?$/);
+    if (candidate.protocol === 'https:' && /^(www\.|m\.)?facebook\.com$/.test(candidate.hostname)
+        && !candidate.username && !candidate.password && !candidate.port && candidatePath && groupPath
+        && candidatePath[1] === groupPath[1]) candidateUrl = candidate.href;
+  } catch (_) {}
+  const verified = response?.success === true && response?.submitted === true
+    && response?.composerIdentityVerified === true && response?.publicationVerified === true
+    && response?.evidenceFound === true && response?.evidenceStatus === 'matched_new_permalink'
+    && !!attributableUrl;
+  return {
+    ...(response?.submitted === true && response?.composerIdentityVerified === true
+      && response?.submissionDeliveryUnknown !== true && response?.publicationVerified !== true
+      && response?.evidenceStatus === 'pending_approval' ? { pending_approval: true } : {}),
+    status: verified ? 'posted' : 'submitted_unconfirmed',
+    publication_verified: verified,
+    post_url: attributableUrl,
+    evidence_status: response?.evidenceStatus || 'legacy_unconfirmed',
+    // Use the deployed durable reason field; adding a new payload column would
+    // break older dashboard schemas. The prefix makes non-verification explicit.
+    evidence_reason: response?.evidenceReason || (candidateUrl ? `candidate_permalink_unattributed:${candidateUrl}` : null)
+  };
+}
+
 async function countRecentPostedResults(session, sinceIso) {
   try {
-    const res = await fetch(`${SB_URL}/rest/v1/jsw_post_results?user_id=eq.${encodeURIComponent(session.userId)}&posted_at=gte.${encodeURIComponent(sinceIso)}&select=id`, {
-      headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}` }
+    const res = await fetch(`${SB_URL}/rest/v1/jsw_post_results?user_id=eq.${encodeURIComponent(session.userId)}&posted_at=gte.${encodeURIComponent(sinceIso)}&select=id&limit=1`, {
+      headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}`, 'Prefer': 'count=exact' }
     });
     if (!res.ok) return null;
-    const rows = await res.json();
-    return Array.isArray(rows) ? rows.length : null;
+    // PostgREST may paginate rows; only its exact total covers the full window.
+    const range = res.headers.get('content-range');
+    const match = /^(?:\d+-\d+|\*)\/(\d+)$/.exec(range || '');
+    const count = match ? Number(match[1]) : NaN;
+    return Number.isSafeInteger(count) && count >= 0 ? count : null;
   } catch (e) {
     extLog('warn', 'recent post cap check failed: ' + e.message);
     return null;
@@ -686,7 +1048,12 @@ async function writeLocalFallbackJobs(jobs) {
   await chrome.storage.local.set({ [LOCAL_FALLBACK_JOB_QUEUE_KEY]: jobs });
 }
 
+// Serialize every queue read/modify/write, not just execution: dashboard enqueue
+// can arrive while a claim or completion is awaiting chrome.storage.
+let localFallbackMutation = Promise.resolve();
 async function saveLocalFallbackJob(payload) {
+  if (payload?.occurrence_id != null) throw new Error('Durable occurrence must remain in the cloud queue');
+  const operation = localFallbackMutation.then(async () => {
   const now = new Date().toISOString();
   const jobs = await readLocalFallbackJobs();
   const job = {
@@ -700,23 +1067,229 @@ async function saveLocalFallbackJob(payload) {
     result: payload.result || { text: 'Queued locally because Supabase is temporarily unavailable.' }
   };
   jobs.push(job);
-  await writeLocalFallbackJobs(jobs.slice(-100));
+  // Bound terminal history only. Never evict unfinished, paused or unknown work.
+  const terminalStatuses = new Set(['done', 'failed', 'cancelled', 'canceled']);
+  let historyToDrop = Math.max(0, jobs.filter(j => terminalStatuses.has(j?.status)).length - 100);
+  const retained = jobs.filter(j => {
+    if (historyToDrop > 0 && terminalStatuses.has(j?.status)) {
+      historyToDrop--;
+      return false;
+    }
+    return true;
+  });
+  await writeLocalFallbackJobs(retained);
   extLog('warn', `Queued local fallback job ${job.id}`);
   return job;
+  });
+  localFallbackMutation = operation.catch(() => {});
+  return operation;
 }
 
-async function updateLocalFallbackJob(jobId, patch) {
+async function updateLocalFallbackJob(jobId, patch, expected = {}) {
+  const operation = localFallbackMutation.then(async () => {
   const jobs = await readLocalFallbackJobs();
   const now = new Date().toISOString();
   let found = false;
   const next = jobs.map(job => {
     if (job.id !== jobId) return job;
+    // Compare-and-set protects claims and lifecycle checkpoints from a stale
+    // service worker completing a newer execution owner's job.
+    if (expected.status && job.status !== expected.status) return job;
+    if (expected.execution_owner && job.execution_owner !== expected.execution_owner) return job;
+    if (patch.status === 'processing' && job.status !== 'pending') return job;
     found = true;
     return { ...job, ...patch, updated_at: now };
   });
   if (found) await writeLocalFallbackJobs(next);
   return found;
+  });
+  localFallbackMutation = operation.catch(() => {});
+  return operation;
 }
+
+// BEGIN LOCAL EXECUTION LIFECYCLE
+// Local fallback is the only runner available during a dashboard-auth outage.
+// Keep its state machine in chrome.storage so a worker death cannot silently
+// turn an ambiguous Facebook command into a retryable pending job.
+const LOCAL_EXECUTION_LEASE_MS = 5 * 60 * 1000;
+function newLocalExecutionLease() {
+  const now = new Date();
+  return {
+    owner: (globalThis.crypto?.randomUUID?.() || `lease-${Date.now()}-${Math.random().toString(36).slice(2)}`),
+    started_at: now.toISOString(),
+    expires_at: new Date(now.getTime() + LOCAL_EXECUTION_LEASE_MS).toISOString()
+  };
+}
+async function claimLocalExecutionLifecycle(job) {
+  const lease = newLocalExecutionLease();
+  const claimed = await updateLocalFallbackJob(job.id, {
+    status: 'processing',
+    started_at: lease.started_at,
+    execution_phase: 'claimed',
+    execution_owner: lease.owner,
+    execution_started_at: lease.started_at,
+    execution_updated_at: lease.started_at,
+    execution_lease_expires_at: lease.expires_at,
+    result: { text: 'Claimed locally; Facebook command has not been dispatched.' }
+  }, { status: 'pending' });
+  return claimed ? lease : null;
+}
+async function checkpointLocalExecutionLifecycle(job, lease, phase, details = {}) {
+  if (!lease?.owner) return false;
+  const now = new Date();
+  return updateLocalFallbackJob(job.id, {
+    ...details,
+    execution_phase: phase,
+    execution_updated_at: now.toISOString(),
+    execution_lease_expires_at: new Date(now.getTime() + LOCAL_EXECUTION_LEASE_MS).toISOString()
+  }, { status: 'processing', execution_owner: lease.owner });
+}
+async function reconcileExpiredLocalExecutionLeases() {
+  const jobs = await readLocalFallbackJobs();
+  const now = Date.now();
+  let reconciled = 0;
+  for (const job of jobs) {
+    if (job?.status !== 'processing') continue;
+    const expiry = Date.parse(job.execution_lease_expires_at || '');
+    // Legacy processing rows lack a lease and are just as ambiguous. Pause all
+    // such work; only an operator with independent evidence may reconcile it.
+    if (!Number.isFinite(expiry) || expiry <= now) {
+      const paused = await updateLocalFallbackJob(job.id, {
+        status: 'paused',
+        execution_phase: 'manual_review',
+        execution_updated_at: new Date().toISOString(),
+        error: 'Execution lease expired; manual review required. This job will not be replayed automatically.',
+        result: { ...(job.result || {}), execution_phase: 'manual_review', auto_retry_allowed: false }
+      }, { status: 'processing', ...(job.execution_owner ? { execution_owner: job.execution_owner } : {}) });
+      if (paused) reconciled++;
+    }
+  }
+  return reconciled;
+}
+// END LOCAL EXECUTION LIFECYCLE
+
+// BEGIN DASHBOARD EXECUTION LIFECYCLE
+// The dashboard queue has the same failure mode as local fallback: a suspended
+// MV3 worker can disappear after a Facebook command but before its completion
+// write. Keep the authoritative claim in Supabase and fail closed if the
+// lifecycle RPC migration is absent or unavailable.
+const DASHBOARD_EXECUTION_LEASE_MS = 5 * 60 * 1000;
+function newDashboardExecutionLease() {
+  const now = new Date();
+  return {
+    owner: (globalThis.crypto?.randomUUID?.() || `dash-lease-${Date.now()}-${Math.random().toString(36).slice(2)}`),
+    started_at: now.toISOString(),
+    expires_at: new Date(now.getTime() + DASHBOARD_EXECUTION_LEASE_MS).toISOString()
+  };
+}
+async function dashboardLifecycleRpc(name, body) {
+  const session = await getStoredSession();
+  if (!session?.accessToken) return null;
+  const response = await fetch(`${SB_URL}/rest/v1/rpc/${name}`, {
+    method: 'POST',
+    headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+  if (!response.ok) throw new Error(`${name} HTTP ${response.status}`);
+  return response.json();
+}
+async function claimDashboardExecutionLifecycle(job) {
+  const lease = newDashboardExecutionLease();
+  try {
+    const result = await dashboardLifecycleRpc('reachr_claim_post_job', {
+      p_job_id: job.id, p_execution_owner: lease.owner,
+      p_lease_seconds: Math.ceil(DASHBOARD_EXECUTION_LEASE_MS / 1000)
+    });
+    const claimed = result === true || result?.claimed === true;
+    return claimed ? lease : null;
+  } catch (e) {
+    extLog('warn', `Dashboard lifecycle claim deferred: ${e.message}`);
+    return null;
+  }
+}
+async function updateDashboardJobWithExpected(jobId, patch, expected = {}) {
+  const session = await getStoredSession();
+  if (!session?.accessToken) return false;
+  const filters = [`id=eq.${encodeURIComponent(jobId)}`];
+  if (expected.status) filters.push(`status=eq.${encodeURIComponent(expected.status)}`);
+  if (expected.execution_owner) filters.push(`execution_owner=eq.${encodeURIComponent(expected.execution_owner)}`);
+  try {
+    const response = await fetch(`${SB_URL}/rest/v1/jsw_post_jobs?${filters.join('&')}`, {
+      method: 'PATCH',
+      headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}`, 'Content-Type': 'application/json', 'Prefer': 'return=representation' },
+      body: JSON.stringify(patch)
+    });
+    if (!response.ok) return false;
+    const rows = await response.json();
+    return Array.isArray(rows) && rows.length === 1 && String(rows[0].id) === String(jobId);
+  } catch (e) {
+    extLog('warn', `Dashboard lifecycle update deferred: ${e.message}`);
+    return false;
+  }
+}
+async function checkpointDashboardExecutionLifecycle(job, lease, phase, details = {}) {
+  if (!lease?.owner) return false;
+  const now = new Date();
+  // `result` carries campaign admission/reconciliation metadata. A lifecycle
+  // checkpoint must add its progress note without destroying that envelope.
+  const checkpointDetails = details?.result && typeof details.result === 'object'
+    ? { ...details, result: { ...(job.result || {}), ...details.result } }
+    : details;
+  return updateDashboardJobWithExpected(job.id, {
+    ...checkpointDetails, execution_phase: phase, execution_updated_at: now.toISOString(),
+    execution_lease_expires_at: new Date(now.getTime() + DASHBOARD_EXECUTION_LEASE_MS).toISOString()
+  }, { status: 'processing', execution_owner: lease.owner });
+}
+async function completeDashboardExecutionLifecycle(job, lease, patch) {
+  if (!lease?.owner) return false;
+  return updateDashboardJobWithExpected(job.id, patch, { status: 'processing', execution_owner: lease.owner });
+}
+async function reconcileExpiredDashboardExecutionLeases() {
+  try {
+    const result = await dashboardLifecycleRpc('reachr_reconcile_expired_post_jobs', {});
+    return Number.isInteger(result) && result >= 0 ? result : 0;
+  } catch (e) {
+    // A failed reconciliation must never turn a processing row back into pending.
+    extLog('warn', `Dashboard lifecycle reconciliation deferred: ${e.message}`);
+    return 0;
+  }
+}
+async function pauseDashboardPendingJob(job, reason, result = {}) {
+  try {
+    const session = await getStoredSession();
+    if (!session?.accessToken) return false;
+    const url = `${SB_URL}/rest/v1/jsw_post_jobs?id=eq.${encodeURIComponent(job.id)}&status=eq.pending`;
+    const headers = { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}`, 'Content-Type': 'application/json', 'Prefer': 'return=representation' };
+    const now = new Date().toISOString();
+    const patch = {
+      status: 'paused', execution_phase: 'manual_review', execution_updated_at: now,
+      error: reason, result: { ...(job.result || {}), ...result, execution_phase: 'manual_review',
+        execution_updated_at: now, auto_retry_allowed: false, manual_review_required: true }
+    };
+    let res = await fetch(url, { method: 'PATCH', headers, body: JSON.stringify(patch) });
+    if (!res.ok) {
+      const error = await res.json().catch(() => null);
+      // Only an explicit missing lifecycle column permits a legacy-schema pause.
+      // Never relax auth or the pending-only guard, or retry ambiguous failures.
+      const missingLifecycleColumn = res.status === 400 && (
+        (error?.code === 'PGRST204' && /^Could not find the '(execution_phase|execution_updated_at)' column of 'jsw_post_jobs' in the schema cache$/.test(error.message))
+        || (error?.code === '42703' && /^column "(execution_phase|execution_updated_at)" of relation "jsw_post_jobs" does not exist$/.test(error.message))
+      );
+      if (!missingLifecycleColumn) return false;
+      delete patch.execution_phase;
+      delete patch.execution_updated_at;
+      res = await fetch(url, { method: 'PATCH', headers, body: JSON.stringify(patch) });
+    }
+    if (!res.ok) return false;
+    const rows = await res.json();
+    return Array.isArray(rows) && rows.length === 1 && String(rows[0]?.id) === String(job.id);
+  } catch (e) {
+    extLog('warn', `Dashboard pending pause deferred: ${e.message}`);
+    return false;
+  }
+}
+
+// END DASHBOARD EXECUTION LIFECYCLE
 
 async function appendLocalFallbackResult(jobId, result) {
   const data = await chrome.storage.local.get([LOCAL_FALLBACK_RESULT_LOG_KEY]);
@@ -726,24 +1299,53 @@ async function appendLocalFallbackResult(jobId, result) {
 }
 
 async function pollLocalFallbackJobs() {
+  if (activeDashJobId !== null) return false;
+  const reconciled = await reconcileExpiredLocalExecutionLeases();
+  if (reconciled) extLog('warn', `Paused ${reconciled} expired local execution lease(s) for manual review`);
   const jobs = await readLocalFallbackJobs();
+  // A prior worker may have stopped mid-post. Never auto-reclaim or overlap an
+  // unresolved processing record; an operator must reconcile its real outcome.
+  if (jobs.some(j => j?.status === 'processing')) return false;
   const now = new Date();
-  const job = jobs.find(j => j?.status === 'pending' && (!j.scheduled_for || new Date(j.scheduled_for) <= now));
-  if (!job) return false;
-  extLog('warn', `Running local fallback job ${job.id}`);
-  await executeDashJob({ ...job, local_fallback: true });
-  return true;
+  const dueJobs = jobs.filter(j => j?.status === 'pending' && (!j.scheduled_for || new Date(j.scheduled_for) <= now));
+  // An uncertainty hold can reject a pending job before it is claimed. Do not
+  // let that one campaign starve unrelated local-fallback work behind it.
+  // executeDashJob remains the sole admission/claim boundary and still
+  // serializes all Facebook work through activeDashJobId.
+  for (const job of dueJobs) {
+    extLog('warn', `Running local fallback job ${job.id}`);
+    if ((await executeDashJob({ ...job, local_fallback: true })) !== false) return true;
+  }
+  return false;
+}
+
+// Database owns durable occurrence admission. The account-scoped session flag is
+// absent/OFF for existing installations; no local fallback on ambiguous RPC results.
+async function tickDurableSchedules(session) {
+  const res = await fetch(`${SB_URL}/rest/v1/rpc/reachr_schedule_tick`, {
+    method: 'POST',
+    headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}`, 'Content-Type': 'application/json' },
+    body: '{}'
+  });
+  if (!res.ok) throw new Error(`Durable schedule tick HTTP ${res.status}`);
+  return res.json();
 }
 
 // Fetch pending jobs for this paired user via REST API
 async function pollPendingJobs() {
+  if (activeDashJobId !== null) return false;
   const session = await getStoredSession();
   if (!session || !session.userId) {
-    await pollLocalFallbackJobs();
-    return;
+    return false; // The shared cycle checks local fallback exactly once.
   }
 
   try {
+    const reconciled = await reconcileExpiredDashboardExecutionLeases();
+    if (reconciled) extLog('warn', `Paused ${reconciled} expired dashboard execution lease(s) for manual review`);
+    if (session.durableSchedulerV1 === true) {
+      try { await tickDurableSchedules(session); }
+      catch (e) { extLog('warn', `Durable scheduler admission deferred: ${e.message}`); }
+    }
     const now = new Date().toISOString();
     // Pick up: (a) immediate pending jobs with no scheduled_for, OR
     //          (b) scheduled jobs whose time has arrived
@@ -755,8 +1357,7 @@ async function pollPendingJobs() {
 
     if (!res.ok) {
       extLog('warn', 'Job poll failed: ' + res.status + ' — checking local fallback queue');
-      await pollLocalFallbackJobs();
-      return;
+      return false;
     }
 
     const jobs = await res.json();
@@ -764,16 +1365,16 @@ async function pollPendingJobs() {
       const job = jobs[0];
       extLog('info', 'Found pending job: ' + job.id);
       if (!dashSession) dashSession = session;
-      await executeDashJob(job);
+      const executed = await executeDashJob(job);
 
       // If this is a repeating job, re-queue it for next occurrence
-      if (job.repeat_days?.length && job.repeat_time) {
+      if (executed !== false && executed?.autoRepeatAllowed !== false && !job.occurrence_id && job.repeat_days?.length && job.repeat_time) {
         await requeueRepeatingJob(job, session);
       }
     }
   } catch (e) {
     extLog('error', 'Dash poll error: ' + e.message + ' — checking local fallback queue');
-    await pollLocalFallbackJobs();
+    return false;
   }
 }
 
@@ -996,7 +1597,57 @@ function friendlyGroupScanMissReason(error) {
   return 'No group list was available for this profile/page during this pass.';
 }
 
+// A cookie or an already-open Facebook tab is not proof of a usable session:
+// expired sessions can retain c_user and the login wall itself is a Facebook tab.
+// Classify a no-post DOM probe fail-closed before scanning or switching actors.
+function classifyFacebookSessionProbe(probe = {}) {
+  const url = String(probe.url || '');
+  const text = `${probe.title || ''} ${probe.text || ''}`;
+  const onFacebook = /^https:\/\/(?:www\.|m\.)?facebook\.com\//i.test(url);
+  const loginWall = /join or log into facebook|forgot account\?|create new account|log into facebook/i.test(text);
+  if (!onFacebook || loginWall || !probe.hasCUser) {
+    return { available: false, code: 'facebook_login_required' };
+  }
+  return { available: true, code: null };
+}
+
+async function requireFacebookSessionForGroupScan() {
+  let createdTabId = null;
+  try {
+    const tabs = await chrome.tabs.query({ url: '*://*.facebook.com/*' });
+    // Discarded/unloaded tabs can reject executeScript even when the extension has the
+    // correct host permission. Prefer a currently loaded first-party surface; do not
+    // reload or close an existing tab merely to run this no-post session probe.
+    let tab = tabs.find(t => t.status === 'complete' && /^https:\/\/(?:www\.|m\.)?facebook\.com\//i.test(String(t.url || '')));
+    if (!tab?.id) {
+      tab = await chrome.tabs.create({ url: 'https://www.facebook.com/', active: false });
+      createdTabId = tab.id;
+      await sleep(2000);
+    }
+    const [probeResult] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: () => ({
+        url: location.href,
+        title: document.title || '',
+        text: (document.body?.innerText || '').slice(0, 6000)
+      })
+    });
+    const cookies = await chrome.cookies.getAll({ domain: '.facebook.com' });
+    const state = classifyFacebookSessionProbe({ ...probeResult?.result, hasCUser: cookies.some(c => c.name === 'c_user') });
+    if (!state.available) {
+      throw Object.assign(new Error('Facebook login required. Sign in before Reachr scans groups or switches identities.'), { code: state.code });
+    }
+    return state;
+  } catch (error) {
+    if (error?.code === 'facebook_login_required') throw error;
+    throw Object.assign(new Error('Facebook session could not be verified; Reachr will not scan or switch identities.'), { code: 'facebook_login_required' });
+  } finally {
+    if (createdTabId != null) { try { await chrome.tabs.remove(createdTabId); } catch (_) {} }
+  }
+}
+
 async function runImportGroupsJob(job, session) {
+  await requireFacebookSessionForGroupScan();
   const targets = await getImportTargetsForJob(job, session);
   if (!targets.length) throw new Error('No synced Facebook profiles/pages found. Sync profiles first.');
   const beforeByIdentity = await getExistingGroupUrlsByIdentity(session, targets.map(t => t.key || t.name).filter(Boolean));
@@ -1200,8 +1851,12 @@ async function runComposerProbeJob(job, session) {
     resolvedItems.push(typeof item === 'string' ? { url: item } : await enrichFacebookIdentityTarget(item));
   }
   const identity = resolvedItems.find(g => g && (g.identity_name || g.identityName)) || {};
-  const identityName = identity.identity_name || identity.identityName || job.ai_prompt || null;
-  const identityUrl = identity.identity_url || identity.identityUrl || null;
+  // Dashboard-created probe jobs may keep actor metadata on the job instead of
+  // duplicating it on every group. Preserve that explicit actor; otherwise a
+  // safe probe would degrade to null/unknown before reaching the composer.
+  const identityName = job.identity_name || job.identityName || identity.identity_name || identity.identityName || job.ai_prompt || null;
+  const identityUrl = job.identity_url || job.identityUrl || identity.identity_url || identity.identityUrl || null;
+  const identityType = job.identity_type || job.identityType || job.type || identity.identity_type || identity.identityType || identity.type || null;
   const targets = resolvedItems.filter(g => g?.url || g?.group_url).slice(0, 5);
   const results = [];
   for (let i = 0; i < targets.length; i++) {
@@ -1226,12 +1881,12 @@ async function runComposerProbeJob(job, session) {
         await sleep(2500);
         await chrome.tabs.update(tab.id, { url });
         await sleep(8000);
-        const response = await sendTabMessageWithRetry(tab.id, { type: 'PROBE_GROUP_COMPOSER_IDENTITY', identityName, identityUrl, identityType: identity.identity_type || identity.identityType || identity.type || null, skipSwitch: directVerified });
+        const response = await sendTabMessageWithRetry(tab.id, { type: 'PROBE_GROUP_COMPOSER_IDENTITY', identityName, identityUrl, identityType, skipSwitch: directVerified, diagnosticNoPersist: true });
         results.push({ group_name: target.name || target.group_name || null, group_url: url, success: !!response?.success, reset_response: target._reset_response || null, reset_error: target._reset_error || null, switch_success: directVerified, switch_response: switchResponse, active_before_group: activeResponse?.activeIdentity || null, ...response });
       } else {
         tab = await chrome.tabs.create({ url, active: true });
         await sleep(7000);
-        const response = await sendTabMessageWithRetry(tab.id, { type: 'PROBE_GROUP_COMPOSER_IDENTITY', identityName, identityUrl, identityType: identity.identity_type || identity.identityType || identity.type || null });
+        const response = await sendTabMessageWithRetry(tab.id, { type: 'PROBE_GROUP_COMPOSER_IDENTITY', identityName, identityUrl, identityType, diagnosticNoPersist: true });
         results.push({ group_name: target.name || target.group_name || null, group_url: url, success: !!response?.success, ...response });
       }
     } catch (e) {
@@ -1242,20 +1897,25 @@ async function runComposerProbeJob(job, session) {
     }
   }
   const allowed = results.filter(r => r.success && r.composerIdentityVerified);
+  const probeResult = {
+    text: `Composer probe complete: ${allowed.length}/${results.length} groups allow ${identityName}`,
+    identity_name: identityName,
+    tested_count: results.length,
+    allowed_count: allowed.length,
+    results
+  };
   await sbUpdateJob(job.id, {
     status: 'done',
-    result: {
-      text: `Composer probe complete: ${allowed.length}/${results.length} groups allow ${identityName}`,
-      identity_name: identityName,
-      tested_count: results.length,
-      allowed_count: allowed.length,
-      results
-    },
+    result: probeResult,
     completed_at: new Date().toISOString()
   });
+  // Returning the same result makes controlled diagnostics observable without
+  // changing the persisted job contract used by the dashboard.
+  return probeResult;
 }
 
 async function runJoinGroupsJob(job, session) {
+  await requireFacebookSessionForGroupScan();
   let items = Array.isArray(job.groups) ? job.groups : [];
   if (typeof job.groups === 'string') {
     try { items = JSON.parse(job.groups); } catch (_) { items = []; }
@@ -1485,39 +2145,12 @@ async function runGlobalIdentitySwitchProbeJob(job, session) {
       let ok = false;
       let error = null;
       try {
-        const isManagedPage = /^page$/i.test(String(identity.type || '')) || (!!identity.url && /^https:\/\/(www\.)?facebook\.com\/profile\.php\?id=\d+/i.test(String(identity.url)));
-        if (isManagedPage && identity.url) {
-          // Prefer Facebook's Page profile context when a synchronized stable URL exists.
-          // The content script verifies the active identity after attempting the Page action.
-          await chrome.tabs.update(tab.id, { url: identity.url, active: true });
-          await sleep(8000);
-          switchResponse = await sendTabMessageWithRetry(tab.id, { type: 'SWITCH_FACEBOOK_IDENTITY', identityName: identity.name, identityUrl: identity.url });
-          if (!switchResponse?.success) {
-            const direct_page_probe = switchResponse;
-            await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/pages/?category=your_pages', active: true });
-            await sleep(8000);
-            const fallback = await sendTabMessageWithRetry(tab.id, { type: 'SWITCH_FACEBOOK_MANAGED_PAGE', identityName: identity.name, identityUrl: identity.url });
-            switchResponse = { ...fallback, direct_page_probe, fallback_path: fallback?.fallback_path || 'pages_manager_after_direct_page_probe' };
-          }
-        } else if (isManagedPage) {
-          // Legacy fallback for older records that have no Page URL yet.
-          await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/pages/?category=your_pages', active: true });
-          await sleep(8000);
-          switchResponse = await sendTabMessageWithRetry(tab.id, { type: 'SWITCH_FACEBOOK_MANAGED_PAGE', identityName: identity.name, identityUrl: identity.url || null });
-        } else {
-          await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/', active: true });
-          await sleep(5000);
-          switchResponse = await sendTabMessageWithRetry(tab.id, { type: 'SWITCH_FACEBOOK_IDENTITY', identityName: identity.name, identityUrl: identity.url || null });
-        }
-        await sleep(7000);
-        await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/', active: true });
-        await sleep(7000);
-        verifyHome = await sendTabMessageWithRetry(tab.id, { type: 'GET_FACEBOOK_ACTIVE_IDENTITY', expectedIdentity: identity.name });
-        // A verified Facebook active identity is authoritative. The switch-control
-        // selector is diagnostic evidence only because Facebook hides that control
-        // once a Page is already active or changes its Pages Manager layout.
-        ok = facebookIdentityNameMatches(verifyHome?.activeIdentity, identity.name);
-        if (!ok) error = switchResponse?.error || `Home active identity verified as ${verifyHome?.activeIdentity || 'unknown'}, not ${identity.name}`;
+        const isManagedPage = /^page|facebook page$/i.test(String(identity.type || '')) || (!!identity.url && /^https:\/\/(www\.)?facebook\.com\/profile\.php\?id=\d+/i.test(String(identity.url)));
+        const preSwitch = await ensureFacebookIdentityActive(identity.name, identity.url || null, identity.type || null);
+        switchResponse = preSwitch?.switch_response || preSwitch || null;
+        ok = !!preSwitch?.success;
+        verifyHome = { activeIdentity: preSwitch?.active_identity || null, pageUrl: preSwitch?.page_url || null };
+        if (!ok) error = preSwitch?.error || `Home active identity verified as ${verifyHome?.activeIdentity || 'unknown'}, not ${identity.name}`;
       } catch (e) {
         error = e.message;
       }
@@ -1553,13 +2186,45 @@ async function runGlobalIdentitySwitchProbeJob(job, session) {
   });
 }
 
-// Claim a job (set status=processing) then run it
-async function executeDashJob(job) {
-  dashSession = await getStoredSession();
-  if (!dashSession && job?.local_fallback) {
-    dashSession = { userId: job.user_id || 'local-fallback', ai_provider: 'ollama', ai_model: 'qwen3:8b' };
+function closeOwnedPostingTab(tab, postingTabIds) {
+  const tabId = tab?.id;
+  if (!Number.isInteger(tabId) || !postingTabIds.includes(tabId)) return false;
+
+  // Remove ownership before invoking Chrome so no later cleanup can issue a
+  // duplicate removal. Only IDs recorded after this worker's own tabs.create
+  // call are eligible; existing user tabs are never touched.
+  postingTabIds.splice(postingTabIds.indexOf(tabId), 1);
+  try {
+    Promise.resolve(chrome.tabs.remove(tabId)).catch(error => {
+      extLog('warn', 'Posting tab cleanup failed: ' + String(error?.message || error));
+    });
+  } catch (error) {
+    extLog('warn', 'Posting tab cleanup failed: ' + String(error?.message || error));
   }
-  if (!dashSession) return;
+  return true;
+}
+
+// Claim a job (set status=processing) then run it
+// Alarm, realtime, and local fallback polling share one Facebook cookie/actor.
+// Acquire synchronously, before the first await, including for identity/import jobs.
+let activeDashJobId = null;
+async function executeDashJob(job) {
+  // Fail closed for stale/imported local copies, before claim or actor side effects.
+  if (job?.occurrence_id != null && (job.local_fallback || String(job.id).startsWith('local_'))) {
+    extLog('error', `Rejected local execution of durable occurrence ${job.occurrence_id}`);
+    return false;
+  }
+  if (activeDashJobId !== null) return false;
+  activeDashJobId = job.id;
+  try {
+  dashSession = await getStoredSession();
+  // Local fallback uses a non-secret account identifier only to scope the
+  // existing duplicate ledger; it never treats this as remote authorization.
+  if (job?.local_fallback && (!dashSession || !dashSession.userId)) {
+    const localAccountId = job.user_id || await getStoredDashboardIdentity() || 'local-fallback';
+    dashSession = { userId: localAccountId, ai_provider: 'ollama', ai_model: 'qwen3:8b', local_fallback: true };
+  }
+  if (!dashSession) return false;
   // Special job: import groups from Facebook
   if (job.message === '__sync_identities__') {
     const claimed = await sbUpdateJob(job.id, {
@@ -1567,7 +2232,7 @@ async function executeDashJob(job) {
       started_at: new Date().toISOString(),
       result: { text: 'Opening Facebook identity switcher...' }
     });
-    if (!claimed) return;
+    if (!claimed) return false;
     extLog('info', 'Running sync_identities job ' + job.id);
     try {
       await syncFacebookIdentitiesForJob(job.id);
@@ -1586,14 +2251,15 @@ async function executeDashJob(job) {
       status: 'processing',
       started_at: new Date().toISOString()
     });
-    if (!claimed) return;
+    if (!claimed) return false;
     extLog('info', 'Running import_groups job ' + job.id);
     try {
       await runImportGroupsJob(job, dashSession);
     } catch (e) {
+      const loginRequired = e?.code === 'facebook_login_required';
       await sbUpdateJob(job.id, {
-        status: 'failed',
-        result: { error: e.message },
+        status: loginRequired ? 'paused' : 'failed',
+        result: { error: e.message, error_code: e?.code || null, requires_facebook_login: loginRequired },
         completed_at: new Date().toISOString()
       });
     }
@@ -1606,14 +2272,15 @@ async function executeDashJob(job) {
       started_at: new Date().toISOString(),
       result: { text: 'Starting actor-first Facebook group join...' }
     });
-    if (!claimed) return;
+    if (!claimed) return false;
     extLog('info', 'Running join_groups job ' + job.id);
     try {
       await runJoinGroupsJob(job, dashSession);
     } catch (e) {
+      const loginRequired = e?.code === 'facebook_login_required';
       await sbUpdateJob(job.id, {
-        status: 'failed',
-        result: { error: e.message },
+        status: loginRequired ? 'paused' : 'failed',
+        result: { error: e.message, error_code: e?.code || null, requires_facebook_login: loginRequired },
         completed_at: new Date().toISOString()
       });
     }
@@ -1626,7 +2293,7 @@ async function executeDashJob(job) {
       started_at: new Date().toISOString(),
       result: { text: 'Starting no-post composer permission probe...' }
     });
-    if (!claimed) return;
+    if (!claimed) return false;
     extLog('info', 'Running composer probe job ' + job.id);
     try {
       await runComposerProbeJob(job, dashSession);
@@ -1646,7 +2313,7 @@ async function executeDashJob(job) {
       started_at: new Date().toISOString(),
       result: { text: 'Starting global Facebook identity switch probe...' }
     });
-    if (!claimed) return;
+    if (!claimed) return false;
     extLog('info', 'Running global identity switch probe job ' + job.id);
     try {
       await runGlobalIdentitySwitchProbeJob(job, dashSession);
@@ -1660,14 +2327,215 @@ async function executeDashJob(job) {
     return;
   }
 
-  // Try to claim it via PATCH
-  const claimed = await sbUpdateJob(job.id, {
-    status: 'processing',
-    started_at: new Date().toISOString()
-  });
+  // Installation-local campaign exclusion, under the existing synchronous actor
+  // lock. No queue producer (including a raw storage append) can bypass this
+  // execution boundary. This is NOT an account-wide/cross-installation lease.
+  // A missing campaign ID matches existing holds conservatively at admission,
+  // but does not turn an ordinary untagged job into a new wildcard campaign.
+  // Ordinary jobs retain their attempt cooldown/cap accounting. Explicit but
+  // invalid/conflicting campaign metadata creates a wildcard hold, not a guess.
+  // Only the documented reachrctl ID envelope is decoded, for known legacy IDs.
+  const legacyCampaigns = ['wildrose-rose-all-saved-daily', 'emptyslot-budget-alerts-daily'];
+  const embeddedCampaign = legacyCampaigns.find(id => new RegExp(`^local_reachr_${id}_[0-9]+$`).test(String(job.id)));
+  const explicitCampaigns = [job.campaign_id, job.result?.campaign_id, embeddedCampaign].filter(v => v != null);
+  const validCampaign = v => typeof v === 'string' && /^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,199}$/.test(v);
+  const campaignId = explicitCampaigns.length && explicitCampaigns.every(validCampaign)
+    && new Set(explicitCampaigns).size === 1 ? explicitCampaigns[0] : '*';
+  const accountId = dashSession.userId;
+  const holdStorageKey = `amplr_campaign_uncertainty_v1:${encodeURIComponent(accountId)}`;
+  const actorKeyFor = target => {
+    const key = target?.identity_key || job.identity_key;
+    const name = target?.identity_name || job.identity_name;
+    // Existing legacy actors use normalized names as keys. Conflicting key/name
+    // metadata cannot silently select another hold scope. No Page-ID guessing.
+    if (key && name && String(key).trim().toLowerCase() !== String(name).trim().toLowerCase()) return null;
+    return typeof (key || name) === 'string' ? (key || name).trim().toLowerCase() || null : null;
+  };
+  let holdTargets = job.groups || [];
+  try { if (!Array.isArray(holdTargets)) holdTargets = JSON.parse(holdTargets); } catch (_) { return false; }
+  if (!Array.isArray(holdTargets)) return false;
+  const holdActors = holdTargets.map(actorKeyFor);
+  if (!accountId || (!job.local_fallback && accountId === 'local-fallback') || (job.user_id && job.user_id !== accountId)
+      || !holdActors.length || holdActors.some(a => !a) || executeDashJob.campaignPersistenceFailed) return false;
+  let campaignLedger;
+  try {
+    campaignLedger = (await chrome.storage.local.get(holdStorageKey))[holdStorageKey];
+    // Dashboard re-authentication must never erase or bypass an existing local
+    // uncertainty hold. If the account identity is unavailable, inspect every
+    // local ledger read-only and merge only validated historical holds. This
+    // makes local fallback more conservative, never more permissive.
+    if (job.local_fallback) {
+      const allStorage = await chrome.storage.local.get(null);
+      const historicalHolds = Object.entries(allStorage)
+        .filter(([key]) => key.startsWith('amplr_campaign_uncertainty_v1:'))
+        .flatMap(([, ledger]) => Array.isArray(ledger?.holds) ? ledger.holds : []);
+      if (historicalHolds.length) {
+        campaignLedger = campaignLedger || { version: 1, holds: [] };
+        const known = new Set(campaignLedger.holds.map(h => `${h.actor}\u0000${h.campaign}\u0000${h.job_id}`));
+        for (const hold of historicalHolds) {
+          const key = `${hold?.actor}\u0000${hold?.campaign}\u0000${hold?.job_id}`;
+          if (!known.has(key)) { campaignLedger.holds.push(hold); known.add(key); }
+        }
+      }
+    }
+    if (campaignLedger === undefined) campaignLedger = { version: 1, holds: [] };
+    if (campaignLedger?.version !== 1 || !Array.isArray(campaignLedger.holds)
+        || campaignLedger.holds.some(h => !h || typeof h.actor !== 'string' || !h.actor || typeof h.campaign !== 'string'
+          || !['held', 'reserved'].includes(h.state) || typeof h.job_id !== 'string')) return false;
+  } catch (_) { return false; }
+  // A user-confirmed pending submission may narrow an OLD campaign hold, but
+  // only with an unambiguous, account-owned single-target source row. Never
+  // infer approval from a missing permalink or clear a reservation/other job.
+  // Lookup failure leaves the original campaign-wide exclusion untouched.
+  for (const hold of [...campaignLedger.holds]) {
+    if (hold.state !== 'held' || !holdActors.includes(hold.actor)
+        || !(campaignId === '*' || hold.campaign === '*' || hold.campaign === campaignId)) continue;
+    let row;
+    try {
+      if (job.local_fallback) {
+        const data = await chrome.storage.local.get('amplr_local_fallback_jobs');
+        row = data.amplr_local_fallback_jobs?.find(r => String(r.id) === hold.job_id);
+      } else {
+        const res = await fetch(`${SB_URL}/rest/v1/jsw_post_jobs?id=eq.${encodeURIComponent(hold.job_id)}&user_id=eq.${encodeURIComponent(accountId)}&select=id,user_id,status,groups,result`, {
+          headers: { apikey: SB_ANON_KEY, Authorization: `Bearer ${dashSession.accessToken}` }
+        });
+        if (!res.ok) continue;
+        const rows = await res.json();
+        if (Array.isArray(rows) && rows.length === 1) row = rows[0];
+      }
+      if (!row || String(row.id) !== hold.job_id || row.user_id !== accountId || row.status !== 'paused'
+          || row.result?.manual_reconciliation?.status !== 'pending_approval') continue;
+      const targets = typeof row.groups === 'string' ? JSON.parse(row.groups) : row.groups;
+      const results = row.result.results;
+      if (!Array.isArray(targets) || targets.length !== 1 || !Array.isArray(results) || results.length !== 1) continue;
+      const actor = value => {
+        const key = value?.identity_key || row.identity_key;
+        const name = value?.identity_name || row.identity_name;
+        if (key && name && String(key).trim().toLowerCase() !== String(name).trim().toLowerCase()) return null;
+        return String(key || name || '').trim().toLowerCase();
+      };
+      const groupKey = value => {
+        try {
+          const url = new URL(value);
+          return url.protocol === 'https:' && /^(www\.|m\.)?facebook\.com$/.test(url.hostname)
+            && !url.username && !url.password && !url.port
+            ? url.pathname.match(/^\/groups\/([^/]+)\/?$/)?.[1]?.toLowerCase() : null;
+        } catch (_) { return null; }
+      };
+      const group = groupKey(targets[0].url);
+      const reconciliationGroup = row.result.manual_reconciliation.group_url;
+      if (!group || actor(targets[0]) !== hold.actor || actor(results[0]) !== hold.actor
+          || !['submitted_unconfirmed', 'pending_approval'].includes(results[0].status) || groupKey(results[0].group_url) !== group
+          || groupKey(hold.evidence?.group_url) !== group
+          || (reconciliationGroup != null && groupKey(reconciliationGroup) !== group)) continue;
+      // Durable target exclusion first. If either write fails, stop admission;
+      // a restart sees at least the old campaign hold or the new group hold.
+      const key = `reachr_group_hold:${encodeURIComponent(hold.actor)}:${group}`;
+      await chrome.storage.local.set({ [key]: { reason: 'pending_approval', job_id: hold.job_id,
+        auto_retry_allowed: false, recorded_at: new Date().toISOString(), evidence: row.result.manual_reconciliation } });
+      const narrowed = { ...campaignLedger, holds: campaignLedger.holds.filter(h => h !== hold) };
+      await chrome.storage.local.set({ [holdStorageKey]: narrowed });
+      campaignLedger = narrowed;
+    } catch (_) { return false; }
+  }
+  const _blockingHolds = campaignLedger.holds.filter(h => holdActors.includes(h.actor)
+      && (campaignId === '*' || h.campaign === '*' || h.campaign === campaignId));
+  const _jobTargetGroups = new Set(holdTargets.map(t => {
+    try { return new URL(t.url || t.group_url || '').pathname.match(/^\/groups\/([^/]+)\/?$/)?.[1]?.toLowerCase() || null; }
+    catch (_) { return null; }
+  }).filter(Boolean));
+  // Database rows have no dedicated continuation column. Durable jobs may carry
+  // this explicit, audited one-time authorization in their result envelope.
+  const explicitBoundedContinuation = job.explicit_bounded_continuation === true
+    || job.result?.explicit_bounded_continuation === true;
+  const _continuationSafe = explicitBoundedContinuation && _blockingHolds.length > 0
+    && _blockingHolds.every(h => {
+      if (!h.evidence?.group_url) return false;
+      try { const g = new URL(h.evidence.group_url).pathname.match(/^\/groups\/([^/]+)\/?$/)?.[1]?.toLowerCase();
+        return g != null && !_jobTargetGroups.has(g); } catch (_) { return false; }
+    });
+  if (_blockingHolds.length > 0 && !_continuationSafe) {
+    // A local row would otherwise be selected every poll and spin forever on a
+    // known-unresolved campaign. Pause it before any Facebook action; it can be
+    // reconciled explicitly but never silently replayed.
+    if (job.local_fallback) {
+      await sbUpdateJob(job.id, {
+        status: 'paused',
+        execution_phase: 'manual_review',
+        execution_updated_at: new Date().toISOString(),
+        error: 'Campaign has an unconfirmed publication attempt. Manual reconciliation required; this queued post will not be replayed.',
+        result: { ...(job.result || {}), campaign_hold: true, auto_retry_allowed: false }
+      });
+    } else {
+      await pauseDashboardPendingJob(job,
+        'Campaign has an unconfirmed publication attempt. Manual reconciliation required; this queued post will not be replayed.',
+        { campaign_hold: true });
+    }
+    extLog('warn', 'Campaign uncertainty hold: pending job retained for reconciliation');
+    return false;
+  }
+  let campaignPersistenceFailed = false;
+  async function persistTargetHold(key, reason, evidence) {
+    try {
+      await chrome.storage.local.set({ [key]: { reason, job_id: String(job.id),
+        recorded_at: new Date().toISOString(), auto_retry_allowed: false, evidence } });
+    } catch (_) {
+      campaignPersistenceFailed = true;
+      executeDashJob.campaignPersistenceFailed = true;
+      throw new Error('Group hold persistence failed; reconciliation required');
+    }
+  }
+  // Reserve BEFORE delivering a mutation. A worker crash or failed promotion
+  // leaves durable exclusion, rather than relying on a best-effort post-click
+  // write. Only this invocation may finish its other targets; even the same job
+  // ID is blocked after a worker restart. Held entries are never auto-released.
+  async function persistCampaignHold(target, evidence, state = 'held') {
+    if (!explicitCampaigns.length) return;
+    const actor = actorKeyFor(target);
+    const existing = campaignLedger.holds.find(h => h.actor === actor && h.campaign === campaignId);
+    if (existing?.state === 'held') return;
+    campaignLedger.holds = campaignLedger.holds.filter(h => h !== existing);
+    if (state !== 'release') campaignLedger.holds.push({ actor, campaign: campaignId, state, job_id: String(job.id),
+      reason: state === 'reserved' ? 'submission_in_flight' : 'publication_unconfirmed',
+      recorded_at: new Date().toISOString(), evidence: evidence || null });
+    try { await chrome.storage.local.set({ [holdStorageKey]: campaignLedger }); }
+    catch (_) {
+      campaignPersistenceFailed = true;
+      executeDashJob.campaignPersistenceFailed = true;
+      throw new Error('Campaign uncertainty persistence failed; reconciliation required');
+    }
+  }
+
+  // Claim with an owner-bound durable lease before any Facebook work. Cloud
+  // rows retain their existing atomic pending-only claim; outage execution uses
+  // the local lifecycle because its evidence remains writable without auth.
+  const localExecutionLease = job.local_fallback ? await claimLocalExecutionLifecycle(job) : null;
+  const dashboardExecutionLease = job.local_fallback ? null : await claimDashboardExecutionLifecycle(job);
+  const claimed = job.local_fallback ? !!localExecutionLease : !!dashboardExecutionLease;
   if (!claimed) {
-    extLog('warn', 'Job already claimed, skipping: ' + job.id);
-    return;
+    extLog('warn', 'Job already claimed, paused, or unavailable: ' + job.id);
+    return false;
+  }
+  const executionLease = localExecutionLease || dashboardExecutionLease;
+  try {
+    await requireFacebookSessionForGroupScan();
+    const checkpointed = localExecutionLease
+      ? await checkpointLocalExecutionLifecycle(job, localExecutionLease, 'session_verified', {
+        result: { text: 'Facebook session verified; command has not been dispatched.' }
+      })
+      : await checkpointDashboardExecutionLifecycle(job, dashboardExecutionLease, 'session_verified', {
+        result: { text: 'Facebook session verified; command has not been dispatched.' }
+      });
+    if (!checkpointed) return false;
+  } catch (e) {
+    const pausePatch = {
+      status: 'paused', execution_phase: 'manual_review', execution_updated_at: new Date().toISOString(),
+      error: `Facebook session preflight failed: ${e.message}. Manual review required; no command dispatched.`,
+      result: { pre_submit_failure: true, auto_retry_allowed: false, error: e.message }
+    };
+    if (localExecutionLease) await updateLocalFallbackJob(job.id, pausePatch, { status: 'processing', execution_owner: localExecutionLease.owner });
+    else await completeDashboardExecutionLifecycle(job, dashboardExecutionLease, pausePatch);
+    return false;
   }
 
   extLog('info', 'Executing job ' + job.id);
@@ -1678,10 +2546,38 @@ async function executeDashJob(job) {
     try { groups = JSON.parse(groups); } catch (e) { groups = []; }
   }
   const controls = await fetchDashboardRunnerControls(dashSession);
-  let groupTargets = groups.map(g => typeof g === 'string' ? { url:g } : g).filter(g => g && g.url);
-  const cappedTargets = groupTargets.slice(controls.maxGroupsPerJob);
-  if (cappedTargets.length) {
-    groupTargets = groupTargets.slice(0, controls.maxGroupsPerJob);
+  const groupTargets = groups.map(g => typeof g === 'string' ? { url:g } : { ...g, url: g.url || g.group_url }).filter(g => g && g.url);
+
+  // Never silently drop overflow targets. A prior implementation posted only
+  // the first maxGroupsPerJob targets and marked the rest skipped, which made
+  // a completed job look exhaustive when it was not. Stop before dispatch so
+  // an operator or queue builder can create separate, bounded child jobs.
+  if (groupTargets.length > controls.maxGroupsPerJob) {
+    const stoppedAt = new Date().toISOString();
+    const pausePatch = {
+      status: 'paused',
+      execution_phase: 'manual_review',
+      execution_updated_at: stoppedAt,
+      execution_lease_expires_at: null,
+      error: `Job has ${groupTargets.length} targets, exceeding the ${controls.maxGroupsPerJob}-group runner limit. Split it into bounded jobs before dispatch; no group was posted.`,
+      result: {
+        ...(job.result || {}),
+        batch_split_required: true,
+        auto_retry_allowed: false,
+        total_target_count: groupTargets.length,
+        max_groups_per_job: controls.maxGroupsPerJob,
+        stopped_at: stoppedAt
+      }
+    };
+    const saved = localExecutionLease
+      ? await updateLocalFallbackJob(job.id, pausePatch, { status: 'processing', execution_owner: localExecutionLease.owner })
+      : await completeDashboardExecutionLifecycle(job, dashboardExecutionLease, pausePatch);
+    if (saved) {
+      extLog('warn', `Job ${job.id} paused before dispatch: ${groupTargets.length} targets exceed max ${controls.maxGroupsPerJob}.`);
+      broadcastDashStatus(`Paused — split ${groupTargets.length} targets into batches of ${controls.maxGroupsPerJob} or fewer`, '#eab308');
+      notify(`Dashboard job paused before dispatch — ${groupTargets.length} targets exceed the ${controls.maxGroupsPerJob}-group limit. No post was attempted.`);
+    }
+    return false;
   }
   const groupUrls = groupTargets.map(g => g.url);
 
@@ -1715,25 +2611,40 @@ async function executeDashJob(job) {
 
   let successCount = 0;
   let lastError = null;
-  const perGroupResults = cappedTargets.map(t => skippedResult(t, 'max_groups_per_job', {
-    type: 'max_groups_per_job',
-    max_groups_per_job: controls.maxGroupsPerJob,
-    message: `Skipped because dashboard runner controls limit one job to ${controls.maxGroupsPerJob} groups.`
-  }));
-
-  if (cappedTargets.length) {
-    jobWarnings.push({
-      type: 'max_groups_per_job',
-      skipped_count: cappedTargets.length,
-      max_groups_per_job: controls.maxGroupsPerJob,
-      message: `Dashboard runner controls limited this job to ${controls.maxGroupsPerJob} groups and skipped ${cappedTargets.length}.`
-    });
-  }
+  const postingTabIds = [];
+  const perGroupResults = [];
 
   const cooldownDays = controls.cooldownDays;
 
   const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   let recentPostedCount = await countRecentPostedResults(dashSession, since24h);
+  // Unknown cloud history cannot be replaced by this browser's partial ledger.
+  // Persist proven non-dispatch separately from publication uncertainty.
+  if (!Number.isSafeInteger(recentPostedCount) || recentPostedCount < 0) {
+    const stoppedAt = new Date().toISOString();
+    const pausePatch = {
+      status: 'paused', execution_phase: 'manual_review', execution_updated_at: stoppedAt,
+      execution_lease_expires_at: null,
+      error: 'Daily post count unavailable; no command dispatched. Restore count access before retrying.',
+      result: {
+        classification: 'failed_before_submission', pre_submit_failure: true,
+        error_code: 'daily_post_count_unavailable', success_count: 0,
+        submitted_unconfirmed_count: 0, auto_retry_allowed: false, auto_repeat_allowed: false
+      }
+    };
+    if (localExecutionLease) await updateLocalFallbackJob(job.id, pausePatch, { status: 'processing', execution_owner: localExecutionLease.owner });
+    else await completeDashboardExecutionLifecycle(job, dashboardExecutionLease, pausePatch);
+    return { autoRepeatAllowed: false };
+  }
+  // Keep uncertain attempts out of the publication table without dropping
+  // conservative local cooldown / 24h attempt accounting on the next job.
+  // Actor serialization already protects this worker's read/modify/write.
+  const attemptStorageKey = `amplr_unconfirmed_attempts:${dashSession.userId}`;
+  const storedAttempts = (await chrome.storage.local.get(attemptStorageKey))[attemptStorageKey];
+  const attemptCutoff = Date.now() - Math.max(1, cooldownDays) * 86400000;
+  const recentAttempts = (Array.isArray(storedAttempts) ? storedAttempts : []).filter(a => new Date(a.submitted_at).getTime() >= attemptCutoff);
+  const recentUnconfirmedCount = recentAttempts.filter(a => a.submitted_at >= since24h).length;
+  recentPostedCount += recentUnconfirmedCount;
 
   // Pre-fetch all group cooldown data in one query (avoids N+1 per group)
   let groupCooldownMap = {};
@@ -1748,6 +2659,14 @@ async function executeDashJob(job) {
     }
   } catch (e) {
     extLog('warn', 'Failed to pre-fetch group cooldown data: ' + e.message);
+  }
+
+  for (const attempt of recentAttempts) {
+    const key = `${attempt.identity_key}::${attempt.group_url}`;
+    const previous = groupCooldownMap[key] || {};
+    if (!previous.last_posted_at || previous.last_posted_at < attempt.submitted_at) {
+      groupCooldownMap[key] = { ...previous, last_posted_at: attempt.submitted_at };
+    }
   }
 
   for (let i = 0; i < groupUrls.length; i++) {
@@ -1769,6 +2688,18 @@ async function executeDashJob(job) {
       broadcastDashStatus(`Identity required ${i + 1}/${groupUrls.length}`, '#eab308');
       continue;
     }
+
+    // BEGIN GROUP HOLD ADMISSION
+    const groupSlug = groupUrl.match(/facebook\.com\/groups\/([^/?#]+)/i)?.[1];
+    const groupHoldKey = `reachr_group_hold:${encodeURIComponent(identityName.trim().toLowerCase())}:${String(groupSlug).toLowerCase()}`;
+    const groupHold = (await chrome.storage.local.get(groupHoldKey))[groupHoldKey];
+    if (groupHold) {
+      perGroupResults.push(skippedResult(target, 'group_restricted', {
+        type: 'group_restricted', message: `Manual review required: ${groupHold.reason}`
+      }));
+      continue;
+    }
+    // END GROUP HOLD ADMISSION
 
     // ── Cooldown awareness — warning only, never blocks posting ──
     let cooldownWarning = null;
@@ -1834,24 +2765,146 @@ async function executeDashJob(job) {
 
     let tab = null;
     try {
-      tab = await chrome.tabs.create({ url: groupUrl, active: true });
+      // Prove the selected actor afresh for every destination. A previous group
+      // cannot authorize movement on a later target after an account switch.
+      const preflight = await ensureFacebookIdentityActive(identityName, identityUrl, identityType);
+      if (!preflight?.success) {
+          lastError = preflight?.error || `Could not verify Facebook identity ${identityName}`;
+          perGroupResults.push({
+            group_url: groupUrl,
+            group_name: target.name || target.group_name || null,
+            identity_name: identityName,
+            identity_key: identityKey || null,
+            identity_used: preflight?.active_identity || null,
+            active_identity: preflight?.active_identity || null,
+            composer_identity: null,
+            composer_identity_verified: false,
+            status: 'failed',
+            error: lastError,
+            error_code: 'identity_preflight_failed',
+            failed_at: new Date().toISOString(),
+            final_message: finalText,
+            tracking: trackingResult.tracking,
+            tracked_url_count: trackingResult.tracked_url_count,
+            warnings: cooldownWarning ? [cooldownWarning] : []
+          });
+          broadcastDashStatus(`Identity verify failed ${i + 1}/${groupUrls.length}`, '#ef4444');
+          break;
+          }
+
+          tab = await chrome.tabs.create({ url: groupUrl, active: true });
+      postingTabIds.push(tab.id);
       await sleep(5000);
 
-      const response = await chrome.tabs.sendMessage(tab.id, {
-        type: 'POST_TO_PAGE',
-        message: finalText,
-        imageUrl: job.image_url || '',
+      // Final proof is tied to this exact group composer. The content script
+      // opens and closes it without typing or submitting. Switching is disabled
+      // here because the independent home-surface proof above is the only
+      // permitted actor-change stage.
+      const composerPreflight = await sendTabMessageWithRetry(tab.id, {
+        type: 'PROBE_GROUP_COMPOSER_IDENTITY',
         identityName,
         identityUrl,
-        identityType
-      });
+        identityType,
+        skipSwitch: true
+      }, 4);
+      if (!composerPreflight?.success || composerPreflight?.composerIdentityVerified !== true) {
+        const error = composerPreflight?.error || `Composer identity is not confirmed as ${identityName}`;
+        perGroupResults.push({
+          group_url: groupUrl,
+          group_name: target.name || target.group_name || null,
+          identity_name: identityName,
+          identity_key: identityKey || null,
+          identity_used: composerPreflight?.composerIdentity || composerPreflight?.activeIdentity || null,
+          active_identity: composerPreflight?.activeIdentity || null,
+          composer_identity: composerPreflight?.composerIdentity || null,
+          composer_identity_verified: false,
+          status: 'failed',
+          error,
+          error_code: composerPreflight?.error_code || 'identity_not_verified',
+          failed_at: new Date().toISOString(),
+          final_message: finalText,
+          tracking: trackingResult.tracking,
+          tracked_url_count: trackingResult.tracked_url_count,
+          warnings: cooldownWarning ? [cooldownWarning] : []
+        });
+        broadcastDashStatus(`Composer identity not verified ${i + 1}/${groupUrls.length}`, '#ef4444');
+        continue;
+      }
 
-      if (response?.success && response?.composerIdentityVerified === true) {
-        successCount++;
+      await persistCampaignHold(target, { group_url: groupUrl }, 'reserved');
+      // This checkpoint is intentionally immediately before the only mutable
+      // Facebook command. If the worker dies after it, reconciliation pauses
+      // the job instead of ever replaying an ambiguous submission.
+      const commandCheckpointed = localExecutionLease
+        ? await checkpointLocalExecutionLifecycle(job, localExecutionLease, 'command_dispatched', {
+          result: { text: 'Facebook post command dispatching; do not replay without manual reconciliation.', group_url: groupUrl }
+        })
+        : await checkpointDashboardExecutionLifecycle(job, dashboardExecutionLease, 'command_dispatched', {
+          result: { text: 'Facebook post command dispatching; do not replay without manual reconciliation.', group_url: groupUrl }
+        });
+      if (!commandCheckpointed) {
+        throw new Error('Lost execution lease before Facebook command dispatch');
+      }
+      let response;
+      try {
+        response = await sendTabMessageWithRetry(tab.id, {
+          type: 'POST_TO_PAGE',
+          intendedGroupUrl: groupUrl,
+          message: finalText,
+          imageUrl: job.image_url || '',
+          identityName,
+          identityUrl,
+          identityType
+        }, 4);
+      } catch (error) {
+        // Missing receivers prove non-delivery; other lost mutation replies do
+        // not prove failure. Preserve uncertainty without asserting a click.
+        if (/Receiving end does not exist|Could not establish connection/i.test(String(error?.message || error))) {
+          await persistCampaignHold(target, null, 'release');
+          throw error;
+        }
+        // A thrown defense error is not proof that the mutation was never
+        // delivered. Keep the reservation and the existing defense stop.
+        if (isFacebookDefenseError(error?.message || error)) throw error;
+        response = { success: false, submissionDeliveryUnknown: true, publicationVerified: false,
+          evidenceStatus: 'submission_delivery_unknown', evidenceReason: String(error?.message || error) };
+      }
+      if (!response) response = { success: false, submissionDeliveryUnknown: true, publicationVerified: false,
+        evidenceStatus: 'submission_delivery_unknown', evidenceReason: 'empty_submission_response' };
+
+      // Security signals outrank a contradictory group-local refusal code.
+      if (isFacebookDefenseError(response.error)) response = { ...response, error_code: 'facebook_defense' };
+      let destinationQuarantined = false;
+      const attemptReported = response.success === true || response.submitted === true || response.submissionDeliveryUnknown === true;
+      const provenPreSubmitRefusal = !attemptReported && response.error_code !== 'facebook_defense'
+        && !isFacebookDefenseError(response.error) && ['not_group_member', 'group_restricted', 'identity_required',
+        'identity_not_verified', 'intended_destination_not_verified', 'composer_submit_not_ready', 'composer_text_entry_failed'].includes(response.error_code);
+      if (provenPreSubmitRefusal) {
+        if (['not_group_member', 'group_restricted'].includes(response.error_code)) {
+          await persistTargetHold(groupHoldKey, response.error_code, { group_url: groupUrl, error: response.error || null });
+        }
+        await persistCampaignHold(target, null, 'release');
+      }
+      else if (response.error_code === 'facebook_defense' || isFacebookDefenseError(response.error)) {
+        // A security/checkpoint signal may affect every following destination,
+        // so retain the campaign-wide stop for this class only.
+        await persistCampaignHold(target, { group_url: groupUrl, response });
+      }
+      else if (!attemptReported) {
+        // The command result is ambiguous, but its destination is exact. Keep
+        // that target non-replayable and continue the caller's untouched work.
+        await persistTargetHold(groupHoldKey, 'submission_delivery_unknown', { group_url: groupUrl, response });
+        await persistCampaignHold(target, null, 'release');
+        destinationQuarantined = true;
+      }
+
+      if ((response?.success === true || response?.submitted === true || response?.submissionDeliveryUnknown === true) && response?.error_code !== 'facebook_defense' && !isFacebookDefenseError(response?.error)) {
+        const outcome = submissionEvidenceOutcome(response, groupUrl);
+        if (outcome.publication_verified) successCount++;
         const postedAt = new Date().toISOString();
-        const postUrl = response?.postUrl || null;
+        const postUrl = outcome.post_url;
         const evidenceFound = !!response?.evidenceFound;
-        extLog('info', `Posted ${i + 1}/${groupUrls.length} → ${groupUrl}${postUrl ? ' (' + postUrl + ')' : evidenceFound ? ' (evidence matched)' : ' (submitted, no permalink found)'}`);
+        extLog('info', `${outcome.publication_verified ? 'Verified publication' : 'Submitted, publication unconfirmed'} ${i + 1}/${groupUrls.length} → ${groupUrl}`);
         perGroupResults.push({
           group_url: groupUrl,
           group_name: target.name || target.group_name || null,
@@ -1862,8 +2915,7 @@ async function executeDashJob(job) {
           composer_identity: response?.composerIdentity || null,
           composer_identity_verified: response?.composerIdentityVerified === true,
           identity_switched: response?.identitySwitched === true,
-          status: 'posted',
-          post_url: postUrl,
+          ...outcome,
           evidence_found: evidenceFound,
           matched_text: response?.matchedText || null,
           page_url: response?.pageUrl || null,
@@ -1871,10 +2923,31 @@ async function executeDashJob(job) {
           tracking: trackingResult.tracking,
           tracked_url_count: trackingResult.tracked_url_count,
           warnings: cooldownWarning ? [cooldownWarning] : [],
-          posted_at: postedAt
+          ...(outcome.publication_verified ? { posted_at: postedAt } : {
+            submitted_at: postedAt,
+            auto_retry_allowed: false,
+            destination_quarantined: true
+          })
         });
-        broadcastDashStatus(`Posted ${i + 1}/${groupUrls.length}`, '#4ecca3');
-        // Update last_posted_at for cooldown tracking
+        broadcastDashStatus(`${outcome.publication_verified ? 'Posted' : 'Submission unconfirmed'} ${i + 1}/${groupUrls.length}`, outcome.publication_verified ? '#4ecca3' : '#eab308');
+        const cooldownKey = `${identityKey}::${groupUrl}`;
+        groupCooldownMap[cooldownKey] = { ...groupCooldownMap[cooldownKey], last_posted_at: postedAt };
+        if (!outcome.publication_verified) {
+          // The destination is known even when Facebook does not return enough
+          // evidence to prove publication. Quarantine that exact actor+group
+          // BEFORE releasing the campaign reservation. This prevents a replay
+          // of the ambiguous target while allowing untouched destinations in
+          // the same requested campaign to continue.
+          await persistTargetHold(groupHoldKey,
+            outcome.pending_approval === true ? 'pending_approval' : 'publication_unconfirmed',
+            perGroupResults[perGroupResults.length - 1]);
+          await persistCampaignHold(target, null, 'release');
+          recentAttempts.push({ job_id: job.id, identity_key: identityKey, group_url: groupUrl, submitted_at: postedAt });
+          await chrome.storage.local.set({ [attemptStorageKey]: recentAttempts });
+        } else {
+          await persistCampaignHold(target, null, 'release');
+        }
+        // Existing cooldown field tracks attempts conservatively, not publication proof.
         fetch(`${SB_URL}/rest/v1/jsw_groups?user_id=eq.${dashSession.userId}&identity_key=eq.${encodeURIComponent(identityKey || '__legacy__')}&group_url=eq.${encodeURIComponent(groupUrl)}`, {
           method: 'PATCH',
           headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${dashSession.accessToken}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
@@ -1883,15 +2956,16 @@ async function executeDashJob(job) {
 
         if (recentPostedCount !== null) recentPostedCount++;
 
-        // Record post result for ban detection
-        fetch(`${SB_URL}/rest/v1/jsw_post_results`, {
+        // This legacy table feeds publication counts and ban detection. Do not
+        // insert uncertain attempts as publications; evidence lives in job.result.
+        if (outcome.publication_verified) fetch(`${SB_URL}/rest/v1/jsw_post_results`, {
           method: 'POST',
           headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${dashSession.accessToken}`, 'Content-Type': 'application/json', 'Prefer': 'return=minimal' },
           body: JSON.stringify({ user_id: dashSession.userId, group_url: groupUrl, post_url: postUrl, job_id: job.id, posted_at: postedAt })
         }).catch(e => extLog('warn', 'jsw_post_results insert error: ' + e.message));
 
         // First comment automation
-        if (job.first_comment) {
+        if (job.first_comment && outcome.publication_verified && postUrl) {
           await sleep(4000); // let FB process the post
           try {
             await postFirstComment(tab.id, job.first_comment);
@@ -1901,6 +2975,13 @@ async function executeDashJob(job) {
           }
         }
 
+        // Ambiguous publication is terminal for this actor+group, not for the
+        // whole campaign. The durable group quarantine above makes continuing
+        // safe and guarantees this destination is not replayed.
+      } else if (response?.error_code === 'group_restricted') {
+        const warning = { type: 'group_restricted', message: response.error || 'Group restricted; manual review required' };
+        perGroupResults.push(skippedResult(target, 'group_restricted', warning));
+        jobWarnings.push(warning);
       } else if (response?.error_code === 'not_group_member') {
         lastError = response?.error || 'Not accepted into group';
         const warning = {
@@ -1924,8 +3005,13 @@ async function executeDashJob(job) {
           composer_identity: response?.composer_identity || null,
           composer_identity_verified: response?.composer_identity_verified === true,
           error_code: response?.error_code || null,
+          // Diagnostics are evidence only: never promote them to readiness or
+          // publication proof and never infer a group restriction from them.
+          reason: typeof response?.reason === 'string' ? response.reason.slice(0, 500) : null,
+          readiness: response?.readiness && typeof response.readiness === 'object' ? response.readiness : null,
           status: 'failed',
           error: lastError,
+          ...(destinationQuarantined ? { auto_retry_allowed: false, destination_quarantined: true } : {}),
           warnings: cooldownWarning ? [cooldownWarning] : [],
           final_message: finalText,
           tracking: trackingResult.tracking,
@@ -1939,15 +3025,18 @@ async function executeDashJob(job) {
           lastError = `Stopped after Facebook defense signal: ${lastError}`;
           break;
         }
+        if ((!provenPreSubmitRefusal && !destinationQuarantined)
+            || ['identity_required', 'identity_not_verified', 'identity_switch_failed', 'intended_destination_not_verified'].includes(response?.error_code)) break;
       }
 
-      await sleep(1000);
-      if (tab) {
-        await chrome.tabs.remove(tab.id);
-        tab = null;
-      }
     } catch (e) {
       lastError = e.message;
+      if (campaignPersistenceFailed) {
+        // Do not append a contradictory failed attempt over evidence already
+        // recorded, or continue to another group after losing durable safety.
+        jobWarnings.push({ type: 'campaign_hold_persistence_failed', message: lastError });
+        break;
+      }
       const defenseTriggered = isFacebookDefenseError(lastError) || e.code === 'facebook_defense';
       perGroupResults.push({
         group_url: groupUrl,
@@ -1969,21 +3058,23 @@ async function executeDashJob(job) {
       });
       extLog('error', `Error on group ${i + 1} (${groupUrl}): ${e.message}`);
       broadcastDashStatus(`Error on group ${i + 1}`, '#e94560');
-      if (tab) {
-        try { await chrome.tabs.remove(tab.id); } catch (_) {}
-        tab = null;
-      }
       if (defenseTriggered) {
         jobWarnings.push({ type: 'facebook_defense_stop', message: `Stopped batch after Facebook defense signal: ${lastError}` });
         lastError = `Stopped after Facebook defense signal: ${lastError}`;
         break;
       }
+    } finally {
+      // Start cleanup as soon as this destination's attempt has settled. Do not
+      // await browser housekeeping: a stuck tabs.remove must never block result
+      // persistence or the remaining campaign. Ownership validation inside the
+      // helper prevents any pre-existing/user-created tab from being removed.
+      closeOwnedPostingTab(tab, postingTabIds);
     }
 
     if (i < groupUrls.length - 1) {
       const waitSeconds = randomAntiBotDelaySeconds(job.delay || 0);
       broadcastDashStatus(`Anti-bot wait ${waitSeconds}s...`, '#6a6a8a');
-      await sleep(waitSeconds * 1000);
+      await sleepWithWorkerKeepalive(waitSeconds * 1000);
     }
   }
 
@@ -1991,13 +3082,26 @@ async function executeDashJob(job) {
   const success = successCount > 0;
   const failedCount = perGroupResults.filter(r => r.status === 'failed').length;
   const skippedCount = perGroupResults.filter(r => r.status === 'skipped').length;
-  const completedWithoutHardFailure = success || (skippedCount > 0 && failedCount === 0);
+  const unconfirmedCount = perGroupResults.filter(r => r.status === 'submitted_unconfirmed').length;
+  const quarantinedCount = perGroupResults.filter(r => r.destination_quarantined === true).length;
+  // Paused is an existing job state, retained locally and blocking durable
+  // occurrence admission. Group attempts themselves are terminal, not retryable.
+  const needsReview = campaignPersistenceFailed || campaignLedger.holds.length > 0
+    && campaignLedger.holds.some(h => h.job_id === String(job.id));
+  const completedWithoutHardFailure = success || unconfirmedCount > 0 || (skippedCount > 0 && failedCount === 0);
+  const autoRepeatAllowed = !needsReview && quarantinedCount === 0;
   const completedAt = new Date().toISOString();
-  await sbUpdateJob(job.id, {
-    status: completedWithoutHardFailure ? 'done' : 'failed',
-    error: completedWithoutHardFailure ? null : (lastError || 'All groups failed'),
+  const completionPatch = {
+    status: needsReview ? 'paused' : completedWithoutHardFailure ? 'done' : 'failed',
+    ...(executionLease ? { execution_phase: needsReview ? 'manual_review' : 'completed', execution_updated_at: completedAt, execution_lease_expires_at: null } : {}),
+    error: needsReview ? 'Publication unconfirmed; manual reconciliation required before any replay.' : completedWithoutHardFailure ? null : (lastError || 'All groups failed'),
     result: {
+      // Keep the campaign/reconciliation envelope durable across completion.
+      ...(job.result || {}),
       success_count: successCount,
+      submitted_unconfirmed_count: unconfirmedCount,
+      quarantined_count: quarantinedCount,
+      auto_repeat_allowed: autoRepeatAllowed,
       total_groups: groupUrls.length,
       failed_count: failedCount,
       skipped_count: skippedCount,
@@ -2006,33 +3110,43 @@ async function executeDashJob(job) {
       completed_at: completedAt
     },
     completed_at: completedAt
-  });
+  };
+  const completionSaved = localExecutionLease
+    ? await updateLocalFallbackJob(job.id, completionPatch, { status: 'processing', execution_owner: localExecutionLease.owner })
+    : await completeDashboardExecutionLifecycle(job, dashboardExecutionLease, completionPatch);
 
-  extLog(completedWithoutHardFailure ? 'info' : 'error', `Job ${job.id} ${completedWithoutHardFailure ? 'DONE' : 'FAILED'} — ${successCount}/${groupUrls.length} posted, ${skippedCount} skipped`);
+  extLog(needsReview ? 'warn' : completedWithoutHardFailure ? 'info' : 'error', `Job ${job.id} ${needsReview ? 'PAUSED FOR REVIEW' : completedWithoutHardFailure ? 'DONE' : 'FAILED'} — ${successCount}/${groupUrls.length} posted, ${quarantinedCount} quarantined, ${skippedCount} skipped`);
 
   broadcastDashStatus(
-    completedWithoutHardFailure ? `Done — ${successCount}/${groupUrls.length} posted${skippedCount ? `, ${skippedCount} skipped` : ''}` : 'Job failed',
-    completedWithoutHardFailure ? '#4ecca3' : '#e94560'
+    needsReview ? `Paused for review — ${unconfirmedCount} unconfirmed, ${successCount} verified publications` : completedWithoutHardFailure ? `Done — ${successCount}/${groupUrls.length} posted${quarantinedCount ? `, ${quarantinedCount} quarantined` : ''}${skippedCount ? `, ${skippedCount} skipped` : ''}` : 'Job failed',
+    needsReview ? '#eab308' : completedWithoutHardFailure ? '#4ecca3' : '#e94560'
   );
 
-  notify(completedWithoutHardFailure
-    ? `Dashboard job complete — ${successCount}/${groupUrls.length} groups posted${skippedCount ? `, ${skippedCount} skipped` : ''}.`
+  notify(needsReview ? `Dashboard job paused — ${unconfirmedCount} submissions unconfirmed. Do not replay without reconciliation.` : completedWithoutHardFailure
+    ? `Dashboard job complete — ${successCount}/${groupUrls.length} groups posted${quarantinedCount ? `, ${quarantinedCount} quarantined (not replayable)` : ''}${skippedCount ? `, ${skippedCount} skipped` : ''}.`
     : `Dashboard job failed: ${lastError}`
   );
 
   // ── Webhook delivery (fire-and-forget, best-effort) ──
   if (job.webhook_url) {
-    fireWebhook(job, completedWithoutHardFailure, successCount, groupUrls.length, lastError);
+    fireWebhook(job, completedWithoutHardFailure, successCount, groupUrls.length, lastError, unconfirmedCount, quarantinedCount, autoRepeatAllowed);
+  }
+  return { autoRepeatAllowed: autoRepeatAllowed && completionSaved === true };
+  } finally {
+    activeDashJobId = null;
   }
 }
 
 // Fire a webhook to the caller's endpoint with job completion details
-async function fireWebhook(job, success, successCount, totalGroups, lastError) {
+async function fireWebhook(job, success, successCount, totalGroups, lastError, unconfirmedCount = 0, quarantinedCount = unconfirmedCount, autoRepeatAllowed = quarantinedCount === 0) {
   const payload = {
-    event:       success ? 'job.completed' : 'job.failed',
+    event:       quarantinedCount && success ? 'job.completed_with_quarantine' : success ? 'job.completed' : 'job.failed',
     job_id:      job.id,
     status:      success ? 'done' : 'failed',
     success_count: successCount,
+    submitted_unconfirmed_count: unconfirmedCount,
+    quarantined_count: quarantinedCount,
+    auto_repeat_allowed: autoRepeatAllowed,
     total_groups:  totalGroups,
     error:       lastError || null,
     completed_at: new Date().toISOString(),
@@ -2101,22 +3215,28 @@ async function sbUpdateJob(jobId, patch) {
   try {
     if (String(jobId || '').startsWith('local_')) {
       const ok = await updateLocalFallbackJob(jobId, patch);
-      if (patch.status === 'done' || patch.status === 'failed') await appendLocalFallbackResult(jobId, patch.result || patch);
+      if (ok && (patch.status === 'done' || patch.status === 'failed' || (patch.status === 'paused' && patch.result?.submitted_unconfirmed_count > 0))) await appendLocalFallbackResult(jobId, patch.result || patch);
       return ok;
     }
     const session = await getStoredSession();
     if (!session) return false;
-    const res = await fetch(`${SB_URL}/rest/v1/jsw_post_jobs?id=eq.${jobId}`, {
+    // A successful HTTP PATCH can update zero rows. Claims must atomically
+    // transition pending -> processing and prove that this caller won.
+    const claiming = patch.status === 'processing';
+    const res = await fetch(`${SB_URL}/rest/v1/jsw_post_jobs?id=eq.${encodeURIComponent(jobId)}${claiming ? '&status=eq.pending' : ''}`, {
       method: 'PATCH',
       headers: {
         'apikey': SB_ANON_KEY,
         'Authorization': `Bearer ${session.accessToken}`,
         'Content-Type': 'application/json',
-        'Prefer': 'return=minimal'
+        'Prefer': claiming ? 'return=representation' : 'return=minimal'
       },
       body: JSON.stringify(patch)
     });
-    return res.ok;
+    if (!res.ok) return false;
+    if (!claiming) return true;
+    const rows = await res.json();
+    return Array.isArray(rows) && rows.length === 1 && String(rows[0].id) === String(jobId);
   } catch (e) {
     console.warn('[JSW] sbUpdateJob error:', e.message);
     return false;
@@ -2201,15 +3321,36 @@ function mergePostingIdentities(...lists) {
   return [...merged.values()];
 }
 
+function isFacebookMessageChannelReloadError(error) {
+  const msg = String(error?.message || error || '');
+  return /Receiving end does not exist|Could not establish connection|message (?:channel|port) closed|asynchronous response.*channel closed|Extension context invalidated|Frame with ID \d+ was removed|frame was removed|document was unloaded/i.test(msg);
+}
+
+const TAB_MESSAGE_RESPONSE_TIMEOUT_MS = 90_000;
+
 async function sendTabMessageWithRetry(tabId, message, attempts = 5) {
   let lastError;
   for (let i = 0; i < attempts; i++) {
     try {
-      return await chrome.tabs.sendMessage(tabId, message);
+      // A content script can keep a message channel open indefinitely if Facebook
+      // replaces its frame mid-flow. A post command has already been checkpointed
+      // before this point, so a bounded timeout must surface as delivery-unknown
+      // and pause/manual-review rather than wedging the whole local runner.
+      return await Promise.race([
+        chrome.tabs.sendMessage(tabId, message),
+        new Promise((_, reject) => setTimeout(() => {
+          reject(new Error(`Content-script response timed out after ${TAB_MESSAGE_RESPONSE_TIMEOUT_MS}ms`));
+        }, TAB_MESSAGE_RESPONSE_TIMEOUT_MS))
+      ]);
     } catch (e) {
       lastError = e;
-      const msg = String(e?.message || e || '');
-      if (/Receiving end does not exist|Could not establish connection/i.test(msg)) {
+      // An accepted mutation may have completed before navigation lost its reply.
+      // Never blindly replay a post or identity switch. Only missing receivers
+      // prove delivery did not happen; callers can verify identity after reload.
+      const missingReceiver = /Receiving end does not exist|Could not establish connection/i.test(String(e?.message || e));
+      const mutation = /^(POST_TO_PAGE|PROBE_GROUP_COMPOSER_TYPING|SWITCH_FACEBOOK_)/.test(String(message?.type || ''));
+      if (mutation && !missingReceiver) throw e;
+      if (isFacebookMessageChannelReloadError(e)) {
         try {
           await chrome.scripting.executeScript({ target: { tabId }, files: ['content.js'] });
           await sleep(800);
@@ -2221,6 +3362,139 @@ async function sendTabMessageWithRetry(tabId, message, attempts = 5) {
     }
   }
   throw lastError;
+}
+
+async function ensureFacebookIdentityActive(identityName, identityUrl = null, identityType = null) {
+  if (!identityName || isForbiddenPostingIdentityName(identityName)) {
+    return { success: false, error: 'Missing valid Facebook identity name' };
+  }
+  const isManagedPage = /^page|facebook page$/i.test(String(identityType || ''))
+    || (!!identityUrl && /^https:\/\/(www\.)?facebook\.com\/profile\.php\?id=\d+/i.test(String(identityUrl)));
+  let tab = null;
+  let switchResponse = null;
+  let switchError = null;
+  try {
+    tab = await chrome.tabs.create({ url: identityUrl || 'https://www.facebook.com/pages/?category=your_pages', active: true });
+    await sleep(identityUrl ? 8000 : 6500);
+
+    const trySwitchMessage = async (message) => {
+      try {
+        return await sendTabMessageWithRetry(tab.id, message, 2);
+      } catch (e) {
+        if (isFacebookMessageChannelReloadError(e)) {
+          // Expected when Facebook reloads after clicking "Switch Now". Do not
+          // trust it as success; verify on facebook.com after navigation settles.
+          switchError = e;
+          await sleep(7000);
+          return { success: false, channel_closed_during_switch: true, error: String(e.message || e) };
+        }
+        throw e;
+      }
+    };
+
+    if (identityUrl) {
+      switchResponse = await trySwitchMessage({ type: 'SWITCH_FACEBOOK_IDENTITY', identityName, identityUrl });
+      if (!switchResponse?.success && switchResponse?.channel_closed_during_switch) {
+        await sleep(7000);
+        try {
+          const interimVerify = await sendTabMessageWithRetry(tab.id, { type: 'GET_FACEBOOK_ACTIVE_IDENTITY', expectedIdentity: identityName }, 4);
+          if (facebookIdentityNameMatches(interimVerify?.activeIdentity, identityName)) {
+            switchResponse = {
+              ...switchResponse,
+              success: true,
+              active_identity: interimVerify.activeIdentity,
+              page_url: interimVerify.pageUrl || null,
+              verified_after_channel_close: true
+            };
+          }
+        } catch (verifyErr) {
+          extLog('warn', `Identity interim verify after channel close failed for ${identityName}: ${verifyErr.message}`);
+        }
+      }
+    }
+    // Facebook's visible Page-profile Switch control is a separate interaction
+    // from the content-script menu path. Use the native DevTools click on the
+    // exact Page URL before falling back to Pages Manager; then independently
+    // prove the actor below. This is the route that handles Page shells whose
+    // synthetic/isolated-world click acknowledges but does not switch identity.
+    if (!switchResponse?.success && isManagedPage && identityUrl) {
+      await chrome.tabs.update(tab.id, { url: identityUrl, active: true });
+      await sleep(7000);
+      // The Page shell's visible Switch card is often covered by its navigation
+      // layer, so mouse coordinates land on navigation rather than the card.
+      // Keyboard activation through CDP focus is trusted by Facebook and exposes
+      // the required confirmation dialog; only then do we fall back to mouse.
+      let nativeFallback = await confirmFacebookPageProfileSwitchByKeyboard(tab.id, identityName);
+      if (!nativeFallback?.success) {
+        nativeFallback = await clickFacebookPageProfileSwitchButton(tab.id, identityName);
+      }
+      switchResponse = {
+        ...nativeFallback,
+        content_switch: switchResponse || null,
+        native_page_profile_fallback: nativeFallback,
+        fallback_path: 'native_page_profile_switch'
+      };
+    }
+    if (!switchResponse?.success && isManagedPage) {
+      await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/pages/?category=your_pages', active: true });
+      await sleep(8000);
+      const fallback = await trySwitchMessage({ type: 'SWITCH_FACEBOOK_MANAGED_PAGE', identityName, identityUrl: identityUrl || null });
+      switchResponse = { ...fallback, direct_page_probe: switchResponse || null, fallback_path: fallback?.fallback_path || 'background_pages_manager_pre_switch' };
+    }
+
+    await sleep(5000);
+    let verifyPageContext = null;
+    if (isManagedPage && identityUrl) {
+      // Facebook Page mode currently renders its global account button as generic
+      // “Your profile”. Before falling back to that ambiguous surface, require
+      // two native controls in the exact managed-Page document: management chrome
+      // and the Page-bound comment actor. The group composer remains the final
+      // destination-specific actor proof.
+      await chrome.tabs.update(tab.id, { url: identityUrl, active: true });
+      await sleep(7000);
+      verifyPageContext = await sendTabMessageWithRetry(tab.id, {
+        type: 'GET_FACEBOOK_PAGE_CONTEXT_IDENTITY', identityName, identityUrl, expectedIdentity: identityName
+      }, 4);
+    }
+    const verifiedByPageContext = isManagedPage
+      && verifyPageContext?.success === true
+      && verifyPageContext?.verified === true
+      && verifyPageContext?.identitySource === 'native_managed_page_context'
+      && facebookIdentityNameMatches(verifyPageContext?.activeIdentity, identityName);
+
+    let verifyHome = null;
+    if (!verifiedByPageContext) {
+      await chrome.tabs.update(tab.id, { url: 'https://www.facebook.com/', active: true });
+      await sleep(7000);
+      verifyHome = await sendTabMessageWithRetry(tab.id, { type: 'GET_FACEBOOK_ACTIVE_IDENTITY', expectedIdentity: identityName }, 4);
+    }
+    // Switching is navigation telemetry, never actor proof. An exact native
+    // managed-Page proof is accepted only for a managed Page; all other actors
+    // still require the independent home/account-control proof.
+    const verifiedByHome = verifyHome?.success === true && facebookIdentityNameMatches(verifyHome?.activeIdentity, identityName);
+    const composerVerificationRequired = false;
+    const ok = verifiedByPageContext || verifiedByHome;
+    const proof = verifiedByPageContext ? verifyPageContext : verifyHome;
+    const proofSource = verifiedByPageContext ? 'native_managed_page_context' : 'native_home_account_control';
+    return {
+      success: ok,
+      active_identity: proof?.activeIdentity || null,
+      page_url: proof?.pageUrl || null,
+      switch_response: switchResponse || null,
+      home_verify_identity: verifyHome?.activeIdentity || null,
+      home_verify_url: verifyHome?.pageUrl || null,
+      page_context_verify_identity: verifyPageContext?.activeIdentity || null,
+      page_context_verify_url: verifyPageContext?.pageUrl || null,
+      identity_proof_source: ok ? proofSource : null,
+      composer_verification_required: composerVerificationRequired,
+      recovered_after_channel_close: !!switchError,
+      error: ok ? null : (`Home/Page active identity verified as ${verifyHome?.activeIdentity || verifyPageContext?.activeIdentity || 'unknown'}, not ${identityName}`)
+    };
+  } catch (e) {
+    return { success: false, error: String(e?.message || e), switch_response: switchResponse || null };
+  } finally {
+    if (tab?.id) { try { await chrome.tabs.remove(tab.id); } catch (_) {} }
+  }
 }
 
 async function syncFacebookIdentitiesForJob(jobId) {
@@ -2415,6 +3689,64 @@ async function switchFacebookIdentityNative(tabId, identityName, options = {}) {
     active = activeRes?.activeIdentity || null;
   } catch (_) {}
   return { switched: true, active_identity: active || identityName, debug: locate };
+}
+
+async function confirmFacebookPageProfileSwitchByKeyboard(tabId, identityName) {
+  const target = { tabId };
+  const pressEnter = async () => {
+    await chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', {
+      type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13
+    });
+    await chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', {
+      type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13
+    });
+  };
+  try {
+    const [probe] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (expected) => {
+        const pageText = String(document.body?.innerText || '').replace(/\s+/g, ' ');
+        const control = [...document.querySelectorAll('[aria-label="Switch"]')]
+          .find(el => el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0);
+        return {
+          ready: !!control && new RegExp(`Switch into ${String(expected).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i').test(pageText),
+          pageUrl: location.href
+        };
+      },
+      args: [identityName]
+    });
+    if (!probe?.result?.ready) return { clicked: false, success: false, reason: 'page switch card unavailable' };
+
+    await chrome.tabs.update(tabId, { active: true });
+    await chrome.debugger.attach(target, '1.3');
+    try {
+      const first = await chrome.debugger.sendCommand(target, 'Runtime.evaluate', {
+        expression: `document.querySelector('[aria-label="Switch"]')`
+      });
+      if (!first?.result?.objectId) return { clicked: false, success: false, reason: 'page switch control disappeared' };
+      await chrome.debugger.sendCommand(target, 'DOM.focus', { objectId: first.result.objectId });
+      await pressEnter();
+      await sleep(900);
+
+      const confirmation = await chrome.debugger.sendCommand(target, 'Runtime.evaluate', {
+        expression: `(() => { const d = [...document.querySelectorAll('[role="dialog"]')].find(x => (x.innerText || '').toLowerCase().includes(${JSON.stringify(String(identityName).toLowerCase())})); return d?.querySelector('[aria-label="Switch"]') || null; })()`
+      });
+      if (!confirmation?.result?.objectId) {
+        return { clicked: true, success: false, reason: 'page switch confirmation missing' };
+      }
+      await chrome.debugger.sendCommand(target, 'DOM.focus', { objectId: confirmation.result.objectId });
+      await pressEnter();
+    } finally {
+      try { await chrome.debugger.detach(target); } catch (_) {}
+    }
+    // This only records that Facebook accepted both trusted UI activations. The
+    // caller still performs independent Page/composer actor verification.
+    await sleep(8000);
+    return { clicked: true, success: true, switch_confirmed_by_dialog: true, active_identity: identityName };
+  } catch (e) {
+    try { await chrome.debugger.detach(target); } catch (_) {}
+    return { clicked: false, success: false, error: e.message };
+  }
 }
 
 async function clickFacebookPageProfileSwitchButton(tabId, identityName) {
@@ -2871,6 +4203,19 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null, options = 
 }
 
 async function importFacebookGroups(identityMeta = null) {
+  if (activeDashJobId !== null) {
+    chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_ERROR', error: 'Facebook runner busy — retry after the current operation finishes.' });
+    return false;
+  }
+  activeDashJobId = 'popup-import';
+  try {
+    return await importFacebookGroupsUnlocked(identityMeta);
+  } finally {
+    activeDashJobId = null;
+  }
+}
+
+async function importFacebookGroupsUnlocked(identityMeta = null) {
   const identityName = typeof identityMeta === 'string' ? identityMeta : (identityMeta?.name || identityMeta?.identity_name || null);
   const identityKey = (typeof identityMeta === 'object' && (identityMeta?.key || identityMeta?.identity_key)) ? (identityMeta.key || identityMeta.identity_key) : identityName;
   const identityType = (typeof identityMeta === 'object' && (identityMeta?.type || identityMeta?.identity_type)) ? (identityMeta.type || identityMeta.identity_type) : null;

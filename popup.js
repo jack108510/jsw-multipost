@@ -68,8 +68,9 @@ async function ensureFreshSession(session) {
       expiresAt: data.expires_at,
       refreshedAt: Date.now()
     };
-    await chrome.storage.local.set({ jsw_session: refreshed });
-    return refreshed;
+    const imported = await chrome.runtime.sendMessage({ type: 'POPUP_SESSION_IMPORT', session: refreshed });
+    if (!imported?.ok || !imported.session) return null;
+    return imported.session;
   } catch(e) {
     // Transient Supabase/Auth outages should not wipe the saved refresh token.
     // Keep the extension paired/offline-retryable instead of forcing a password login.
@@ -106,7 +107,7 @@ async function handleLogin() {
     const data = await res.json();
     if (!res.ok || !data.access_token) throw new Error(data.error_description || 'Login failed');
 
-    const session = {
+    let session = {
       userId: data.user.id,
       email: data.user.email,
       accessToken: data.access_token,
@@ -133,14 +134,11 @@ async function handleLogin() {
       }
     } catch(e) { /* non-fatal */ }
 
-    // Fix 2: Clear onboarding flag if a different user is logging in
-    const prev = await new Promise(r => chrome.storage.local.get('jsw_session', r));
-    if (prev.jsw_session?.userId && prev.jsw_session.userId !== session.userId) {
-      await chrome.storage.local.remove(['amplr_onboarding_done']);
-    }
-
-    await chrome.storage.local.set({ jsw_session: session });
-    chrome.runtime.sendMessage({ type: 'PAIRING_CONNECTED', pairing: session });
+    // The worker serializes replacement with refresh/import writes and retains
+    // installation-owned scheduler state only for this same account.
+    const imported = await chrome.runtime.sendMessage({ type: 'POPUP_SESSION_IMPORT', session });
+    if (!imported?.ok || !imported.session) throw new Error(imported?.error || 'Session could not be saved');
+    session = imported.session;
 
     // Check if onboarding already done
     const stored = await new Promise(r => chrome.storage.local.get('amplr_onboarding_done', r));
@@ -217,19 +215,20 @@ function openBackgroundSetting() {
   if (status) status.textContent = 'Opened Amplr extension details. Use Reload there if Chrome is running an old worker.';
 }
 
-// Step 2: Facebook login check
+// Step 2: Facebook login check. Tab existence and c_user alone are false positives
+// after an expired Facebook session; the background performs a no-post DOM probe.
 async function checkFacebookLogin() {
   try {
-    const tabs = await chrome.tabs.query({ url: '*://*.facebook.com/*' });
-    if (tabs.length > 0) {
+    const state = await chrome.runtime.sendMessage({ type: 'CHECK_FACEBOOK_SESSION' });
+    if (state?.available) {
       markStep('step2', '✓ Logged in');
-    } else {
-      // Check cookies
-      const cookies = await chrome.cookies.getAll({ domain: '.facebook.com' });
-      const loggedIn = cookies.some(c => c.name === 'c_user');
-      if (loggedIn) markStep('step2', '✓ Logged in');
+      return true;
     }
-  } catch(e) {}
+    markStep('step2', 'Sign in required');
+  } catch (e) {
+    markStep('step2', 'Facebook session not verified');
+  }
+  return false;
 }
 
 function openFacebook() {
@@ -239,14 +238,9 @@ function openFacebook() {
   const poll = setInterval(async () => {
     attempts++;
     if (attempts > 30 || onboardState.facebook) { clearInterval(poll); return; }
-    try {
-      const cookies = await chrome.cookies.getAll({ domain: '.facebook.com' });
-      const loggedIn = cookies.some(c => c.name === 'c_user');
-      if (loggedIn) {
-        clearInterval(poll);
-        markStep('step2', '✓ Logged in');
-      }
-    } catch(e) {}
+    if (await checkFacebookLogin()) {
+      clearInterval(poll);
+    }
   }, 3000);
 }
 
@@ -256,13 +250,13 @@ function finishOnboarding() {
   });
 }
 
-// ── Wire up all event listeners (MV3 CSP requires addEventListener, not onclick=) ──
+// ── Wire up all event listeners (MV3 CSP requires addEventListener, not onclick=)
 document.addEventListener('DOMContentLoaded', () => {
   const on = (id, fn) => { const el = document.getElementById(id); if (el) el.addEventListener('click', fn); };
   on('step1btn', openBackgroundSetting);
   on('step2btn', openFacebook);
   on('finishBtn', finishOnboarding);
-  on('openDashBtn', () => chrome.tabs.create({ url: 'https://jack108510.github.io/jsw-multipost/dashboard.html' }));
+  on('openDashBtn', () => chrome.tabs.create({ url: 'https://jack108510.github.io/fb-autoposter/dashboard.html' }));
   on('signOutBtn', signOut);
   on('loginBtn', handleLogin);
 

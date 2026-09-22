@@ -32,10 +32,20 @@
     return null;
   }
 
+  function isFreshSession(session) {
+    const expiresAt = Number(session?.expiresAt || 0);
+    // If expiry is absent, keep compatibility with older dashboard sessions.
+    // If present, ignore stale cached copies that would immediately disconnect
+    // the extension even though Supabase has a fresh auth-token session.
+    return !expiresAt || expiresAt * 1000 > Date.now() + 60000;
+  }
+
   function getDashboardSession() {
+    const candidates = [];
+
     for (const key of SESSION_KEYS) {
       const parsed = normalizeSession(localStorage.getItem(key));
-      if (parsed) return parsed;
+      if (parsed) candidates.push(parsed);
     }
 
     // Supabase-js can store sessions as sb-<project>-auth-token.
@@ -43,9 +53,10 @@
       const key = localStorage.key(i);
       if (!key || !/^sb-.*-auth-token$/.test(key)) continue;
       const parsed = normalizeSession(localStorage.getItem(key));
-      if (parsed) return parsed;
+      if (parsed) candidates.push(parsed);
     }
-    return null;
+
+    return candidates.find(isFreshSession) || candidates[0] || null;
   }
 
   function syncSessionToExtension() {
