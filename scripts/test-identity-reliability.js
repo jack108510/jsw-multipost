@@ -49,8 +49,8 @@ assert(background.includes('const genericUrl = target.url') && background.includ
 assert(composerProbe.includes('await enrichFacebookIdentityTarget(item)'), 'Composer probes do not use enriched identity metadata');
 assert(composerProbe.includes('skipSwitch: directVerified'), 'Composer probes do not conditionally use the verified direct Page switch');
 assert(!/POST_TO_PAGE/.test(composerProbe), 'Composer probe path references the posting command');
-assert(globalProbe.includes("url: identity.url, active: true"), 'Global probe does not prefer a stable Page URL');
-assert(globalProbe.includes('ok = facebookIdentityNameMatches'), 'Global probe does not treat verified Facebook state as authoritative');
+assert(globalProbe.includes('ensureFacebookIdentityActive(identity.name, identity.url'), 'Global probe does not use the verified Page URL and identity');
+assert(globalProbe.includes('ok = !!preSwitch?.success'), 'Global probe does not treat verified Facebook state as authoritative');
 assert(globalProbe.includes('switch_control_confirmed'), 'Global probe does not preserve switch-control evidence separately');
 assert(background.includes("job.message === '__join_groups__'"), 'Dashboard/API jobs cannot queue actor-first group joins');
 assert(joinGroups.includes('SWITCH_FACEBOOK_IDENTITY') && joinGroups.includes('SWITCH_FACEBOOK_MANAGED_PAGE'), 'Group join job does not switch into the intended actor first');
