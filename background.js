@@ -1326,7 +1326,17 @@ async function admitScheduledCampaignBatch(job, session) {
   if (!response.ok) return false;
   const previous = (await response.json())[0];
   if (!previous) return false;
-  if (previous.status === 'done') return true;
+  if (previous.status === 'done') {
+    const counts = previous.result || {};
+    const complete = Number.isInteger(counts.total_groups) && counts.total_groups > 0
+      && counts.success_count === counts.total_groups
+      && Number(counts.failed_count || 0) === 0
+      && Number(counts.skipped_count || 0) === 0
+      && Number(counts.submitted_unconfirmed_count || 0) === 0;
+    if (complete) return true;
+    await pauseDashboardPendingJob(job, 'Previous campaign batch did not complete every group; later batches were held for review.', { error_code: 'previous_batch_incomplete' });
+    return false;
+  }
   if (['failed', 'paused', 'cancelled', 'canceled'].includes(previous.status)) {
     await pauseDashboardPendingJob(job, 'Previous campaign batch needs review; this batch was not posted.', { error_code: 'previous_batch_not_completed' });
   }
