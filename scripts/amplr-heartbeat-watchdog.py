@@ -73,10 +73,12 @@ def strings_for_dir(path: Path) -> str:
 
 def find_sessions(raw: str) -> list[dict]:
     sessions: list[dict] = []
-    # Chrome LevelDB strings can contain leading/trailing bytes; find compact JSON
-    # objects containing accessToken + userId. Tokens are never logged.
-    for match in re.finditer(r'\{[^{}]*"accessToken"[^{}]*"userId"[^{}]*\}', raw):
+    # The stored session writes userId before accessToken. Accept either key
+    # order, and never log the tokens found in Chrome's LevelDB files.
+    for match in re.finditer(r'\{[^{}]{0,8192}\}', raw):
         text = match.group(0)
+        if '"accessToken"' not in text or '"userId"' not in text:
+            continue
         try:
             obj = json.loads(text)
         except json.JSONDecodeError:
@@ -87,14 +89,19 @@ def find_sessions(raw: str) -> list[dict]:
 
 
 def latest_session(extension_id: str, chrome_user_data_dir: str, chrome_profile: str) -> dict | None:
-    storage_dir = (
+    storage_root = (
         Path(chrome_user_data_dir).expanduser()
         / chrome_profile
         / "Local Extension Settings"
-        / extension_id
     )
-    raw = strings_for_dir(storage_dir)
-    sessions = find_sessions(raw)
+    preferred = storage_root / extension_id
+    sessions = find_sessions(strings_for_dir(preferred))
+    if not sessions and storage_root.is_dir():
+        # Unpacked extension IDs depend on the installed path when no manifest
+        # key is set. Search other extension stores only if the expected ID has
+        # no Reachr session.
+        sessions = [session for path in storage_root.iterdir() if path.is_dir() and path != preferred
+                    for session in find_sessions(strings_for_dir(path))]
     if not sessions:
         return None
     return max(sessions, key=lambda s: (int(s.get("expiresAt") or 0), float(s.get("refreshedAt") or 0)))
@@ -195,7 +202,6 @@ def terminate_chrome(ext_dir: str) -> None:
 
 
 def launch_chrome(chrome_app: str, chrome_user_data_dir: str, chrome_profile: str, ext_dir: str, dashboard_url: str, extension_id: str) -> None:
-    popup_url = f"chrome-extension://{extension_id}/popup.html"
     chrome_bin = str(Path(chrome_app) / "Contents/MacOS/Google Chrome")
     subprocess.Popen(
         [
@@ -207,7 +213,6 @@ def launch_chrome(chrome_app: str, chrome_user_data_dir: str, chrome_profile: st
             "--remote-debugging-address=127.0.0.1",
             "--remote-debugging-port=9223",
             f"--load-extension={ext_dir}",
-            popup_url,
             dashboard_url,
         ],
         stdout=subprocess.DEVNULL,
@@ -228,7 +233,7 @@ def main() -> int:
     parser.add_argument("--chrome-app", default="/Applications/Google Chrome.app")
     parser.add_argument("--chrome-user-data-dir", default=str(Path.home() / "Library/Application Support/Amplr/ChromeProfile"))
     parser.add_argument("--chrome-profile", default="Default")
-    parser.add_argument("--dashboard-url", default="https://jack108510.github.io/jsw-multipost/dashboard.html")
+    parser.add_argument("--dashboard-url", default="https://jack108510.github.io/fb-autoposter/dashboard.html")
     parser.add_argument("--extension-id", default=DEFAULT_EXTENSION_ID)
     parser.add_argument("--stale-seconds", type=int, default=150)
     parser.add_argument("--restart-wait-seconds", type=int, default=70)
@@ -240,8 +245,9 @@ def main() -> int:
 
     session = latest_session(args.extension_id, args.chrome_user_data_dir, args.chrome_profile)
     if not session:
-        print(status_line("NO_SESSION", chrome_running=chrome_running(ext_dir)))
-        if not args.no_restart:
+        running = chrome_running(ext_dir)
+        print(status_line("NO_SESSION", action="sign_in_to_reachr_in_runner_chrome", chrome_running=running))
+        if not args.no_restart and not running:
             launch_chrome(args.chrome_app, args.chrome_user_data_dir, args.chrome_profile, ext_dir, args.dashboard_url, args.extension_id)
         return 2
 
@@ -255,8 +261,6 @@ def main() -> int:
             body = ""
         if exc.code == 401 and ("JWT expired" in body or "PGRST303" in body):
             print(status_line("SESSION_EXPIRED", action="open_extension_popup_and_sign_in", chrome_running=chrome_running(ext_dir)))
-            if not args.no_restart:
-                launch_chrome(args.chrome_app, args.chrome_user_data_dir, args.chrome_profile, ext_dir, args.dashboard_url, args.extension_id)
             return 7
         print(status_line("CHECK_FAILED", error=f"HTTPError:{exc.code}", chrome_running=chrome_running(ext_dir)))
         return 3
