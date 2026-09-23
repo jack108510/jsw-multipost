@@ -45,6 +45,36 @@ CREATE TABLE IF NOT EXISTS public.reachr_campaign_schedules (
   CONSTRAINT reachr_campaign_next_required CHECK (NOT enabled OR next_at IS NOT NULL),
   CONSTRAINT reachr_campaign_source_unique UNIQUE (user_id, source_campaign_id)
 );
+-- Some projects already have a smaller schedule table. Preserve its rows, but
+-- leave every pre-existing schedule inactive until it receives a new approval.
+ALTER TABLE public.reachr_campaign_schedules
+  ADD COLUMN IF NOT EXISTS source_campaign_id text,
+  ADD COLUMN IF NOT EXISTS name text NOT NULL DEFAULT '',
+  ADD COLUMN IF NOT EXISTS missed_count integer NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'draft',
+  ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+UPDATE public.reachr_campaign_schedules
+  SET source_campaign_id = id::text WHERE source_campaign_id IS NULL;
+UPDATE public.reachr_campaign_schedules
+  SET enabled = false, status = 'paused', updated_at = now() WHERE enabled;
+ALTER TABLE public.reachr_campaign_schedules
+  ALTER COLUMN source_campaign_id SET NOT NULL,
+  ALTER COLUMN identity_type DROP NOT NULL,
+  ALTER COLUMN identity_url DROP NOT NULL,
+  ALTER COLUMN next_at DROP NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS reachr_campaign_source_unique_idx
+  ON public.reachr_campaign_schedules (user_id, source_campaign_id);
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'reachr_campaign_active_consistent') THEN
+    ALTER TABLE public.reachr_campaign_schedules ADD CONSTRAINT reachr_campaign_active_consistent
+      CHECK (enabled = (status = 'active'));
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'reachr_campaign_next_required') THEN
+    ALTER TABLE public.reachr_campaign_schedules ADD CONSTRAINT reachr_campaign_next_required
+      CHECK (NOT enabled OR next_at IS NOT NULL);
+  END IF;
+END $$;
 CREATE INDEX IF NOT EXISTS reachr_campaign_due_idx
   ON public.reachr_campaign_schedules (user_id, next_at) WHERE enabled;
 
@@ -57,13 +87,19 @@ CREATE TABLE IF NOT EXISTS public.reachr_schedule_occurrences (
   created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (campaign_id, scheduled_for, batch_index)
 );
+ALTER TABLE public.reachr_schedule_occurrences
+  ADD COLUMN IF NOT EXISTS batch_index integer NOT NULL DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
+CREATE UNIQUE INDEX IF NOT EXISTS reachr_occurrence_batch_unique_idx
+  ON public.reachr_schedule_occurrences (campaign_id, scheduled_for, batch_index);
 CREATE UNIQUE INDEX IF NOT EXISTS jsw_post_jobs_occurrence_unique
   ON public.jsw_post_jobs (occurrence_id) WHERE occurrence_id IS NOT NULL;
 
 ALTER TABLE public.reachr_campaign_schedules ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.reachr_schedule_occurrences ENABLE ROW LEVEL SECURITY;
 GRANT SELECT, INSERT, UPDATE ON public.reachr_campaign_schedules TO authenticated;
-GRANT SELECT ON public.reachr_schedule_occurrences TO authenticated;
+GRANT SELECT, INSERT, UPDATE ON public.reachr_campaign_schedules TO service_role;
+GRANT SELECT ON public.reachr_schedule_occurrences TO authenticated, service_role;
 CREATE POLICY reachr_campaign_owner_select ON public.reachr_campaign_schedules
   FOR SELECT TO authenticated USING (user_id = auth.uid());
 CREATE POLICY reachr_campaign_owner_insert ON public.reachr_campaign_schedules
@@ -78,7 +114,7 @@ CREATE POLICY reachr_occurrence_owner_select ON public.reachr_schedule_occurrenc
 -- The extension calls this with the paired user's JWT. Schedule admission runs
 -- inside Postgres, independently of the dashboard tab. The approval migration
 -- replaces this private function with its snapshot/approval gated version.
-CREATE FUNCTION reachr_private.schedule_tick_at(p_now timestamptz)
+CREATE OR REPLACE FUNCTION reachr_private.schedule_tick_at(p_now timestamptz)
 RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
 BEGIN
   RAISE EXCEPTION 'Campaign approval migration is required before scheduling';
