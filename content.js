@@ -666,6 +666,8 @@
     });
 
     push(activeIdentityFromMenu());
+    push(activeIdentityFromQuickMenuHeader());
+    push(activeIdentityFromFullSelector());
     const names = [...new Map(candidates.map(name => [name.toLowerCase(), name])).values()];
     return names.length === 1 ? names[0] : null;
   }
@@ -674,29 +676,23 @@
     const banner = document.querySelector('[role="banner"]') || document.body;
     const menuLooksOpen = () => {
       const text = normalizeText(identityMenuRoot()?.innerText || identityMenuRoot()?.textContent || '');
-      return /Quick switch profiles|See all profiles|See all pages|Select profile|Pages you manage|Settings & privacy|Log out/i.test(text);
+      if (/Quick switch profiles|See all profiles|See all pages|Select profile|Pages you manage|Settings & privacy|Log out/i.test(text)) return true;
+      return [...document.querySelectorAll('[role="button"], button, a[href]')].filter(visible)
+        .some(el => /^See all profiles$/i.test(normalizeText(el.getAttribute('aria-label') || el.innerText || el.textContent || '')));
+    };
+    if (menuLooksOpen()) return true;
+    const clickAndCheck = async el => {
+      const button = el?.closest?.('[role="button"], a[href], button') || el;
+      if (!button) return false;
+      try { button.click(); } catch (_) { return false; }
+      await sleep(1000);
+      return menuLooksOpen();
     };
     const topRightVisible = (el) => {
       if (!visible(el)) return false;
       const box = el.getBoundingClientRect?.();
       return !!box && box.top < 140 && box.left > window.innerWidth * 0.45;
     };
-
-    // Most reliable on Facebook: click the top-right account/avatar button by position.
-    // Selector labels change between personal profiles and Pages, but the account
-    // switcher always opens from the right side of the top nav.
-    const y = 50;
-    for (const offset of [24, 64, 104, 144, 184, 224]) {
-      const el = document.elementFromPoint(window.innerWidth - offset, y)?.closest?.('[role="button"], a[href], button');
-      if (!el || !visible(el)) continue;
-      const label = normalizeText(el.getAttribute?.('aria-label') || el.innerText || el.textContent || '');
-      if (/Messenger|Notifications|Facebook menu|Search|Home|Pages|Professional dashboard|Ad Center|Reels/i.test(label)) continue;
-      clickLikeUser(el);
-      await sleep(1200);
-      if (menuLooksOpen()) return true;
-      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-      await sleep(250);
-    }
 
     const selectors = [
       '[aria-label="Account Controls and Settings"]',
@@ -710,12 +706,22 @@
       const matches = [...banner.querySelectorAll(sel)];
       const el = matches.find(topRightVisible)
         || (/Your profile/i.test(sel) ? null : matches.find(visible));
-      if (el) { clickLikeUser(el); await sleep(1200); return true; }
+      if (el && await clickAndCheck(el)) return true;
     }
     const imgBtn = [...banner.querySelectorAll('div[role="button"], a[role="link"], a, button')]
       .filter(topRightVisible)
       .find(el => el.querySelector('img[alt]'));
-    if (imgBtn) { clickLikeUser(imgBtn); await sleep(1200); return true; }
+    if (imgBtn && await clickAndCheck(imgBtn)) return true;
+
+    // Only probe the far-right avatar area. Wider sweeps can click unrelated
+    // nav controls such as Gaming on a narrow Chrome window.
+    for (const offset of [48, 64, 80]) {
+      const el = document.elementFromPoint(window.innerWidth - offset, 50)?.closest?.('[role="button"], a[href], button');
+      if (!el || !visible(el)) continue;
+      const label = normalizeText(el.getAttribute?.('aria-label') || el.innerText || el.textContent || '');
+      if (!/Account|Your profile/i.test(label) && !el.querySelector?.('img[alt]')) continue;
+      if (await clickAndCheck(el)) return true;
+    }
     return false;
   }
 
@@ -756,7 +762,7 @@
     const cleaned = cleanIdentityName(name || '');
     if (!cleaned || isPlaceholderIdentityName(cleaned)) return true;
     if (cleaned.length > 90) return true;
-    if (/^(quick switch profiles?|see all profiles?|see all pages?|settings(?:\s*(?:&|and)?\s*privacy)?|help(?:\s*(?:&|and)?\s*support)?|report a problem|give feedback|meta verified|meta business suite|display & accessibility|privacy|terms|privacy policy|advertising|ad choices|cookies|more|active|edit|manage|back to previous(?: page)?|select an option|available voices?,?\s*switch|unread chats?|chatsallhas new content.*|log out)$/i.test(cleaned)) return true;
+    if (/^(quick switch profiles?|see all profiles?|see all pages?|settings(?:\s*(?:&|and)?\s*privacy)?|help(?:\s*(?:&|and)?\s*support)?|report a problem(?:\s*⌘\s*B)?|give feedback|meta verified|meta business suite|display & accessibility|privacy|terms|privacy policy|advertising|ad choices|cookies|more|active|edit|manage|create(?: page)?|back to previous(?: page)?|select an option|available voices?,?\s*switch|unread chats?|chatsallhas new content.*|log out)$/i.test(cleaned)) return true;
     if (/^(?:[A-Z]\s*){1,3}$/i.test(cleaned.replace(/\./g, ''))) return true; // menu initials like "B B"
     if (/^\d+\+?$/.test(cleaned)) return true;
     if (/^\d+\s*(?:m|h|d|w|mo|y)$/i.test(cleaned)) return true;
@@ -813,6 +819,37 @@
     return names.size === 1 ? [...names.values()][0] : null;
   }
 
+  function activeIdentityFromFullSelector() {
+    // Facebook's full selector marks the current actor independently of its
+    // position. The other visible rows are available actors, not proof.
+    const active = scrapeFullProfileSelector().filter(item => item.is_active);
+    return active.length === 1 ? active[0].name : null;
+  }
+
+  function activeIdentityFromQuickMenuHeader() {
+    if (fullProfileSelectorRoot()) return null;
+    const names = new Set();
+    const seeAllButtons = [...document.querySelectorAll('[role="button"], button')]
+      .filter(visible)
+      .filter(el => normalizeText(el.getAttribute('aria-label') || '') === 'See all profiles');
+    for (const button of seeAllButtons) {
+      for (let panel = button.parentElement, level = 0; panel && level < 8; panel = panel.parentElement, level++) {
+        if (panel === document.body || panel === document.documentElement) break;
+        const children = [...panel.children];
+        const currentLink = children[0];
+        // On the native account menu, the current actor is its first direct
+        // child: a /me/ profile link, followed by a divider and the switch rows.
+        // Other /me/ links elsewhere on Facebook are never accepted.
+        if (currentLink?.tagName !== 'A' || children[1]?.tagName !== 'HR'
+          || !/^https:\/\/(?:www\.)?facebook\.com\/me\/?(?:[?#]|$)/i.test(currentLink.href || '')) continue;
+        const name = cleanIdentityName(currentLink.innerText || currentLink.textContent || '');
+        if (name && !isForbiddenIdentityName(name)) names.add(name);
+        break;
+      }
+    }
+    return names.size === 1 ? [...names][0] : null;
+  }
+
   function identityMenuRoot() {
     const menuTextRe = /Switch to|Continue as|See all profiles|See all pages|Pages you manage|Select profile|Your Pages|See your profile|View your profile|Quick switch profiles|Meta Business Suite|Settings & privacy|Log out/i;
     const textOf = el => normalizeText(el?.innerText || el?.textContent || el?.getAttribute?.('aria-label') || '');
@@ -823,7 +860,9 @@
 
     const semanticRoots = [...document.querySelectorAll('[role="menu"], [role="dialog"]')].filter(visible)
       .filter(el => menuTextRe.test(textOf(el)));
-    if (semanticRoots.length) return semanticRoots.length === 1 ? semanticRoots[0] : null;
+    if (semanticRoots.length === 1) return semanticRoots[0];
+    // Nested menu/dialog nodes are common; search their visible account panel
+    // below instead of treating the nesting as an absent switcher.
     // Facebook's account switcher is often a plain floating div, not a dialog/menu.
     // Find the text node/row for Quick switch / See all, then climb to the smallest
     // visible ancestor that contains the account-menu footer/settings rows.
@@ -863,7 +902,7 @@
   }
 
   function findSeeAllIdentitiesButton(root=identityMenuRoot(), kind='any') {
-    if (!root) return null;
+    root = root || document;
     const wantsProfiles = kind === 'profiles';
     const wantsPages = kind === 'pages';
     return [...root.querySelectorAll('[role="button"], a[href], [aria-label]')]
@@ -877,6 +916,68 @@
         if (wantsPages) return /^See all pages\b/i.test(cleanedLabel) || /^See all pages\b/i.test(cleanedText);
         return /^(See all profiles|See all pages)\b/i.test(cleanedLabel) || /^(See all profiles|See all pages)\b/i.test(cleanedText);
       }) || null;
+  }
+
+  function fullProfileSelectorRoot() {
+    // Anchor only the full selector panel. The quick menu can remain in the
+    // DOM underneath it and must never contribute identity rows.
+    const seeAllPages = [...document.querySelectorAll('[role="button"], button, a[href]')]
+      .filter(visible)
+      .find(el => /^See all Pages$/i.test(normalizeText(el.getAttribute('aria-label') || el.innerText || el.textContent || '')));
+    for (let node = seeAllPages; node && node !== document.body && node !== document.documentElement; node = node.parentElement) {
+      const box = node.getBoundingClientRect?.();
+      const panelText = normalizeText(node.innerText || node.textContent || '');
+      if (box && box.width >= 250 && box.width <= 700 && box.height >= 300
+        && /Select profile/i.test(panelText)) return node;
+    }
+    const headings = [...document.querySelectorAll('[role="heading"], h1, h2, div, span')]
+      .filter(visible)
+      .filter(el => normalizeText(el.innerText || el.textContent || '') === 'Select profile');
+    for (const heading of headings) {
+      let node = heading;
+      for (let i = 0; node && i < 10; i++, node = node.parentElement) {
+        if (node === document.body || node === document.documentElement) break;
+        const box = node.getBoundingClientRect?.();
+        const panelText = normalizeText(node.innerText || node.textContent || '');
+        if (box && box.width >= 250 && box.width <= 700 && box.height >= 200
+          && /\bSee all Pages\b/i.test(panelText)) return node;
+      }
+    }
+    return null;
+  }
+
+  function scrapeFullProfileSelector() {
+    const root = fullProfileSelectorRoot();
+    if (!root) return [];
+    const found = new Map();
+    const controls = [...root.querySelectorAll('[role="button"], [role="option"], [role="menuitemradio"], a[href], button')].filter(visible);
+    for (const control of controls) {
+      const raw = control.innerText || control.textContent || '';
+      if (!raw || raw.length > 180) continue; // Exclude containers holding multiple actors.
+      const lines = raw.split('\n').map(cleanIdentityName).filter(Boolean);
+      if (!lines.length || lines.length > 3) continue;
+      const name = lines[0].replace(/\s+\d+\s+notifications?$/i, '').trim();
+      if (!name || isForbiddenIdentityName(name)
+        || /^(Select profile|Create(?: Page)?|See all Pages|Back|Go back|\d+ notifications?|Report a problem\b.*)$/i.test(name)) continue;
+      if (lines.slice(1).some(line => !/^\d+\s+notifications?$/i.test(line))) continue;
+      const key = name.toLowerCase();
+      const selected = control.getAttribute('aria-checked') === 'true'
+        || control.getAttribute('aria-selected') === 'true'
+        || !!control.querySelector('[aria-checked="true"], [aria-selected="true"], [aria-label="Selected"], [title="Selected"]');
+      const url = control.href || control.closest?.('a[href]')?.href || null;
+      if (!identityUrlAllowed(url)) continue;
+      const previous = found.get(key);
+      found.set(key, {
+        id: facebookProfileIdFromUrl(url) || previous?.id || key,
+        name,
+        type: facebookProfileIdFromUrl(url) ? 'page' : previous?.type || 'facebook identity',
+        url: url || previous?.url || null,
+        avatar_url: extractAvatarUrl(control) || previous?.avatar_url || null,
+        is_active: selected || !!previous?.is_active,
+        source: 'account_switcher'
+      });
+    }
+    return [...found.values()];
   }
 
   async function expandAllIdentitiesIfPresent(maxClicks=2) {
@@ -896,8 +997,15 @@
     const button = findSeeAllIdentitiesButton(identityMenuRoot(), kind);
     if (!button) return false;
     log('Clicking Facebook identity switcher button:', normalizeText(button.innerText || button.textContent || button.getAttribute('aria-label') || kind));
-    clickLikeUser(button);
-    await sleep(kind === 'pages' ? 3000 : 1800);
+    // One click is enough for Facebook's React menu. Sending a second click or
+    // synthetic Enter can close the selector immediately after opening it.
+    try { button.scrollIntoView({ block: 'center', inline: 'center' }); } catch (_) {}
+    (button.closest?.('[role="button"], a[href], button') || button).click();
+    if (kind === 'profiles') {
+      try { return !!await waitFor(fullProfileSelectorRoot, 6000, 250); }
+      catch (_) { return false; }
+    }
+    await sleep(3000);
     return true;
   }
 
@@ -950,7 +1058,7 @@
 
   function findIdentityTarget(expectedName) {
     const expected = cleanIdentityName(expectedName || '').toLowerCase();
-    const root = identityMenuRoot();
+    const root = fullProfileSelectorRoot() || identityMenuRoot();
     if (!root) return null;
     const rows = [];
     const seen = new Set();
@@ -979,8 +1087,20 @@
   }
 
   function identitySwitcherDebugSummary() {
+    const fullControls = [...document.querySelectorAll('[role="button"], button, [role="heading"], h1, h2')]
+      .filter(visible)
+      .map(el => normalizeText(el.getAttribute('aria-label') || el.innerText || el.textContent || ''))
+      .filter(label => /^(Select profile|See all Pages)$/i.test(label))
+      .slice(0, 8);
     const root = identityMenuRoot();
-    if (!root) return 'Switcher visible rows: none; scraped identities: none; see-all/page rows: none';
+    if (!root) {
+      const controls = [...document.querySelectorAll('[role="button"], button, [role="heading"], h1, h2')]
+        .filter(visible)
+        .map(el => normalizeText(el.getAttribute('aria-label') || el.innerText || el.textContent || ''))
+        .filter(label => /^(See all profiles|Select profile|See all Pages|Account Controls|Your profile)/i.test(label))
+        .slice(0, 8);
+      return `Switcher root missing; visible identity controls: ${controls.join(' | ') || 'none'}; full panel controls: ${fullControls.join(' | ') || 'none'}`;
+    }
     const rowEls = [...root.querySelectorAll('[role="button"], a[href], [aria-label]')]
       .filter(visible);
     const rows = rowEls
@@ -999,7 +1119,7 @@
       const rect = clickable.getBoundingClientRect?.();
       return `${text} [${role}${href ? ' href=' + href : ''}${aria ? ' aria=' + aria : ''}${rect ? ' rect=' + Math.round(rect.width) + 'x' + Math.round(rect.height) : ''}]`;
     });
-    return `Switcher visible rows: ${rows.join(' | ') || 'none'}; scraped identities: ${scraped.join(', ') || 'none'}; see-all/page rows: ${seeAll.join(' | ') || 'none'}`;
+    return `Switcher visible rows: ${rows.join(' | ') || 'none'}; scraped identities: ${scraped.join(', ') || 'none'}; see-all/page rows: ${seeAll.join(' | ') || 'none'}; full panel controls: ${fullControls.join(' | ') || 'none'}`;
   }
 
   function scrapeIdentityMenu() {
@@ -1339,21 +1459,32 @@
     }
   }
 
-  async function syncFacebookIdentities() {
-    log('Syncing Facebook identities...');
-    const activeBefore = currentIdentityName();
+  async function locateSeeAllProfilesForTrustedClick() {
     const opened = await openIdentityMenu();
     if (!opened) throw new Error('Could not open Facebook profile switcher');
-    await sleep(1000);
-    const activeAfterOpen = activeIdentityFromMenu() || currentIdentityName() || activeBefore;
-    const quickIdentities = scrapeIdentityMenu();
-    const expanded = await expandAllIdentitiesIfPresent();
-    if (expanded) await sleep(800);
-    let identities = mergeIdentityLists(quickIdentities, expanded ? scrapeIdentityMenu() : []);
-    if (activeAfterOpen && !identities.some(i => identityMatches(i.name, activeAfterOpen))) identities.unshift({ id: activeAfterOpen.toLowerCase(), name: activeAfterOpen, type: 'facebook identity', is_active: true });
-    if (!identities.length && activeAfterOpen) identities = [{ id: activeAfterOpen.toLowerCase(), name: activeAfterOpen, type: 'facebook identity', is_active: true }];
-    if (!identities.length) throw new Error(`No Facebook identities found in switcher at ${location.pathname}. ${identitySwitcherDebugSummary().slice(0, 600)}`);
-    return { identities, active_identity: identities.find(i => i.is_active)?.name || activeAfterOpen || activeBefore || null, expanded_profiles: expanded, pageUrl: location.href };
+    const button = findSeeAllIdentitiesButton(identityMenuRoot(), 'profiles');
+    if (!button) {
+      throw new Error(`Facebook account menu opened, but See all profiles was not found. ${identitySwitcherDebugSummary().slice(0, 600)}`);
+    }
+    try { button.scrollIntoView({ block: 'center', inline: 'center' }); } catch (_) {}
+    const box = button.getBoundingClientRect();
+    if (box.width < 20 || box.height < 20) throw new Error('See all profiles button has no clickable area');
+    return {
+      x: box.left + box.width / 2,
+      y: box.top + box.height / 2,
+      active_identity: activeIdentityFromMenu() || currentIdentityName() || null,
+      pageUrl: location.href
+    };
+  }
+
+  async function syncFacebookIdentities() {
+    log('Reading Facebook Select profile list...');
+    if (!fullProfileSelectorRoot()) {
+      throw new Error(`Facebook's full Select profile list is not open. ${identitySwitcherDebugSummary().slice(0, 600)}`);
+    }
+    const identities = scrapeFullProfileSelector();
+    if (!identities.length) throw new Error(`No Facebook identities found in Select profile list. ${identitySwitcherDebugSummary().slice(0, 600)}`);
+    return { identities, active_identity: identities.find(i => i.is_active)?.name || null, expanded_profiles: true, pageUrl: location.href };
   }
 
   function detectFacebookDefenseSignal() {
@@ -1399,24 +1530,11 @@
     if (!expectedName) return { found: false, active_identity: currentIdentityName(), error: 'missing expected identity' };
     let active = currentIdentityName();
     if (!force && identityMatches(active, expectedName)) return { found: true, already_active: true, active_identity: active, pageUrl: location.href };
-    const opened = await openIdentityMenu();
-    if (!opened) return { found: false, active_identity: active || null, error: 'Could not open Facebook profile switcher', pageUrl: location.href };
-    await sleep(1000);
-
-    // Always open the full Facebook profile/Page selector before locating the
-    // actor. The compact quick-switcher can show stale or partial identities;
-    // the full "See all profiles" path is the stable source of truth.
-    await clickSeeAllButton('profiles');
-    await sleep(800);
+    // Background opens the full selector with trusted browser input first.
+    // Never locate a target from the compact quick-switcher.
+    if (!fullProfileSelectorRoot()) return { found: false, active_identity: active || null, error: 'Full Select profile list is not open', debug: identitySwitcherDebugSummary(), pageUrl: location.href };
 
     let target = findIdentityTarget(expectedName);
-    if (!target) {
-      const expanded = await expandAllIdentitiesIfPresent();
-      if (expanded) {
-        await sleep(800);
-        target = findIdentityTarget(expectedName);
-      }
-    }
     if (!target) return { found: false, active_identity: activeIdentityFromMenu() || active || null, error: `Could not find Facebook identity ${expectedName}`, debug: identitySwitcherDebugSummary(), pageUrl: location.href };
     const clickable = target.closest?.('[role="button"], a[href], button') || target;
     try { clickable.scrollIntoView({ block: 'center', inline: 'center' }); } catch (_) {}
@@ -2151,7 +2269,7 @@
 
   // ============ MESSAGE LISTENER ============
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-    if (!['POST_TO_PAGE','RECONCILE_SUBMITTED_POST_CANDIDATE','PROBE_GROUP_COMPOSER_TYPING','PROBE_GROUP_COMPOSER_SUBMIT_READINESS','PROBE_GROUP_COMPOSER_IDENTITY','SYNC_FACEBOOK_IDENTITIES','SWITCH_FACEBOOK_IDENTITY','LOCATE_FACEBOOK_IDENTITY_SWITCH_TARGET','SCRAPE_FACEBOOK_MANAGED_PAGES','SWITCH_FACEBOOK_MANAGED_PAGE','GET_FACEBOOK_ACTIVE_IDENTITY','GET_FACEBOOK_PAGE_CONTEXT_IDENTITY'].includes(msg.type)) return;
+    if (!['POST_TO_PAGE','RECONCILE_SUBMITTED_POST_CANDIDATE','PROBE_GROUP_COMPOSER_TYPING','PROBE_GROUP_COMPOSER_SUBMIT_READINESS','PROBE_GROUP_COMPOSER_IDENTITY','LOCATE_FACEBOOK_SEE_ALL_PROFILES','SYNC_FACEBOOK_IDENTITIES','SWITCH_FACEBOOK_IDENTITY','LOCATE_FACEBOOK_IDENTITY_SWITCH_TARGET','SCRAPE_FACEBOOK_MANAGED_PAGES','SWITCH_FACEBOOK_MANAGED_PAGE','GET_FACEBOOK_ACTIVE_IDENTITY','GET_FACEBOOK_PAGE_CONTEXT_IDENTITY'].includes(msg.type)) return;
 
     if (msg.type === 'RECONCILE_SUBMITTED_POST_CANDIDATE') {
       // Observation-only: no composer, click, wait, storage or post path. The
@@ -2177,7 +2295,10 @@
             const opened = await openIdentityMenu();
             if (opened) {
               await sleep(1000);
-              active = activeIdentityFromMenu(document, expected) || currentIdentityName();
+              active = activeIdentityFromFullSelector()
+                || activeIdentityFromMenu(document, expected)
+                || activeIdentityFromQuickMenuHeader()
+                || currentIdentityName();
             }
           }
           sendResponse({ success: true, activeIdentity: active || null, expectedIdentity: expected, matchesExpected: identityMatches(active, expected), pageUrl: location.href });
@@ -2231,6 +2352,14 @@
           log('IDENTITY SWITCH ERROR:', error.message);
           sendResponse({ success: false, error: error.message });
         }
+      })();
+      return true;
+    }
+
+    if (msg.type === 'LOCATE_FACEBOOK_SEE_ALL_PROFILES') {
+      (async () => {
+        try { sendResponse({ success: true, ...await locateSeeAllProfilesForTrustedClick() }); }
+        catch (error) { sendResponse({ success: false, error: error.message }); }
       })();
       return true;
     }
