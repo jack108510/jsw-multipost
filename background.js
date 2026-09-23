@@ -1636,7 +1636,11 @@ async function requireFacebookSessionForGroupScan() {
     const cookies = await chrome.cookies.getAll({ domain: '.facebook.com' });
     const state = classifyFacebookSessionProbe({ ...probeResult?.result, hasCUser: cookies.some(c => c.name === 'c_user') });
     if (!state.available) {
-      throw Object.assign(new Error('Facebook login required. Sign in before Reachr scans groups or switches identities.'), { code: state.code });
+      // Keep the Facebook tab visible so the operator can sign in to the exact
+      // Chrome profile used by Reachr. A failed probe must never close it.
+      createdTabId = null;
+      try { await chrome.tabs.update(tab.id, { active: true }); } catch (_) {}
+      throw Object.assign(new Error('Facebook login required in this Reachr Chrome window. Sign in there, then retry Update profiles or Import groups.'), { code: state.code });
     }
     return state;
   } catch (error) {
@@ -3508,7 +3512,8 @@ async function syncFacebookIdentitiesForJob(jobId) {
   let tab;
   try {
     await sbUpdateJob(jobId, { result: { text: 'Opening Facebook...' } });
-    tab = await chrome.tabs.create({ url: 'https://www.facebook.com/', active: false });
+    await requireFacebookSessionForGroupScan();
+    tab = await chrome.tabs.create({ url: 'https://www.facebook.com/', active: true });
     await sleep(5000);
 
     await sbUpdateJob(jobId, { result: { text: 'Reading Facebook profile/Page switcher...' } });
@@ -3576,7 +3581,8 @@ async function syncFacebookIdentitiesForJob(jobId) {
     });
     extLog('info', `Synced ${identities.length} posting identities`);
   } catch (e) {
-    if (tab) { try { await chrome.tabs.remove(tab.id); } catch (_) {} }
+    // Leave Facebook visible for account-menu inspection after a failed sync.
+    if (tab) { try { await chrome.tabs.update(tab.id, { active: true }); } catch (_) {} }
     extLog('error', 'syncFacebookIdentitiesForJob error: ' + e.message);
     await sbUpdateJob(jobId, { status: 'failed', result: { error: e.message }, completed_at: new Date().toISOString() });
   }
