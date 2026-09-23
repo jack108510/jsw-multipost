@@ -90,6 +90,8 @@ CREATE TABLE IF NOT EXISTS public.reachr_schedule_occurrences (
 ALTER TABLE public.reachr_schedule_occurrences
   ADD COLUMN IF NOT EXISTS batch_index integer NOT NULL DEFAULT 1,
   ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now();
+ALTER TABLE public.reachr_schedule_occurrences
+  DROP CONSTRAINT IF EXISTS reachr_schedule_occurrences_campaign_id_scheduled_for_key;
 CREATE UNIQUE INDEX IF NOT EXISTS reachr_occurrence_batch_unique_idx
   ON public.reachr_schedule_occurrences (campaign_id, scheduled_for, batch_index);
 CREATE UNIQUE INDEX IF NOT EXISTS jsw_post_jobs_occurrence_unique
