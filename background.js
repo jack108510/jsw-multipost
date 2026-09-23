@@ -1366,7 +1366,7 @@ async function pollLocalFallbackJobs() {
 // Database owns durable occurrence admission. The account-scoped session flag is
 // absent/OFF for existing installations; no local fallback on ambiguous RPC results.
 async function tickDurableSchedules(session) {
-  const res = await fetch(`${SB_URL}/rest/v1/rpc/reachr_schedule_tick`, {
+  const res = await fetch(`${SB_URL}/rest/v1/rpc/reachr_schedule_tick_approved`, {
     method: 'POST',
     headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}`, 'Content-Type': 'application/json' },
     body: '{}'
