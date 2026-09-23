@@ -1746,7 +1746,10 @@ async function requireFacebookSessionForGroupScan() {
       // Keep the Facebook tab visible so the operator can sign in to the exact
       // Chrome profile used by Reachr. A failed probe must never close it.
       createdTabId = null;
-      try { await chrome.tabs.update(tab.id, { active: true }); } catch (_) {}
+      try {
+        await chrome.tabs.update(tab.id, { active: true });
+        if (Number.isInteger(tab.windowId)) await chrome.windows.update(tab.windowId, { focused: true });
+      } catch (_) {}
       throw Object.assign(new Error('Facebook login required in this Reachr Chrome window. Sign in there, then retry Update profiles or Import groups.'), { code: state.code });
     }
     return state;
@@ -3641,9 +3644,10 @@ async function syncFacebookIdentitiesForJob(jobId) {
     await sbUpdateJob(jobId, { result: { text: 'Opening Facebook...' } });
     await requireFacebookSessionForGroupScan();
     tab = await chrome.tabs.create({ url: 'https://www.facebook.com/', active: true });
+    try { if (Number.isInteger(tab.windowId)) await chrome.windows.update(tab.windowId, { focused: true }); } catch (_) {}
     await sleep(5000);
 
-    await sbUpdateJob(jobId, { result: { text: 'Reading Facebook profile/Page switcher...' } });
+    await sbUpdateJob(jobId, { result: { text: 'Reading Facebook profile/Page switcher...', extension_version: EXT_VERSION } });
     const switcherResponse = await sendTabMessageWithRetry(tab.id, { type: 'SYNC_FACEBOOK_IDENTITIES' });
     if (!switcherResponse?.success) throw new Error(switcherResponse?.error || 'Identity sync failed');
 
@@ -3709,9 +3713,14 @@ async function syncFacebookIdentitiesForJob(jobId) {
     extLog('info', `Synced ${identities.length} posting identities`);
   } catch (e) {
     // Leave Facebook visible for account-menu inspection after a failed sync.
-    if (tab) { try { await chrome.tabs.update(tab.id, { active: true }); } catch (_) {} }
+    if (tab) {
+      try {
+        await chrome.tabs.update(tab.id, { active: true });
+        if (Number.isInteger(tab.windowId)) await chrome.windows.update(tab.windowId, { focused: true });
+      } catch (_) {}
+    }
     extLog('error', 'syncFacebookIdentitiesForJob error: ' + e.message);
-    await sbUpdateJob(jobId, { status: 'failed', result: { error: e.message }, completed_at: new Date().toISOString() });
+    await sbUpdateJob(jobId, { status: 'failed', result: { error: e.message, error_code: e.code || null, extension_version: EXT_VERSION }, completed_at: new Date().toISOString() });
   }
 }
 
