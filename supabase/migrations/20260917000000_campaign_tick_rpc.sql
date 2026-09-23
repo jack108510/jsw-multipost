@@ -2,13 +2,13 @@
 -- private function admits only campaigns with a current approval snapshot.
 BEGIN;
 
-CREATE OR REPLACE FUNCTION public.reachr_schedule_tick()
+CREATE FUNCTION public.reachr_schedule_tick_approved()
 RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public AS $$
 BEGIN
   IF auth.uid() IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
   RETURN reachr_private.schedule_tick_at(clock_timestamp());
 END $$;
-REVOKE ALL ON FUNCTION public.reachr_schedule_tick() FROM PUBLIC, anon, authenticated, service_role;
-GRANT EXECUTE ON FUNCTION public.reachr_schedule_tick() TO authenticated;
+REVOKE ALL ON FUNCTION public.reachr_schedule_tick_approved() FROM PUBLIC, anon, authenticated, service_role;
+GRANT EXECUTE ON FUNCTION public.reachr_schedule_tick_approved() TO authenticated;
 
 COMMIT;
