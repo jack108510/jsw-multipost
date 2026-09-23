@@ -11,7 +11,7 @@ CHECK_INTERVAL="${AMPLR_RUNNER_INTERVAL:-30}"
 HEARTBEAT_STALE_SECONDS="${AMPLR_HEARTBEAT_STALE_SECONDS:-150}"
 HEARTBEAT_CHECK_EVERY="${AMPLR_HEARTBEAT_CHECK_EVERY:-60}"
 EXTENSION_ID="${AMPLR_EXTENSION_ID:-nglcanaclcaahancoecenliekemolfgp}"
-DASHBOARD_URL="${AMPLR_DASHBOARD_URL:-https://jack108510.github.io/jsw-multipost/dashboard.html}"
+DASHBOARD_URL="${AMPLR_DASHBOARD_URL:-https://jack108510.github.io/fb-autoposter/dashboard.html}"
 
 if [[ ! -d "$EXT_DIR" ]]; then
   echo "Extension directory not found: $EXT_DIR" >&2
