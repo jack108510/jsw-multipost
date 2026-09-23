@@ -1352,7 +1352,7 @@
     let identities = mergeIdentityLists(quickIdentities, expanded ? scrapeIdentityMenu() : []);
     if (activeAfterOpen && !identities.some(i => identityMatches(i.name, activeAfterOpen))) identities.unshift({ id: activeAfterOpen.toLowerCase(), name: activeAfterOpen, type: 'facebook identity', is_active: true });
     if (!identities.length && activeAfterOpen) identities = [{ id: activeAfterOpen.toLowerCase(), name: activeAfterOpen, type: 'facebook identity', is_active: true }];
-    if (!identities.length) throw new Error('No Facebook identities found in switcher');
+    if (!identities.length) throw new Error(`No Facebook identities found in switcher at ${location.pathname}. ${identitySwitcherDebugSummary().slice(0, 600)}`);
     return { identities, active_identity: identities.find(i => i.is_active)?.name || activeAfterOpen || activeBefore || null, expanded_profiles: expanded, pageUrl: location.href };
   }
 
