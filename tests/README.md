@@ -1,5 +1,7 @@
 # Reachr smoke checks
 
+The worker Mac handoff for the first test is in [`WORKER_MAC.md`](WORKER_MAC.md).
+
 The JSON files in `fixtures/` describe expected outcomes for identity sync and Facebook group import. They are test inputs, not observations or permission to publish. Both use `mode: "no-submit"`. No group URL or post text is needed for this first stage.
 
 ## Run at a specific commit
