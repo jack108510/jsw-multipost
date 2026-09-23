@@ -1517,6 +1517,113 @@ async function getExistingGroupUrlsByIdentity(session, identityKeys = []) {
   return out;
 }
 
+const GROUP_SCAN_GUARD_VERSION = 'fb-groups-scraper-v3';
+
+async function getGroupRowsForIdentity(session, identityKey) {
+  const rows = [];
+  const pageSize = 500;
+  for (let offset = 0; ; offset += pageSize) {
+    const url = `${SB_URL}/rest/v1/jsw_groups?user_id=eq.${encodeURIComponent(session.userId)}&identity_key=eq.${encodeURIComponent(identityKey)}&select=id,group_url,group_name&order=id.asc&limit=${pageSize}&offset=${offset}`;
+    const response = await fetch(url, { headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}` } });
+    if (!response.ok) throw new Error(`Could not read saved groups for ${identityKey}: ${await response.text()}`);
+    const page = await response.json();
+    rows.push(...page);
+    if (page.length < pageSize) return rows;
+  }
+}
+
+async function getPreviousCompleteGroupSnapshot(session, identityKey) {
+  const url = `${SB_URL}/rest/v1/jsw_post_jobs?user_id=eq.${encodeURIComponent(session.userId)}&message=eq.__import_groups__&status=eq.done&select=id,result,completed_at&order=completed_at.desc&limit=50`;
+  const response = await fetch(url, { headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}` } });
+  if (!response.ok) throw new Error('Could not read prior group scans: ' + await response.text());
+  const jobs = await response.json();
+  for (const job of jobs) {
+    const item = (job.result?.identities || []).find(entry =>
+      String(entry.identity_key) === String(identityKey)
+      && entry.status === 'scanned'
+      && entry.scan_complete === true
+      && Array.isArray(entry.group_urls)
+      && entry.group_scan_guard_version === GROUP_SCAN_GUARD_VERSION
+    );
+    if (item) return { job_id: job.id, urls: item.group_urls };
+  }
+  return null;
+}
+
+function groupSnapshotsAgree(previousUrls, currentUrls) {
+  const previous = new Set(previousUrls || []);
+  const current = new Set(currentUrls || []);
+  if (!previous.size && !current.size) return true;
+  const overlap = [...current].filter(url => previous.has(url)).length;
+  return overlap / Math.max(previous.size, current.size) >= 0.8;
+}
+
+async function persistCompleteGroupScan(session, identity, scan, priorSnapshot) {
+  if (scan?.scan_complete !== true || scan?.active_identity_verified !== true || !Array.isArray(scan.groups)) {
+    throw new Error('Incomplete or unverified group scan cannot change saved groups');
+  }
+  const identityKey = String(identity.key || '');
+  if (!identityKey || identityKey === '__legacy__' || String(scan.identity_key) !== identityKey) {
+    throw new Error('Group scan identity key does not match its save target');
+  }
+  const existing = await getGroupRowsForIdentity(session, identityKey);
+  const before = new Set(existing.map(row => row.group_url));
+  const seen = new Set(scan.groups.map(group => group?.url).filter(Boolean));
+  if (seen.size !== scan.groups.length) throw new Error('Group scan has missing or duplicate URLs');
+  const rows = scan.groups.map(group => ({
+    user_id: session.userId,
+    identity_key: identityKey,
+    identity_name: identity.name,
+    identity_type: identity.type || null,
+    group_url: group.url,
+    group_name: group.name || null,
+    group_avatar_url: group.group_avatar_url || group.avatar_url || null
+  }));
+  for (let i = 0; i < rows.length; i += 50) {
+    const chunk = rows.slice(i, i + 50);
+    const write = async (withAvatar) => {
+      const body = withAvatar ? chunk : chunk.map(({ group_avatar_url, ...row }) => row);
+      return fetch(`${SB_URL}/rest/v1/jsw_groups?on_conflict=user_id,identity_key,group_url`, {
+        method: 'POST',
+        headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}`, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+        body: JSON.stringify(body)
+      });
+    };
+    let response = await write(true);
+    if (!response.ok) {
+      const reason = await response.text();
+      if (/group_avatar_url|schema cache|column/i.test(reason)) response = await write(false);
+      else throw new Error('Group save failed: ' + reason);
+    }
+    if (!response.ok) throw new Error('Group save failed: ' + await response.text());
+  }
+
+  const missing = existing.filter(row => row.id && !seen.has(row.group_url));
+  const canReconcile = priorSnapshot && groupSnapshotsAgree(priorSnapshot.urls, [...seen]);
+  let removedCount = 0;
+  if (canReconcile) {
+    for (let i = 0; i < missing.length; i += 50) {
+      const ids = missing.slice(i, i + 50).map(row => row.id);
+      const url = `${SB_URL}/rest/v1/jsw_groups?user_id=eq.${encodeURIComponent(session.userId)}&identity_key=eq.${encodeURIComponent(identityKey)}&id=in.(${ids.join(',')})`;
+      const response = await fetch(url, {
+        method: 'DELETE',
+        headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}`, 'Prefer': 'return=minimal' }
+      });
+      if (!response.ok) throw new Error('Group reconciliation failed after removing ' + removedCount + ' rows: ' + await response.text());
+      removedCount += ids.length;
+    }
+  }
+  return {
+    new_count: [...seen].filter(url => !before.has(url)).length,
+    removed_count: removedCount,
+    removed_groups: canReconcile ? missing.map(row => ({ group_url: row.group_url, group_name: row.group_name || null })) : [],
+    retained_count: [...seen].filter(url => before.has(url)).length,
+    reconciliation: !priorSnapshot ? 'baseline_recorded' : canReconcile ? 'complete' : 'awaiting_consistent_scan',
+    previous_scan_job_id: priorSnapshot?.job_id || null,
+    pending_removal_count: canReconcile ? 0 : missing.length
+  };
+}
+
 async function deleteGroupsForIdentity(session, identityKey) {
   if (!session?.userId || !identityKey) return false;
   const res = await fetch(`${SB_URL}/rest/v1/jsw_groups?user_id=eq.${encodeURIComponent(session.userId)}&identity_key=eq.${encodeURIComponent(identityKey)}`, {
@@ -1655,8 +1762,8 @@ async function runImportGroupsJob(job, session) {
   await requireFacebookSessionForGroupScan();
   const targets = await getImportTargetsForJob(job, session);
   if (!targets.length) throw new Error('No synced Facebook profiles/pages found. Sync profiles first.');
-  const beforeByIdentity = await getExistingGroupUrlsByIdentity(session, targets.map(t => t.key || t.name).filter(Boolean));
   const perIdentity = [];
+  const scanCandidates = [];
   const errors = [];
   const scanSignatures = [];
   let accountLevelGroupSignature = null;
@@ -1673,7 +1780,7 @@ async function runImportGroupsJob(job, session) {
     };
     if (!mergedTarget.name || !mergedTarget.key) throw new Error('Group import target is missing a Facebook profile/page owner. Sync profiles first.');
     const label = mergedTarget.name || mergedTarget.key || `profile ${i + 1}`;
-    await sbUpdateJob(job.id, { result: { group_scan_guard_version: 'fb-groups-scraper-v2', text: `Scanning ${label} (${i + 1}/${targets.length})...`, current_identity: label, target_index: i + 1, target_count: targets.length } });
+    await sbUpdateJob(job.id, { result: { group_scan_guard_version: GROUP_SCAN_GUARD_VERSION, text: `Scanning ${label} (${i + 1}/${targets.length})...`, current_identity: label, target_index: i + 1, target_count: targets.length } });
     try {
       const result = await importFacebookGroupsForJob(job.id, mergedTarget, { finalizeJob: false, progressPrefix: `${label}: ` });
       const resultSignature = groupUrlSignature(result?.groups || []);
@@ -1684,7 +1791,6 @@ async function runImportGroupsJob(job, session) {
         || ['verified_profile_switch_then_joined_groups','pages_manager_switch_then_joined_groups'].includes(result?.page_scan_strategy)
       );
       if (isPageTarget && !pageSourceProof && resultSignature && (knownAccountLevelGroupSignatures.has(resultSignature) || (accountLevelGroupSignature && resultSignature === accountLevelGroupSignature))) {
-        await deleteGroupsForIdentity(session, mergedTarget.key);
         throw new Error(`same account-level groups returned for ${mergedTarget.name}`);
       }
       const overlapAssessment = await assessAccountLevelGroupOverlap(session, mergedTarget.name, mergedTarget.type, result?.groups || []);
@@ -1698,26 +1804,29 @@ async function runImportGroupsJob(job, session) {
             : 'Blocked because the scrape did not have Page-specific source proof and overlapped the account-level profile list.'
         });
         if (!pageSourceProof) {
-          await deleteGroupsForIdentity(session, mergedTarget.key);
           throw new Error(`same account-level groups returned for ${mergedTarget.name}`);
         }
       }
       scanSignatures.push({ identity_key: mergedTarget.key, identity_name: mergedTarget.name, identity_type: mergedTarget.type, signature: resultSignature, page_source_proof: pageSourceProof });
-      const before = beforeByIdentity.get(String(mergedTarget.key)) || new Set();
-      const newGroups = (result?.groups || []).filter(g => g?.url && !before.has(g.url)).map(g => ({ group_name: g.name || null, group_url: g.url, group_avatar_url: g.group_avatar_url || null }));
+      const candidateIndex = perIdentity.length;
+      scanCandidates.push({ identity: mergedTarget, result, index: candidateIndex });
       perIdentity.push({
         identity_name: mergedTarget.name || null,
         group_scan_guard_version: result?.group_scan_guard_version || null,
         identity_key: mergedTarget.key,
         identity_type: mergedTarget.type || null,
+        status: 'scanned',
         count: result?.count || 0,
         avatar_count: result?.avatar_count || 0,
+        scan_complete: result?.scan_complete === true,
+        active_identity_verified: result?.active_identity_verified === true,
+        group_urls: (result?.groups || []).map(group => group.url),
         scan_source_url: result?.scan_source_url || null,
         page_scan_strategy: result?.page_scan_strategy || null,
         debug: result?.debug || null,
         warnings,
-        new_count: newGroups.length,
-        new_groups: newGroups.slice(0, 50)
+        new_count: 0,
+        removed_count: 0
       });
     } catch (e) {
       const reason = friendlyGroupScanMissReason(e);
@@ -1747,8 +1856,7 @@ async function runImportGroupsJob(job, session) {
   });
   const quarantinedKeys = new Set();
   for (const item of scanSignatures) {
-    if (!item.signature || signatureCounts.get(item.signature) < 2 || !isPageIdentityType(item.identity_type) || item.page_source_proof) continue;
-    try { await deleteGroupsForIdentity(session, item.identity_key); } catch (e) { extLog('warn', e.message); }
+    if (!item.signature || signatureCounts.get(item.signature) < 2 || !isPageIdentityType(item.identity_type)) continue;
     quarantinedKeys.add(String(item.identity_key));
     errors.push({
       identity_name: item.identity_name || null,
@@ -1773,20 +1881,38 @@ async function runImportGroupsJob(job, session) {
     }
   }
 
+  // All cross-identity checks finish before any scan writes Supabase.
+  for (const candidate of scanCandidates) {
+    if (quarantinedKeys.has(String(candidate.identity.key))) continue;
+    const entry = perIdentity[candidate.index];
+    if (entry?.status !== 'scanned') continue;
+    try {
+      const previous = await getPreviousCompleteGroupSnapshot(session, candidate.identity.key);
+      const change = await persistCompleteGroupScan(session, candidate.identity, candidate.result, previous);
+      Object.assign(entry, change);
+      entry.text = `Scanned ${entry.count} groups; ${change.new_count} new, ${change.removed_count} removed`;
+    } catch (e) {
+      const reason = e.message || 'Group reconciliation failed';
+      errors.push({ identity_name: candidate.identity.name, identity_key: candidate.identity.key, status: 'not_scanned', reason, raw_error: reason });
+      perIdentity[candidate.index] = { identity_name: candidate.identity.name, identity_key: candidate.identity.key, identity_type: candidate.identity.type || null, count: 0, new_count: 0, removed_count: 0, status: 'not_scanned', reason };
+    }
+  }
+
   const totalGroups = perIdentity.reduce((sum, item) => sum + (item.count || 0), 0);
   const totalNew = perIdentity.reduce((sum, item) => sum + (item.new_count || 0), 0);
+  const totalRemoved = perIdentity.reduce((sum, item) => sum + (item.removed_count || 0), 0);
   const notScanned = perIdentity.filter(item => item.status === 'not_scanned').length;
   const scanned = perIdentity.length - notScanned;
   const status = scanned > 0 ? 'done' : 'failed';
   const isDailyScan = !!(job.daily_scan || job.result?.daily_scan);
   const label = isDailyScan ? 'Daily group scan' : 'Group scan';
   const scanText = status === 'done'
-    ? `${label} complete: ${totalGroups} groups across ${targets.length} profiles/pages · ${totalNew} new${notScanned ? ` · ${notScanned} profile/page${notScanned === 1 ? '' : 's'} not scanned` : ''}`
+    ? `${label} complete: ${totalGroups} groups across ${targets.length} profiles/pages · ${totalNew} new · ${totalRemoved} removed${notScanned ? ` · ${notScanned} profile/page${notScanned === 1 ? '' : 's'} not scanned` : ''}`
     : `${label} could not scan any synced profiles/pages`;
   await sbUpdateJob(job.id, {
     status,
     result: {
-      group_scan_guard_version: 'fb-groups-scraper-v2',
+      group_scan_guard_version: GROUP_SCAN_GUARD_VERSION,
       text: scanText,
       daily_scan: isDailyScan,
       target_count: targets.length,
@@ -1794,6 +1920,7 @@ async function runImportGroupsJob(job, session) {
       not_scanned_count: notScanned,
       total_groups: totalGroups,
       total_new_groups: totalNew,
+      total_removed_groups: totalRemoved,
       identities: perIdentity,
       not_scanned: errors
     },
@@ -3846,7 +3973,7 @@ async function clickFacebookPageProfileSwitchButton(tabId, identityName) {
 
 // Job-aware version: updates job progress and result in jsw_post_jobs
 async function importFacebookGroupsForJob(jobId, identityMeta = null, options = {}) {
-  const groupScanGuardVersion = 'fb-groups-scraper-v2';
+  const groupScanGuardVersion = GROUP_SCAN_GUARD_VERSION;
   const identityName = typeof identityMeta === 'string' ? identityMeta : (identityMeta?.name || identityMeta?.identity_name || null);
   const identityKey = (typeof identityMeta === 'object' && (identityMeta?.key || identityMeta?.identity_key)) ? (identityMeta.key || identityMeta.identity_key) : identityName;
   const identityType = (typeof identityMeta === 'object' && (identityMeta?.type || identityMeta?.identity_type)) ? (identityMeta.type || identityMeta.identity_type) : null;
@@ -3940,13 +4067,13 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null, options = 
     let groups = [];
     let scanSourceUrl = null;
     let prevCount = -1;
+    let prevScrollHeight = -1;
+    let stableBottomPasses = 0;
     let passes = 0;
     let lastDebug = null;
     const MAX_PASSES = 30;
-
     const MIN_PASSES = 5;
-    while (passes < MAX_PASSES && (passes < MIN_PASSES || groups.length !== prevCount)) {
-      prevCount = groups.length;
+    while (passes < MAX_PASSES) {
       passes++;
 
       if (passes <= 2) {
@@ -4075,7 +4202,12 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null, options = 
             return out;
           };
 
-          document.querySelectorAll('a[href*="/groups/"]').forEach(a => {
+          const main = document.querySelector('[role="main"], main');
+          if (!main) throw new Error('Joined-groups main region was not available');
+          main.querySelectorAll('a[href*="/groups/"]').forEach(a => {
+            const card = a.closest('[role="listitem"], [role="article"]') || a.parentElement;
+            const cardText = (card?.innerText || card?.textContent || '').replace(/\s+/g, ' ');
+            if (/\bJoin group\b/i.test(cardText) && !/\bJoined\b/i.test(cardText)) return;
             const href = a.href || '';
             const match = href.match(/facebook\.com\/groups\/([^/?#]+)/);
             if (!match) return;
@@ -4096,13 +4228,18 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null, options = 
             rawGroupLinkCount: rawGroupLinks.length,
             rawGroupLinks
           };
-          return { pageUrl, groups: [...found.values()], debug };
+          return {
+            pageUrl, groups: [...found.values()], debug,
+            atBottom: window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 80,
+            scrollHeight: document.documentElement.scrollHeight
+          };
         }
       });
 
       if (result?.result?.debug) lastDebug = result.result.debug;
       if (result?.result?.pageUrl) {
         scanSourceUrl = result.result.pageUrl;
+        if (!isGenericJoinedGroupsUrl(scanSourceUrl)) throw new Error('Joined-groups scan navigated away from Facebook’s joined-groups page');
         assertPageGroupScanSource(identityName, identityType, scanSourceUrl, { allowGenericJoinedGroupsForVerifiedPageSwitch });
       }
       const scrapedGroups = Array.isArray(result?.result) ? result.result : (result?.result?.groups || []);
@@ -4111,91 +4248,59 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null, options = 
         groups = [...groups, ...scrapedGroups.filter(g => !existingSlugs.has(g.url))];
       }
 
+      const height = Number(result?.result?.scrollHeight) || 0;
+      const stable = passes >= MIN_PASSES && result?.result?.atBottom === true
+        && groups.length === prevCount && height === prevScrollHeight;
+      stableBottomPasses = stable ? stableBottomPasses + 1 : 0;
+      prevCount = groups.length;
+      prevScrollHeight = height;
+      if (stableBottomPasses >= 2) break;
       await updateProgress(`Found ${groups.length} groups, scrolling...`);
       await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: () => window.scrollBy(0, window.innerHeight * 3) });
       await sleep(2500);
     }
 
+    if (stableBottomPasses < 2 || !scanSourceUrl) {
+      throw new Error(`Joined-groups scan incomplete for ${identityName}; saved groups were left unchanged`);
+    }
+    await assertFacebookActiveIdentity(tab.id, identityName, 'completed joined groups import');
     await chrome.tabs.remove(tab.id);
     tab = null;
-
-    if (groups.length === 0) {
-      const emptyResult = {
-        group_scan_guard_version: groupScanGuardVersion,
-        count: 0,
-        avatar_count: 0,
-        identity_name: identityName,
-        identity_key: identityKey,
-        identity_type: identityType || null,
-        scan_source_url: scanSourceUrl,
-        page_scan_strategy: pageScanStrategy || null,
-        warnings: [],
-        joined_groups_identity_verified: !!allowGenericJoinedGroupsForVerifiedPageSwitch,
-        debug: { ...(lastDebug || {}), pageSwitchDebug },
-        groups: [],
-        text: `No visible joined groups found for ${identityName}`
-      };
-      if (finalizeJob) {
-        await sbUpdateJob(jobId, { status: 'done', result: emptyResult, completed_at: new Date().toISOString() });
-      }
-      return emptyResult;
-    }
 
     const groupScanWarnings = [];
     if (isPageIdentityType(identityType)) {
       const overlap = await assessAccountLevelGroupOverlap(session, identityName, identityType, groups);
-      const pageSourceProof = hasPageSpecificScanProof(pageScanStrategy, scanSourceUrl)
-        || ['verified_profile_switch_then_joined_groups','pages_manager_switch_then_joined_groups'].includes(pageScanStrategy);
       if (overlap?.high_overlap) {
         groupScanWarnings.push({
           ...overlap,
-          severity: pageSourceProof ? 'warning' : 'blocked',
-          message: pageSourceProof
-            ? 'Saved because the scrape source was the Page-specific Groups tab, but the URL set overlaps the account-level profile list.'
-            : 'Blocked because the scrape did not have Page-specific source proof and overlapped the account-level profile list.'
+          severity: 'warning',
+          message: 'The Page group list overlaps the account profile list; confirm this identity before posting.'
         });
-        if (!pageSourceProof) throw new Error(`same account-level groups returned for ${identityName}`);
       }
     }
 
-    await updateProgress(`Saving ${groups.length} groups...`);
-
-    const rows = groups.map(g => ({
-      user_id: session.userId,
-      group_url: g.url,
-      group_name: g.name || null,
-      group_avatar_url: g.group_avatar_url || g.avatar_url || g.image_url || null,
+    const groupAvatarCount = groups.filter(g => !!(g.group_avatar_url || g.avatar_url || g.image_url)).length;
+    const importResult = {
+      group_scan_guard_version: groupScanGuardVersion,
+      count: groups.length,
+      avatar_count: groupAvatarCount,
       identity_name: identityName,
       identity_key: identityKey,
-      identity_type: identityType || null
-    }));
-    const saveGroupRows = async (chunk, includeAvatars = true) => {
-      const bodyRows = includeAvatars ? chunk : chunk.map(({ group_avatar_url, ...row }) => row);
-      const saveRes = await fetch(`${SB_URL}/rest/v1/jsw_groups?on_conflict=user_id,identity_key,group_url`, {
-        method: 'POST',
-        headers: { 'apikey': SB_ANON_KEY, 'Authorization': `Bearer ${session.accessToken}`, 'Content-Type': 'application/json', 'Prefer': 'resolution=merge-duplicates,return=minimal' },
-        body: JSON.stringify(bodyRows)
-      });
-      if (saveRes.ok) return true;
-      const text = await saveRes.text();
-      if (includeAvatars && /group_avatar_url|schema cache|column/i.test(text)) {
-        extLog('warn', 'group_avatar_url column missing; saving groups without avatars until migration is applied');
-        return saveGroupRows(chunk, false);
-      }
-      throw new Error('Group save failed: ' + text);
+      identity_type: identityType || null,
+      scan_complete: true,
+      active_identity_verified: true,
+      scan_passes: passes,
+      scan_source_url: scanSourceUrl,
+      page_scan_strategy: pageScanStrategy || null,
+      joined_groups_identity_verified: !!allowGenericJoinedGroupsForVerifiedPageSwitch,
+      warnings: groupScanWarnings,
+      debug: { ...(lastDebug || {}), pageSwitchDebug },
+      groups,
+      text: `Scanned ${groups.length} groups for ${identityName}`
     };
-    const CHUNK = 50;
-    for (let i = 0; i < rows.length; i += CHUNK) {
-      await saveGroupRows(rows.slice(i, i + CHUNK));
-    }
-
-    extLog('info', `Imported ${groups.length} groups via job ${jobId}`);
-    const groupAvatarCount = groups.filter(g => !!(g.group_avatar_url || g.avatar_url || g.image_url)).length;
-    const importResult = { group_scan_guard_version: groupScanGuardVersion, count: groups.length, avatar_count: groupAvatarCount, identity_name: identityName, identity_key:identityKey, identity_type: identityType || null, scan_source_url: scanSourceUrl, page_scan_strategy: pageScanStrategy || null, joined_groups_identity_verified: !!allowGenericJoinedGroupsForVerifiedPageSwitch, warnings: groupScanWarnings, debug: { ...(lastDebug || {}), pageSwitchDebug }, groups, text: `Imported ${groups.length} groups for ${identityName} · ${groupAvatarCount} photos` };
     if (finalizeJob) {
-      await sbUpdateJob(jobId, { status: 'done', result: importResult, completed_at: new Date().toISOString() });
+      throw new Error('Standalone group scans must use the identity-scoped reconciliation job');
     }
-    chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_DONE', count: groups.length, groups }).catch(() => {});
     return importResult;
 
   } catch (e) {
