@@ -1,11 +1,11 @@
 {
-  "name": "Wildrose identity and composer check",
+  "name": "Wildrose identity and group import check",
   "mode": "no-submit",
   "expectedPage": "Wildrose Automations",
-  "groupUrl": "https://www.facebook.com/groups/REPLACE_WITH_GROUP_ID",
-  "postText": "REPLACE_WITH_EXACT_DRAFT_TEXT",
+  "workflow": ["sync-identities", "import-groups"],
   "expected": {
-    "pageMatches": true,
-    "composerPageMatches": true
+    "identityFound": true,
+    "groupScanCompleted": true,
+    "groupsScopedToIdentity": true
   }
 }
