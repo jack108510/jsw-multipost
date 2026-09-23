@@ -2610,15 +2610,17 @@ async function executeDashJob(job) {
   const actorKeyFor = target => {
     const key = target?.identity_key || job.identity_key;
     const name = target?.identity_name || job.identity_name;
-    // Existing legacy actors use normalized names as keys. Conflicting key/name
-    // metadata cannot silently select another hold scope. No Page-ID guessing.
-    if (key && name && String(key).trim().toLowerCase() !== String(name).trim().toLowerCase()) return null;
+    // A stable Facebook key and its display name are normally different.
+    // Compare each field with its job-level value instead of comparing key to name.
+    if (target?.identity_key && job.identity_key && String(target.identity_key).trim().toLowerCase() !== String(job.identity_key).trim().toLowerCase()) return null;
+    if (target?.identity_name && job.identity_name && String(target.identity_name).trim().toLowerCase() !== String(job.identity_name).trim().toLowerCase()) return null;
     return typeof (key || name) === 'string' ? (key || name).trim().toLowerCase() || null : null;
   };
   let holdTargets = job.groups || [];
   try { if (!Array.isArray(holdTargets)) holdTargets = JSON.parse(holdTargets); } catch (_) { return false; }
   if (!Array.isArray(holdTargets)) return false;
   const holdActors = holdTargets.map(actorKeyFor);
+  const holdActorAliases = new Set([...holdActors, ...holdTargets.map(t => String(t?.identity_name || job.identity_name || '').trim().toLowerCase()).filter(Boolean)]);
   if (!accountId || (!job.local_fallback && accountId === 'local-fallback') || (job.user_id && job.user_id !== accountId)
       || !holdActors.length || holdActors.some(a => !a) || executeDashJob.campaignPersistenceFailed) return false;
   let campaignLedger;
@@ -2652,7 +2654,7 @@ async function executeDashJob(job) {
   // infer approval from a missing permalink or clear a reservation/other job.
   // Lookup failure leaves the original campaign-wide exclusion untouched.
   for (const hold of [...campaignLedger.holds]) {
-    if (hold.state !== 'held' || !holdActors.includes(hold.actor)
+    if (hold.state !== 'held' || !holdActorAliases.has(hold.actor)
         || !(campaignId === '*' || hold.campaign === '*' || hold.campaign === campaignId)) continue;
     let row;
     try {
@@ -2675,8 +2677,9 @@ async function executeDashJob(job) {
       const actor = value => {
         const key = value?.identity_key || row.identity_key;
         const name = value?.identity_name || row.identity_name;
-        if (key && name && String(key).trim().toLowerCase() !== String(name).trim().toLowerCase()) return null;
-        return String(key || name || '').trim().toLowerCase();
+        if (value?.identity_key && row.identity_key && String(value.identity_key).trim().toLowerCase() !== String(row.identity_key).trim().toLowerCase()) return [];
+        if (value?.identity_name && row.identity_name && String(value.identity_name).trim().toLowerCase() !== String(row.identity_name).trim().toLowerCase()) return [];
+        return [key, name].filter(Boolean).map(item => String(item).trim().toLowerCase());
       };
       const groupKey = value => {
         try {
@@ -2688,7 +2691,7 @@ async function executeDashJob(job) {
       };
       const group = groupKey(targets[0].url);
       const reconciliationGroup = row.result.manual_reconciliation.group_url;
-      if (!group || actor(targets[0]) !== hold.actor || actor(results[0]) !== hold.actor
+      if (!group || !actor(targets[0]).includes(hold.actor) || !actor(results[0]).includes(hold.actor)
           || !['submitted_unconfirmed', 'pending_approval'].includes(results[0].status) || groupKey(results[0].group_url) !== group
           || groupKey(hold.evidence?.group_url) !== group
           || (reconciliationGroup != null && groupKey(reconciliationGroup) !== group)) continue;
@@ -2702,7 +2705,7 @@ async function executeDashJob(job) {
       campaignLedger = narrowed;
     } catch (_) { return false; }
   }
-  const _blockingHolds = campaignLedger.holds.filter(h => holdActors.includes(h.actor)
+  const _blockingHolds = campaignLedger.holds.filter(h => holdActorAliases.has(h.actor)
       && (campaignId === '*' || h.campaign === '*' || h.campaign === campaignId));
   const _jobTargetGroups = new Set(holdTargets.map(t => {
     try { return new URL(t.url || t.group_url || '').pathname.match(/^\/groups\/([^/]+)\/?$/)?.[1]?.toLowerCase() || null; }
