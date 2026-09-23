@@ -1800,7 +1800,7 @@ async function runImportGroupsJob(job, session) {
           ...overlapAssessment,
           severity: pageSourceProof ? 'warning' : 'blocked',
           message: pageSourceProof
-            ? 'Saved because the scrape source was the Page-specific Groups tab, but the URL set overlaps the account-level profile list.'
+            ? 'The active Page was verified on the joined-groups route, but its URL set overlaps the account profile list; review before posting.'
             : 'Blocked because the scrape did not have Page-specific source proof and overlapped the account-level profile list.'
         });
         if (!pageSourceProof) {
