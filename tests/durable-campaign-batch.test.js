@@ -21,7 +21,9 @@ Promise.resolve()
     if (paused.length !== 1) throw new Error('Late batch was not paused');
     previous = { status: 'processing' };
     if (await admitScheduledCampaignBatch({ ...base, result: { ...base.result, batch_index: 2 } }, session)) throw new Error('Overlapping batch was admitted');
-    previous = { status: 'done' };
+    previous = { status: 'done', result: { total_groups: 8, success_count: 7, skipped_count: 1 } };
+    if (await admitScheduledCampaignBatch({ ...base, result: { ...base.result, batch_index: 2 } }, session)) throw new Error('Incomplete prior batch was admitted');
+    previous = { status: 'done', result: { total_groups: 8, success_count: 8, failed_count: 0, skipped_count: 0, submitted_unconfirmed_count: 0 } };
     if (!await admitScheduledCampaignBatch({ ...base, result: { ...base.result, batch_index: 2 } }, session)) throw new Error('Completed prior batch did not release next batch');
     print('durable campaign batch test OK');
   });
