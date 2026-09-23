@@ -750,7 +750,8 @@ async function startDashPolling() {
   await chrome.alarms.create('poll-jobs', { periodInMinutes: 0.5 }); // every 30s
   await chrome.alarms.create('amplr_heartbeat', { periodInMinutes: 0.5 }); // every 30s
   await chrome.alarms.create('check-post-results', { periodInMinutes: 360 }); // every 6h
-  await scheduleDailyGroupScanAlarm();
+  // Pause unattended group scans until joined-group provenance can be verified.
+  await chrome.alarms.clear(DAILY_GROUP_SCAN_ALARM);
 }
 
 function nextDailyGroupScanTime() {
@@ -800,7 +801,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'amplr_heartbeat') writeHeartbeat();
   else if (alarm.name === 'poll-jobs') { pollFacebookWork(); }
   else if (alarm.name === 'check-post-results') { checkPostResults(); }
-  else if (alarm.name === DAILY_GROUP_SCAN_ALARM) { enqueueDailyGroupScan(); }
+  else if (alarm.name === DAILY_GROUP_SCAN_ALARM) { chrome.alarms.clear(DAILY_GROUP_SCAN_ALARM); }
 });
 
 // ─── Group name lookup ───
