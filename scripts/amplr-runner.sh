@@ -6,7 +6,7 @@ CHROME_APP="${AMPLR_CHROME_APP:-/Applications/Google Chrome.app}"
 CHROME_BIN="$CHROME_APP/Contents/MacOS/Google Chrome"
 CHROME_USER_DATA_DIR="${AMPLR_CHROME_USER_DATA_DIR:-$HOME/Library/Application Support/Amplr/ChromeProfile}"
 CHROME_PROFILE="${AMPLR_CHROME_PROFILE:-Default}"
-DASHBOARD_URL="${AMPLR_DASHBOARD_URL:-https://jack108510.github.io/jsw-multipost/dashboard.html}"
+DASHBOARD_URL="${AMPLR_DASHBOARD_URL:-https://jack108510.github.io/fb-autoposter/dashboard.html}"
 CHECK_INTERVAL="${AMPLR_RUNNER_INTERVAL:-30}"
 HEARTBEAT_STALE_SECONDS="${AMPLR_HEARTBEAT_STALE_SECONDS:-150}"
 HEARTBEAT_CHECK_EVERY="${AMPLR_HEARTBEAT_CHECK_EVERY:-60}"
@@ -53,7 +53,6 @@ launch_chrome() {
     --remote-debugging-address=127.0.0.1 \
     --remote-debugging-port=9223 \
     --load-extension="$EXT_DIR" \
-    "chrome-extension://$EXTENSION_ID/popup.html" \
     "$DASHBOARD_URL" >/dev/null 2>&1 &
 }
 
