@@ -77,4 +77,45 @@ const importBody = background.slice(background.indexOf('async function importFac
 assert(!importBody.includes('jsw_groups?on_conflict='), 'Scanner writes groups before cross-identity validation');
 assert(importBody.includes('stableBottomPasses < 2'), 'Scanner may reconcile after partial scrolling');
 
-console.log('PASS: Identity reliability release preserves stable Page metadata, rejects placeholders, and keeps composer probes non-posting.');
+async function runReconciliationTests() {
+  const buildPersist = new Function('getGroupRowsForIdentity', 'fetch', 'SB_URL', 'SB_ANON_KEY',
+    background.slice(agreeStart, persistEnd) + '; return persistCompleteGroupScan;');
+  const existing = [
+    { id: '1', group_url: 'https://www.facebook.com/groups/old/', group_name: 'Old' },
+    { id: '2', group_url: 'https://www.facebook.com/groups/keep/', group_name: 'Keep' }
+  ];
+  const writes = [];
+  const fetchMock = async (url, options) => {
+    writes.push({ url, method: options.method });
+    return { ok: true, text: async () => '' };
+  };
+  const persist = buildPersist(async () => existing, fetchMock, 'https://example.supabase.co', 'anon');
+  const session = { userId: 'user', accessToken: 'token' };
+  const identity = { key: 'page-one', name: 'Page One', type: 'page' };
+  const scan = {
+    identity_key: 'page-one', scan_complete: true, active_identity_verified: true,
+    groups: [
+      { url: 'https://www.facebook.com/groups/keep/', name: 'Keep' },
+      { url: 'https://www.facebook.com/groups/new/', name: 'New' }
+    ]
+  };
+  const first = await persist(session, identity, scan, null);
+  assert(first.reconciliation === 'baseline_recorded' && first.removed_count === 0, 'First scan must record a baseline without deletion');
+  assert(!writes.some(write => write.method === 'DELETE'), 'First scan issued a delete');
+  writes.length = 0;
+  const second = await persist(session, identity, scan, { job_id: 'prior', urls: scan.groups.map(group => group.url) });
+  assert(second.reconciliation === 'complete' && second.removed_count === 1, 'Matching second scan did not remove the missing row');
+  assert(writes.some(write => write.method === 'DELETE' && write.url.includes('identity_key=eq.page-one')), 'Deletion was not scoped to the identity');
+  writes.length = 0;
+  let rejected = false;
+  try { await persist(session, identity, { ...scan, scan_complete: false }, { job_id: 'prior', urls: [] }); }
+  catch (_) { rejected = true; }
+  assert(rejected && writes.length === 0, 'Incomplete scan changed saved rows');
+}
+
+runReconciliationTests().then(() => {
+  console.log('PASS: Identity reliability and guarded group reconciliation.');
+}).catch(error => {
+  console.error(error);
+  process.exitCode = 1;
+});
