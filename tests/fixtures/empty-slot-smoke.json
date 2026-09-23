@@ -1,0 +1,11 @@
+{
+  "name": "Empty Slot identity and composer check",
+  "mode": "no-submit",
+  "expectedPage": "Empty Slot",
+  "groupUrl": "https://www.facebook.com/groups/REPLACE_WITH_GROUP_ID",
+  "postText": "REPLACE_WITH_EXACT_DRAFT_TEXT",
+  "expected": {
+    "pageMatches": true,
+    "composerPageMatches": true
+  }
+}
