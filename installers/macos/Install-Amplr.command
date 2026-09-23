@@ -37,11 +37,10 @@ chmod +x "$EXT_DIR/scripts/amplr-runner.sh" "$EXT_DIR/scripts/install-amplr-runn
 step "Installing background runner..."
 "$EXT_DIR/scripts/install-amplr-runner.sh" "$EXT_DIR" || fail "Could not install Amplr Runner."
 
-step "Opening Chrome with Amplr loaded..."
-open -a "Google Chrome" --args --profile-directory=Default --load-extension="$EXT_DIR" --no-first-run
+step "The background runner is opening its own Chrome window..."
 
 echo
 echo "Amplr installed."
-echo "Next: pin/open the Amplr extension, sign into Amplr, and make sure Facebook is logged in."
+echo "Next: in the Chrome window opened by the runner, sign in to Reachr and Facebook."
 echo
 read -r -p "Press Enter to close..." _ || true
