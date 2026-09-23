@@ -60,4 +60,21 @@ assert(joinGroups.includes('search\\/groups') && joinGroups.includes('join group
 assert(switchIdentity.includes("tryDirectPageUrl('initial Page URL')"), 'Identity switcher does not try the stable Page URL first');
 assert(content.includes('switch|continue|use facebook as|act as'), 'Page switch button matcher is not broadened for Facebook UI variants');
 
+// Group reconciliation must require two consistent, complete identity scans.
+const agreeStart = background.indexOf('function groupSnapshotsAgree(');
+const agreeEnd = background.indexOf('async function persistCompleteGroupScan(', agreeStart);
+assert(agreeStart >= 0 && agreeEnd > agreeStart, 'Group snapshot comparison is missing');
+const groupSnapshotsAgree = new Function(background.slice(agreeStart, agreeEnd) + '; return groupSnapshotsAgree;')();
+assert(groupSnapshotsAgree(['a', 'b'], ['a', 'b']), 'Identical snapshots must agree');
+assert(!groupSnapshotsAgree(['a', 'b'], ['x', 'y']), 'Disjoint snapshots must not agree');
+const persistStart = background.indexOf('async function persistCompleteGroupScan(');
+const persistEnd = background.indexOf('async function deleteGroupsForIdentity(', persistStart);
+assert(persistStart >= 0 && persistEnd > persistStart, 'Identity-scoped persistence is missing');
+const persistBody = background.slice(persistStart, persistEnd);
+assert(persistBody.includes('scan?.scan_complete !== true') && persistBody.includes('scan?.active_identity_verified !== true'), 'An incomplete or unverified scan could change saved groups');
+assert(persistBody.includes('identity_key=eq.') && persistBody.includes("method: 'DELETE'"), 'Missing groups are not reconciled within their identity');
+const importBody = background.slice(background.indexOf('async function importFacebookGroupsForJob('), background.indexOf('\nasync function ', background.indexOf('async function importFacebookGroupsForJob(') + 10));
+assert(!importBody.includes('jsw_groups?on_conflict='), 'Scanner writes groups before cross-identity validation');
+assert(importBody.includes('stableBottomPasses < 2'), 'Scanner may reconcile after partial scrolling');
+
 console.log('PASS: Identity reliability release preserves stable Page metadata, rejects placeholders, and keeps composer probes non-posting.');
