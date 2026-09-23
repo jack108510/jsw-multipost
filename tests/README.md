@@ -4,6 +4,8 @@ The worker Mac handoff for the first test is in [`WORKER_MAC.md`](WORKER_MAC.md)
 
 The JSON files in `fixtures/` describe expected outcomes for identity sync and Facebook group import. They are test inputs, not observations or permission to publish. Both use `mode: "no-submit"`. No group URL or post text is needed for this first stage.
 
+`fixtures/wildrose-rose-campaign-draft.json` is a proposed one-time Rose campaign for review. Its 100-group target, copy, and time are proposals only. Fill the actual destination list from a complete Wildrose identity scan, review the destinations and copy, and keep the campaign as a draft until the owner explicitly approves activation.
+
 ## Run at a specific commit
 
 1. Check out the requested commit in a clean copy of this repository and read both fixtures. Confirm the expected Pages are the intended accounts.

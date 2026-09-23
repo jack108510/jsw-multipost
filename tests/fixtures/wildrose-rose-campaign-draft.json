@@ -1,0 +1,18 @@
+{
+  "name": "Wildrose Rose campaign for September 24",
+  "mode": "no-submit",
+  "identityName": "Wildrose Automations",
+  "targetCount": 100,
+  "targetRule": "Use at most 100 distinct group URLs from a complete, identity-verified Wildrose Automations joined-groups scan. Review each destination before activation.",
+  "proposedDate": "2026-09-24",
+  "proposedTime": "09:00",
+  "timezone": "America/Halifax",
+  "maxRuns": 1,
+  "postText": "If you run a small business, how many website visitors leave before anyone can answer their question? We built Rose at Wildrose Automations to act as a front desk for your website: it answers common questions, captures quote requests, and sends the lead to your team while the visitor is still there. You can preview how Rose would look on your own site at https://wildroseautomations.ca/. Happy to answer questions about how it works.",
+  "expected": {
+    "identityMatches": true,
+    "groupsVerified": true,
+    "composerIdentityMatches": true,
+    "submitted": false
+  }
+}
