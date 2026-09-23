@@ -1,16 +1,15 @@
 # Reachr smoke checks
 
-The JSON files in `fixtures/` describe exact browser checks for one Facebook Page, group, and draft. They are test inputs and expected outcomes, not observations or permission to publish. Keep `mode` set to `no-submit` unless a separate, explicit request authorizes a real post to a named destination.
-
-## Prepare a fixture
-
-Replace `REPLACE_WITH_GROUP_ID` and `REPLACE_WITH_EXACT_DRAFT_TEXT` with the exact group URL and draft supplied for that test. Do not run a browser check while either placeholder remains. Keep passwords, cookies, tokens, and private customer data out of the fixture and Git history. Use a new commit for each change so the test input is unambiguous.
+The JSON files in `fixtures/` describe expected outcomes for identity sync and Facebook group import. They are test inputs, not observations or permission to publish. Both use `mode: "no-submit"`. No group URL or post text is needed for this first stage.
 
 ## Run at a specific commit
 
-1. Check out the requested commit in a clean copy of this repository and read the selected fixture. Confirm its `mode` is `no-submit` and its Page, group, and draft are the intended test data.
+1. Check out the requested commit in a clean copy of this repository and read both fixtures. Confirm the expected Pages are the intended accounts.
 2. Run the existing source regression tests with `node --test tests/*.test.cjs` and `python3 tests/identity_contract_regression.py`. These tests do not open Facebook or publish a post.
-3. If a browser check was requested, use the Chrome profile that runs the Reachr extension. Open the fixture's group, select `expectedPage`, and enter `postText` in the composer. Verify the active Page and composer actor against the fixture's `expected` fields. **Stop before clicking Post, Publish, or any equivalent submit control.**
-4. Report the commit SHA, fixture path, automated test results, and what the browser actually showed. Record observations in the test report, not in the fixture's `expected` fields. If the Page or composer actor cannot be verified, stop and report that uncertainty.
+3. In the Chrome profile running the Reachr extension, sign in to Reachr and Facebook. In the dashboard, run **Update profiles once**, then **Import groups once**. The extension may switch Facebook identities while it reads their group lists. It must not open a post composer or submit a post in this stage.
+4. Compare the completed `__sync_identities__` job with each fixture's `expectedPage`. Compare the `__import_groups__` job's per-identity result with each fixture: its scan must have completed, and any saved groups must belong to that identity key. Report the scan strategy, source URL, group count, skipped Pages, and errors. Do not treat a successful overall job as proof that every Page was scanned.
+5. Report the commit SHA, fixture paths, automated test results, and what the browser and job results actually showed. Record observations in the report, not in a fixture's `expected` fields. If an identity or source cannot be verified, mark that case unverified and stop before any posting workflow.
 
-A fixture alone never authorizes publishing. A real post requires a separate explicit request naming the Page and destination, followed by independent verification of both actors before submission.
+After groups have imported and been reviewed, add a separate no-submit composer fixture with one exact group URL and draft text. A fixture alone never authorizes publishing. A real post requires a separate explicit request naming the Page and destination, followed by independent verification before submission.
+
+Keep passwords, cookies, tokens, and private customer data out of fixtures and Git history.
