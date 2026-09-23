@@ -29,7 +29,6 @@ chmod +x "$EXT_DIR/scripts/amplr-runner.sh" "$EXT_DIR/scripts/install-amplr-runn
 chown -R "$CONSOLE_USER" "$INSTALL_DIR"
 
 sudo -u "$CONSOLE_USER" "$EXT_DIR/scripts/install-amplr-runner.sh" "$EXT_DIR"
-sudo -u "$CONSOLE_USER" open -a "Google Chrome" --args --profile-directory=Default --load-extension="$EXT_DIR" --no-first-run
 
-osascript -e 'display notification "Amplr installed. Open the extension and sign in." with title "Amplr"' || true
+osascript -e 'display notification "Amplr installed. Sign in to Reachr and Facebook in the runner Chrome window." with title "Amplr"' || true
 exit 0
