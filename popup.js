@@ -84,6 +84,12 @@ function showConnectedView(session) {
   if (session?.email && $('dashEmail')) {
     $('dashEmail').textContent = session.email;
   }
+  chrome.storage.local.get('reachr_worker_install_id').then(stored => {
+    const id = stored?.reachr_worker_install_id;
+    if ($('workerBuild')) $('workerBuild').textContent = `v${chrome.runtime.getManifest().version} · worker ${id ? id.slice(0, 8) : 'starting'}`;
+  }).catch(() => {
+    if ($('workerBuild')) $('workerBuild').textContent = `v${chrome.runtime.getManifest().version}`;
+  });
 }
 
 // ── Sign In ──

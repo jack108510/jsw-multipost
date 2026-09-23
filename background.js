@@ -22,6 +22,18 @@ async function sleepWithWorkerKeepalive(ms) {
 }
 
 const EXT_VERSION = chrome.runtime.getManifest?.().version || 'unknown';
+const WORKER_INSTALL_ID_KEY = 'reachr_worker_install_id';
+let workerInstallIdPromise = null;
+async function getWorkerInstallId() {
+  if (!workerInstallIdPromise) workerInstallIdPromise = (async () => {
+    const stored = await chrome.storage.local.get(WORKER_INSTALL_ID_KEY);
+    if (typeof stored?.[WORKER_INSTALL_ID_KEY] === 'string' && stored[WORKER_INSTALL_ID_KEY]) return stored[WORKER_INSTALL_ID_KEY];
+    const id = crypto.randomUUID();
+    await chrome.storage.local.set({ [WORKER_INSTALL_ID_KEY]: id });
+    return id;
+  })();
+  return workerInstallIdPromise;
+}
 const CONNECTION_STATUS_KEY = 'extension_status';
 const DAILY_GROUP_SCAN_ALARM = 'daily-group-scan';
 const DAILY_GROUP_SCAN_HOUR_LOCAL = 7;
@@ -943,6 +955,7 @@ async function writeExtensionStatus(session, status = 'online', extra = {}) {
     await upsertAmplrData(session, CONNECTION_STATUS_KEY, {
       status,
       version: EXT_VERSION,
+      worker_install_id: await getWorkerInstallId(),
       user_id: session.userId,
       email: session.email || null,
       last_seen: new Date().toISOString(),
@@ -1924,6 +1937,8 @@ async function runImportGroupsJob(job, session) {
       total_groups: totalGroups,
       total_new_groups: totalNew,
       total_removed_groups: totalRemoved,
+      worker_install_id: await getWorkerInstallId(),
+      extension_version: EXT_VERSION,
       identities: perIdentity,
       not_scanned: errors
     },
@@ -3640,8 +3655,9 @@ async function syncFacebookIdentitiesForJob(jobId) {
   }
 
   let tab;
+  const workerInstallId = await getWorkerInstallId();
   try {
-    await sbUpdateJob(jobId, { result: { text: 'Opening Facebook...' } });
+    await sbUpdateJob(jobId, { result: { text: 'Opening Facebook...', extension_version: EXT_VERSION, worker_install_id: workerInstallId } });
     await requireFacebookSessionForGroupScan();
     tab = await chrome.tabs.create({ url: 'https://www.facebook.com/', active: true });
     try { if (Number.isInteger(tab.windowId)) await chrome.windows.update(tab.windowId, { focused: true }); } catch (_) {}
@@ -3706,6 +3722,7 @@ async function syncFacebookIdentitiesForJob(jobId) {
         managed_pages_count: (pagesResponse?.pages || []).length,
         avatar_count: avatarCount,
         extension_version: EXT_VERSION,
+        worker_install_id: workerInstallId,
         text: `Synced ${identities.length} posting identities · ${avatarCount} profile pictures`
       },
       completed_at: new Date().toISOString()
@@ -3720,7 +3737,7 @@ async function syncFacebookIdentitiesForJob(jobId) {
       } catch (_) {}
     }
     extLog('error', 'syncFacebookIdentitiesForJob error: ' + e.message);
-    await sbUpdateJob(jobId, { status: 'failed', result: { error: e.message, error_code: e.code || null, extension_version: EXT_VERSION }, completed_at: new Date().toISOString() });
+    await sbUpdateJob(jobId, { status: 'failed', result: { error: e.message, error_code: e.code || null, extension_version: EXT_VERSION, worker_install_id: workerInstallId }, completed_at: new Date().toISOString() });
   }
 }
 
