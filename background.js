@@ -1876,6 +1876,17 @@ async function requireFacebookSessionForGroupScan() {
   }
 }
 
+async function ensureImportJobActive(jobId, session) {
+  const response = await fetch(`${SB_URL}/rest/v1/jsw_post_jobs?id=eq.${encodeURIComponent(jobId)}&user_id=eq.${encodeURIComponent(session.userId)}&select=status&limit=1`, {
+    headers: { apikey: SB_ANON_KEY, Authorization: `Bearer ${session.accessToken}` }
+  });
+  if (!response.ok) throw new Error(`Could not verify group import state (HTTP ${response.status})`);
+  const rows = await response.json();
+  if (rows?.[0]?.status !== 'processing') {
+    throw Object.assign(new Error('Group import was cancelled or replaced; scan stopped without saving more groups.'), { code: 'import_cancelled' });
+  }
+}
+
 async function runImportGroupsJob(job, session) {
   await requireFacebookSessionForGroupScan();
   const targets = await getImportTargetsForJob(job, session);
@@ -1888,6 +1899,7 @@ async function runImportGroupsJob(job, session) {
   const knownAccountLevelGroupSignatures = await getKnownAccountLevelGroupSignatures(session);
 
   for (let i = 0; i < targets.length; i++) {
+    await ensureImportJobActive(job.id, session);
     const target = targets[i];
     const storedIdentity = await getPostingIdentityByNameOrKey(target.name, target.key);
     const mergedTarget = {
@@ -1900,7 +1912,7 @@ async function runImportGroupsJob(job, session) {
     const label = mergedTarget.name || mergedTarget.key || `profile ${i + 1}`;
     await sbUpdateJob(job.id, { result: { group_scan_guard_version: GROUP_SCAN_GUARD_VERSION, text: `Scanning ${label} (${i + 1}/${targets.length})...`, current_identity: label, target_index: i + 1, target_count: targets.length } });
     try {
-      const result = await importFacebookGroupsForJob(job.id, mergedTarget, { finalizeJob: false, progressPrefix: `${label}: ` });
+      const result = await importFacebookGroupsForJob(job.id, mergedTarget, { finalizeJob: false, enforceJobActive: true, progressPrefix: `${label}: ` });
       const resultSignature = groupUrlSignature(result?.groups || []);
       const isPageTarget = isPageIdentityType(mergedTarget.type);
       if (!isPageTarget && resultSignature) accountLevelGroupSignature = accountLevelGroupSignature || resultSignature;
@@ -1947,6 +1959,7 @@ async function runImportGroupsJob(job, session) {
         removed_count: 0
       });
     } catch (e) {
+      if (e?.code === 'import_cancelled') throw e;
       const reason = friendlyGroupScanMissReason(e);
       errors.push({
         identity_name: mergedTarget.name || null,
@@ -2018,6 +2031,7 @@ async function runImportGroupsJob(job, session) {
 
   // All cross-identity checks finish before any scan writes Supabase.
   for (const candidate of scanCandidates) {
+    await ensureImportJobActive(job.id, session);
     if (quarantinedKeys.has(String(candidate.identity.key))) continue;
     const entry = perIdentity[candidate.index];
     if (entry?.status !== 'scanned') continue;
@@ -2044,6 +2058,7 @@ async function runImportGroupsJob(job, session) {
   const scanText = status === 'done'
     ? `${label} ${notScanned ? 'partial' : 'complete'}: ${scanned}/${targets.length} profiles/pages scanned · ${totalGroups} groups · ${totalNew} new · ${totalRemoved} removed${notScanned ? ` · ${notScanned} not scanned` : ''}`
     : `${label} could not scan any synced profiles/pages`;
+  await ensureImportJobActive(job.id, session);
   await sbUpdateJob(job.id, {
     status,
     result: {
@@ -2525,6 +2540,7 @@ async function executeDashJob(job) {
     try {
       await runImportGroupsJob(job, dashSession);
     } catch (e) {
+      if (e?.code === 'import_cancelled') return false;
       const loginRequired = e?.code === 'facebook_login_required';
       await sbUpdateJob(job.id, {
         status: loginRequired ? 'paused' : 'failed',
@@ -4158,36 +4174,60 @@ async function clickFacebookPageProfileSwitchButton(tabId, identityName) {
 }
 
 // Job-aware version: updates job progress and result in jsw_post_jobs
+async function withGroupScanTimeout(promise, label, timeoutMs = 20000) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)} seconds`)), timeoutMs); })
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function scrollFacebookJoinedGroupsNative(tabId) {
-  const [viewport] = await chrome.scripting.executeScript({
+  const [viewport] = await withGroupScanTimeout(chrome.scripting.executeScript({
     target: { tabId },
-    func: () => ({ width: window.innerWidth, height: window.innerHeight })
-  });
+    func: () => {
+      const main = document.querySelector('[role="main"], main');
+      const rect = main?.getBoundingClientRect();
+      const width = window.innerWidth;
+      return {
+        width, height: window.innerHeight,
+        targetX: rect && rect.width > 100
+          ? Math.round(Math.max(width * 0.62, Math.min(width - 70, rect.left + rect.width * 0.48)))
+          : Math.round(width * 0.68)
+      };
+    }
+  }), 'Facebook joined-groups viewport read');
   const width = Number(viewport?.result?.width) || 1200;
   const height = Number(viewport?.result?.height) || 800;
   // A browser wheel event over the group cards triggers Facebook's lazy list.
   // window.scrollBy moves the viewport but does not load the next card batch.
-  const x = Math.max(320, Math.min(width - 60, Math.round(width * 0.42)));
+  const x = Math.max(320, Math.min(width - 60, Number(viewport?.result?.targetX) || Math.round(width * 0.68)));
   const y = Math.max(180, Math.min(height - 60, Math.round(height * 0.7)));
   const target = { tabId };
-  await chrome.tabs.update(tabId, { active: true });
-  await chrome.debugger.attach(target, '1.3');
+  await withGroupScanTimeout(chrome.tabs.update(tabId, { active: true }), 'Facebook joined-groups tab activation');
+  let attached = false;
   try {
-    await chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', {
+    await withGroupScanTimeout(chrome.debugger.attach(target, '1.3'), 'Facebook scroll debugger attach');
+    attached = true;
+    await withGroupScanTimeout(chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', {
       type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27
-    });
-    await chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', {
+    }), 'Facebook scroll Escape key down');
+    await withGroupScanTimeout(chrome.debugger.sendCommand(target, 'Input.dispatchKeyEvent', {
       type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27, nativeVirtualKeyCode: 27
-    });
+    }), 'Facebook scroll Escape key up');
     for (let step = 0; step < 2; step++) {
-      await chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
+      await withGroupScanTimeout(chrome.debugger.sendCommand(target, 'Input.dispatchMouseEvent', {
         type: 'mouseWheel', x, y, deltaX: 0,
         deltaY: Math.max(400, Math.round(height * 0.8)), pointerType: 'mouse'
-      });
+      }), 'Facebook joined-groups wheel event');
       await sleep(180);
     }
   } finally {
-    try { await chrome.debugger.detach(target); } catch (_) {}
+    if (attached) { try { await withGroupScanTimeout(chrome.debugger.detach(target), 'Facebook scroll debugger detach'); } catch (_) {} }
   }
 }
 
@@ -4208,8 +4248,13 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null, options = 
     throw new Error('Group import refused: missing Facebook profile/page owner. Sync profiles first.');
   }
 
-  const updateProgress = async (text) => {
-    await sbUpdateJob(jobId, { result: { text: progressPrefix + text } });
+  const updateProgress = async (text, details = {}) => {
+    await sbUpdateJob(jobId, { result: {
+      text: progressPrefix + text,
+      current_identity: identityName,
+      progress_at: new Date().toISOString(),
+      ...details
+    } });
     chrome.runtime.sendMessage({ type: 'IMPORT_GROUPS_PROGRESS', text: progressPrefix + text }).catch(() => {});
   };
 
@@ -4303,9 +4348,12 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null, options = 
     const MIN_PASSES = 5;
     while (passes < MAX_PASSES) {
       passes++;
+      if (options.enforceJobActive && (passes === 1 || passes % 5 === 0)) {
+        await ensureImportJobActive(jobId, session);
+      }
 
       if (passes <= 2) {
-        const [expanded] = await chrome.scripting.executeScript({
+        const [expanded] = await withGroupScanTimeout(chrome.scripting.executeScript({
           target: { tabId: tab.id },
           func: () => {
             const norm = s => String(s || '').replace(/\s+/g, ' ').trim();
@@ -4317,11 +4365,11 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null, options = 
             target.click();
             return { clicked: true, href: target.href || null, text: norm(target.innerText || target.textContent || target.getAttribute('aria-label') || '') };
           }
-        });
+        }), 'Facebook joined-groups See all check');
         if (expanded?.result?.clicked) await sleep(3500);
       }
 
-      const [result] = await chrome.scripting.executeScript({
+      const [result] = await withGroupScanTimeout(chrome.scripting.executeScript({
         target: { tabId: tab.id },
         func: () => {
           const found = new Map();
@@ -4470,7 +4518,7 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null, options = 
             scrollHeight: document.documentElement.scrollHeight
           };
         }
-      });
+      }), 'Facebook joined-groups card read');
 
       if (result?.result?.debug) lastDebug = result.result.debug;
       if (Number.isInteger(result?.result?.expectedJoinedCount)) expectedJoinedCount = result.result.expectedJoinedCount;
@@ -4495,8 +4543,11 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null, options = 
       if (passes >= 6 && expectedJoinedCount == null && groups.length === 0) {
         throw new Error(`Joined-groups count heading was not available for ${identityName}; saved groups were left unchanged`);
       }
-      await updateProgress(`Found ${groups.length} groups, scrolling...`);
-      await scrollFacebookJoinedGroupsNative(tab.id);
+      await updateProgress(`Found ${groups.length}${Number.isInteger(expectedJoinedCount) ? ` of ${expectedJoinedCount}` : ''} groups, scrolling (pass ${passes}/${MAX_PASSES})...`, {
+        scan_pass: passes, scan_pass_limit: MAX_PASSES,
+        observed_groups: groups.length, expected_groups: expectedJoinedCount
+      });
+      await withGroupScanTimeout(scrollFacebookJoinedGroupsNative(tab.id), 'Facebook joined-groups scroll', 30000);
       await sleep(1500);
     }
 
