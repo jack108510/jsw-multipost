@@ -1877,14 +1877,26 @@ async function requireFacebookSessionForGroupScan() {
 }
 
 async function ensureImportJobActive(jobId, session) {
-  const response = await fetch(`${SB_URL}/rest/v1/jsw_post_jobs?id=eq.${encodeURIComponent(jobId)}&user_id=eq.${encodeURIComponent(session.userId)}&select=status&limit=1`, {
-    headers: { apikey: SB_ANON_KEY, Authorization: `Bearer ${session.accessToken}` }
+  const current = await getStoredSession();
+  if (!current?.accessToken || current.userId !== session.userId) {
+    throw new Error('Reachr sign-in changed during group import; no further groups were saved.');
+  }
+  const response = await fetch(`${SB_URL}/rest/v1/jsw_post_jobs?id=eq.${encodeURIComponent(jobId)}&user_id=eq.${encodeURIComponent(current.userId)}&select=status&limit=1`, {
+    headers: { apikey: SB_ANON_KEY, Authorization: `Bearer ${current.accessToken}` }
   });
   if (!response.ok) throw new Error(`Could not verify group import state (HTTP ${response.status})`);
   const rows = await response.json();
   if (rows?.[0]?.status !== 'processing') {
     throw Object.assign(new Error('Group import was cancelled or replaced; scan stopped without saving more groups.'), { code: 'import_cancelled' });
   }
+}
+
+async function freshGroupImportSession(expectedUserId) {
+  const session = await getStoredSession();
+  if (!session?.accessToken || session.userId !== expectedUserId) {
+    throw new Error('Reachr sign-in changed or expired during group import; saved groups were left unchanged.');
+  }
+  return session;
 }
 
 async function runImportGroupsJob(job, session) {
@@ -1923,7 +1935,7 @@ async function runImportGroupsJob(job, session) {
       if (isPageTarget && !pageSourceProof && resultSignature && (knownAccountLevelGroupSignatures.has(resultSignature) || (accountLevelGroupSignature && resultSignature === accountLevelGroupSignature))) {
         throw new Error(`same account-level groups returned for ${mergedTarget.name}`);
       }
-      const overlapAssessment = await assessAccountLevelGroupOverlap(session, mergedTarget.name, mergedTarget.type, result?.groups || []);
+      const overlapAssessment = await assessAccountLevelGroupOverlap(await freshGroupImportSession(session.userId), mergedTarget.name, mergedTarget.type, result?.groups || []);
       const warnings = [];
       if (overlapAssessment?.high_overlap) {
         warnings.push({
@@ -2036,8 +2048,9 @@ async function runImportGroupsJob(job, session) {
     const entry = perIdentity[candidate.index];
     if (entry?.status !== 'scanned') continue;
     try {
-      const previous = await getPreviousCompleteGroupSnapshot(session, candidate.identity.key);
-      const change = await persistCompleteGroupScan(session, candidate.identity, candidate.result, previous);
+      const currentSession = await freshGroupImportSession(session.userId);
+      const previous = await getPreviousCompleteGroupSnapshot(currentSession, candidate.identity.key);
+      const change = await persistCompleteGroupScan(await freshGroupImportSession(session.userId), candidate.identity, candidate.result, previous);
       Object.assign(entry, change);
       entry.text = `Scanned ${entry.count} groups; ${change.new_count} new, ${change.removed_count} removed`;
     } catch (e) {
@@ -4560,7 +4573,7 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null, options = 
 
     const groupScanWarnings = [];
     if (isPageIdentityType(identityType)) {
-      const overlap = await assessAccountLevelGroupOverlap(session, identityName, identityType, groups);
+      const overlap = await assessAccountLevelGroupOverlap(await freshGroupImportSession(session.userId), identityName, identityType, groups);
       if (overlap?.high_overlap) {
         groupScanWarnings.push({
           ...overlap,
