@@ -4244,6 +4244,22 @@ async function scrollFacebookJoinedGroupsNative(tabId) {
   }
 }
 
+async function scrollFacebookJoinedGroupsWithRetry(tabId, reportRetry = null) {
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      await scrollFacebookJoinedGroupsNative(tabId);
+      return;
+    } catch (error) {
+      // A stalled Chrome debugger command is transient. The native helper
+      // detaches in finally, so a fresh attach can continue the same list.
+      // Never retry other failures or accept a partial list as complete.
+      if (attempt === 2 || !/timed out after \d+ seconds/i.test(String(error?.message || ''))) throw error;
+      if (reportRetry) await reportRetry(error);
+      await sleep(2500);
+    }
+  }
+}
+
 async function importFacebookGroupsForJob(jobId, identityMeta = null, options = {}) {
   const groupScanGuardVersion = GROUP_SCAN_GUARD_VERSION;
   const identityName = typeof identityMeta === 'string' ? identityMeta : (identityMeta?.name || identityMeta?.identity_name || null);
@@ -4560,7 +4576,9 @@ async function importFacebookGroupsForJob(jobId, identityMeta = null, options = 
         scan_pass: passes, scan_pass_limit: MAX_PASSES,
         observed_groups: groups.length, expected_groups: expectedJoinedCount
       });
-      await withGroupScanTimeout(scrollFacebookJoinedGroupsNative(tab.id), 'Facebook joined-groups scroll', 30000);
+      await scrollFacebookJoinedGroupsWithRetry(tab.id, () => updateProgress(
+        `Chrome paused while scrolling ${identityName}'s groups; retrying this page once...`
+      ));
       await sleep(1500);
     }
 
