@@ -2777,7 +2777,7 @@ async function scanVisibleProspects(groupUrls=[]){
       window.postMessage({source:'reachr-prospect-page',type:'REACHR_SCAN_PROSPECTS',requestId,groupUrls:groupUrls},window.location.origin);
     });
     if (!result.ok) throw new Error(result.error || 'Scan failed');
-    status.textContent=`Scanned ${result.scanned}/${result.tabCount} group feeds · ${result.found} matching posts · ${result.rows.length} saved for review.${result.failed ? ` ${result.failed} feeds could not be read.` : ''}`;
+    status.textContent=`Scanned ${result.scanned}/${result.tabCount} group feeds · ${result.inspected || 0} sourced post areas inspected · ${result.found} matching posts · ${result.rows.length} saved for review.${result.failed ? ` ${result.failed} feeds could not be read.` : ''}`;
     renderProspectRows(result.rows);
   } catch(error){ status.textContent=error.message || 'Prospect scan failed.'; }
   finally { button.disabled=false; }

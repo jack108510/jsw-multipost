@@ -36,7 +36,7 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
     const summary = buildScanSummary(existing, results, tabCount);
     if (!summary.scanned) return { ok: false, error: `Could not read any of ${tabCount} group feeds. Check Facebook login and retry.` };
     await chrome.storage.local.set({ [GROUP_PROSPECT_KEY]: summary.rows });
-    return { ok: true, scanned: summary.scanned, tabCount: summary.tabCount, found: summary.found, failed: results.filter(r => !r?.ok).length,
+    return { ok: true, scanned: summary.scanned, tabCount: summary.tabCount, found: summary.found, failed: results.filter(r => !r?.ok).length, inspected: results.reduce((count, r) => count + (r?.diagnostics?.credible || 0), 0),
       rows: summary.rows.slice(0, 100).map(row => ({ businessName: row.businessName, businessUrl: row.businessUrl,
         sourceGroupName: row.sourceGroupName, postUrl: row.postUrl, observedText: row.observedText,
         status: row.status, observedAt: row.observedAt })) };

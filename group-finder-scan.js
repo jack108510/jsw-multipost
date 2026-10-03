@@ -49,8 +49,11 @@ async function scanGroupFeeds(urls, api) {
       await api.pause(2500);
       let result;
       const candidates = new Map();
+      let maxContainers = 0, maxCredible = 0;
       for (let attempt = 0; attempt < 3; attempt++) {
         result = await api.read(tab);
+        maxContainers = Math.max(maxContainers, result?.diagnostics?.containers || 0);
+        maxCredible = Math.max(maxCredible, result?.diagnostics?.credible || 0);
         if (!result?.ok && !result?.transient) break;
         for (const row of result?.candidates || []) candidates.set(key(row), row);
         if (attempt < 2) {
@@ -58,7 +61,7 @@ async function scanGroupFeeds(urls, api) {
           await api.pause(2500);
         }
       }
-      results.push(result?.ok ? { ...result, candidates: [...candidates.values()] } : candidates.size ? { ok: true, candidates: [...candidates.values()] } : result || { ok: false, error: 'No feed response' });
+      results.push(result?.ok ? { ...result, diagnostics: { ...result.diagnostics, containers: maxContainers, credible: maxCredible }, candidates: [...candidates.values()] } : candidates.size ? { ok: true, diagnostics: { containers: maxContainers, credible: maxCredible }, candidates: [...candidates.values()] } : result || { ok: false, error: 'No feed response' });
     } catch (error) { results.push({ ok: false, error: error.message || 'Group feed failed' }); }
     finally { if (tab?.id) await api.close(tab).catch(() => {}); }
   }

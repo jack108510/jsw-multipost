@@ -6,5 +6,6 @@ assert.match(background,/scanGroupFeeds\(groupUrls/);
 assert.match(background,/active:\s*false/);
 assert.match(background,/chrome\.tabs\.remove/);
 assert.match(background,/failed:/);
+assert.match(background,/inspected:/);
 assert.match(bridge,/groupUrls:\s*msg\.groupUrls/);
 console.log('read-only target dispatch wiring passed');
