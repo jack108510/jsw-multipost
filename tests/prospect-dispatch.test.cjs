@@ -1,0 +1,10 @@
+const assert=require('node:assert/strict');const fs=require('node:fs');
+const background=fs.readFileSync('group-finder-background.js','utf8');
+const bridge=fs.readFileSync('dashboard_bridge.js','utf8');
+assert.match(background,/normalizeGroupFeedUrls\(msg\.groupUrls\)/);
+assert.match(background,/scanGroupFeeds\(groupUrls/);
+assert.match(background,/active:\s*false/);
+assert.match(background,/chrome\.tabs\.remove/);
+assert.match(background,/failed:/);
+assert.match(bridge,/groupUrls:\s*msg\.groupUrls/);
+console.log('read-only target dispatch wiring passed');

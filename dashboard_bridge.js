@@ -75,7 +75,7 @@
     const msg = event.data || {};
     if (msg.source !== 'amplr-dashboard-page' && !(msg.source === 'reachr-prospect-page' && msg.type === 'REACHR_SCAN_PROSPECTS')) return;
     if (msg.type === 'REACHR_SCAN_PROSPECTS' && location.pathname === '/jsw-multipost/dashboard.html' && typeof msg.requestId === 'string') {
-      chrome.runtime.sendMessage({ type: 'REACHR_SCAN_PROSPECTS' })
+      chrome.runtime.sendMessage({ type: 'REACHR_SCAN_PROSPECTS', groupUrls: msg.groupUrls })
         .then(response => window.postMessage({ source: 'reachr-prospect-extension', requestId: msg.requestId, ...(response || { ok: false, error: 'No scanner response' }) }, window.location.origin))
         .catch(error => window.postMessage({ source: 'reachr-prospect-extension', requestId: msg.requestId, ok: false, error: error.message }, window.location.origin));
     } else if (msg.type === 'QUEUE_LOCAL_FALLBACK_JOB' && msg.job) {
