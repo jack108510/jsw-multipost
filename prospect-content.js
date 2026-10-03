@@ -44,8 +44,9 @@
     return { businessName: normalizeBusinessName(match?.textContent) || 'Unlabeled visible post', businessUrl: stripQuery(match?.href) };
   }
   function cleanObservedText(value) { return clean(value).replace(/(?:Facebook\s*){3,}/gi, ' ').replace(/^\s*[·|]\s*/, '').trim(); }
+  function isGroupFeedNode(node) { return !!node?.closest?.('[role="main"], main'); }
   function fallbackPostContainers() {
-    return [...document.querySelectorAll('h2, h3')].filter(visible).map(heading => {
+    return [...document.querySelectorAll('h2, h3')].filter(visible).filter(isGroupFeedNode).map(heading => {
       const name = normalizeBusinessName(heading.innerText || heading.textContent);
       if (!name || name.length > 120 || /facebook|featured|recent activity|about|upcoming events|date night/i.test(name)) return null;
       let node = heading;
@@ -75,16 +76,16 @@
     const sourceGroupUrl = `${location.origin}${location.pathname}`.replace(/\/$/, '');
     const sourceGroupName = clean(document.title.replace(/^\(\d+\+?\)\s*/, '').replace(/\s*\|\s*Facebook.*$/i, ''), 180);
     const seen = new Set();
-    const articles = [...document.querySelectorAll('[role="article"]')].filter(visible).filter(article => cleanObservedText(article.innerText || article.textContent || '').length >= 80);
+    const articles = [...document.querySelectorAll('[role="article"]')].filter(visible).filter(isGroupFeedNode).filter(article => cleanObservedText(article.innerText || article.textContent || '').length >= 80);
     const containers = mergePostContainers(articles, fallbackPostContainers());
     const rawRecords = containers.map(item => { const article = item.node; const identity = item.businessName ? { businessName: item.businessName, businessUrl: item.businessUrl } : author(article), rawText = article.innerText || article.textContent || '', observedText = cleanObservedText(rawText); return { ...identity, sourceGroupName, sourceGroupUrl, postUrl: canonicalPostUrl(article), observedText, websiteUrls: websiteUrls(article, rawText), promotionSignals: promotionSignals(observedText) }; });
     const candidates = rawRecords
       .filter(record => record.observedText.length >= 80 && isLikelyPromotion(record.observedText) && isCredibleProspect(record))
       .filter(record => { const key = dedupeKey(record); if (seen.has(key)) return false; seen.add(key); return true; })
       .slice(0, 25).map(record => ({ ...record, status: 'pending_review', draft: composeReachrMessage(record.businessName), observedAt: new Date().toISOString() }));
-    return { ok: true, mode: 'visible_posts_only', sourceGroupName, sourceGroupUrl, scannedAt: new Date().toISOString(), diagnostics: { articles: articles.length, containers: containers.length, credible: rawRecords.filter(isCredibleProspect).length, promotional: rawRecords.filter(record => record.observedText.length >= 80 && isLikelyPromotion(record.observedText)).length, samples: rawRecords.map(record => ({ name: record.businessName, chars: record.observedText.length, signals: record.promotionSignals, text: record.observedText.slice(0, 240) })) }, candidates, count: candidates.length };
+    return { ok: true, mode: 'visible_posts_only', sourceGroupName, sourceGroupUrl, scannedAt: new Date().toISOString(), diagnostics: { articles: articles.length, containers: containers.length, credible: rawRecords.filter(record => record.observedText.length >= 80 && isCredibleProspect(record)).length, promotional: rawRecords.filter(record => record.observedText.length >= 80 && isLikelyPromotion(record.observedText)).length, samples: rawRecords.map(record => ({ name: record.businessName, chars: record.observedText.length, signals: record.promotionSignals, text: record.observedText.slice(0, 240) })) }, candidates, count: candidates.length };
   }
   if (typeof globalThis !== 'undefined') globalThis.__reachrScanVisibleGroupPromotions = scanVisibleGroupPromotions;
-  if (typeof module !== 'undefined' && module.exports) module.exports = { promotionSignals, isLikelyPromotion, isCredibleProspect, mergePostContainers, normalizeBusinessName, composeReachrMessage, dedupeKey, externalDestination, websitesFromText };
+  if (typeof module !== 'undefined' && module.exports) module.exports = { promotionSignals, isLikelyPromotion, isCredibleProspect, isGroupFeedNode, mergePostContainers, normalizeBusinessName, composeReachrMessage, dedupeKey, externalDestination, websitesFromText };
   if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) chrome.runtime.onMessage.addListener((msg, _sender, respond) => { if (msg?.type !== 'SCAN_VISIBLE_GROUP_PROMOTIONS') return; try { respond(scanVisibleGroupPromotions()); } catch (error) { respond({ ok: false, error: error?.message || 'Visible-post scan failed.' }); } });
 })();
