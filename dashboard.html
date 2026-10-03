@@ -1027,6 +1027,13 @@ body[data-amplr-vibe='calm']{--accent:#14b8a6;--accent-2:#38bdf8;--grad:linear-g
                 </div>
               </details>
               <div id="finderResults"></div>
+              <div style="border-top:1px solid var(--border);margin-top:20px;padding-top:18px;">
+                <h3>Prospect Searcher</h3>
+                <div class="desc">Review promotional posts already visible in open Facebook group-feed tabs. No joining, scrolling, or messaging. Verify each business before outreach.</div>
+                <button class="btn btn-primary" id="prospectScanBtn" onclick="scanVisibleProspects()">Scan Open Group Tabs</button>
+                <div class="result-meta" id="prospectStatus" role="status" style="margin:12px 0;">Open group feeds in this Chrome profile, then scan.</div>
+                <div id="prospectResults"></div>
+              </div>
             </div>
           </div>
         </div>
@@ -2727,6 +2734,46 @@ const CATEGORY_MAP = {
   home:{keywords:['home','furniture','decor','interior design','garden','landscaping','renovation','construction','contractor','cleaning'],searches:['home renovation business','landscaping business owners','construction business owners','cleaning business owners','contractor business networking']},
   realestate:{keywords:['real estate','realtor','property','housing','rental','airbnb','mortgage'],searches:['real estate business owners','realtor business networking','real estate investors network','property management business']}
 };
+
+function safeProspectLink(value){
+  try { const url=new URL(value); return url.protocol==='https:' && /(^|\.)facebook\.com$/.test(url.hostname) ? url.href : ''; }
+  catch { return ''; }
+}
+function renderProspectRows(rows){
+  const el=document.getElementById('prospectResults');
+  if (!el) return;
+  if (!rows?.length) { el.textContent='No saved prospects yet. Only visible posts with multiple promotional signals appear here.'; return; }
+  el.innerHTML=rows.map(row=>{
+    const post=safeProspectLink(row.postUrl), business=safeProspectLink(row.businessUrl);
+    return `<div class="job" style="display:block;margin-bottom:10px;">
+      <strong>${esc(row.businessName || 'Unverified author')}</strong> <span class="warning-chip">${esc(row.status || 'pending_review')}</span>
+      <div class="job-meta">${esc(row.sourceGroupName || 'Facebook group')}</div>
+      <div class="job-msg" style="margin:8px 0;white-space:normal;">${esc((row.observedText || '').slice(0,400))}</div>
+      ${post?`<a class="btn btn-ghost" href="${esc(post)}" target="_blank" rel="noopener noreferrer">Source post</a>`:''}
+      ${business?`<a class="btn btn-ghost" href="${esc(business)}" target="_blank" rel="noopener noreferrer">Business route</a>`:''}
+    </div>`;
+  }).join('');
+}
+async function scanVisibleProspects(){
+  const button=document.getElementById('prospectScanBtn'), status=document.getElementById('prospectStatus');
+  button.disabled=true; status.textContent='Scanning posts already visible in open group tabs…';
+  const requestId='prospect-'+crypto.randomUUID();
+  try {
+    const result=await new Promise((resolve,reject)=>{
+      const timer=setTimeout(()=>{ window.removeEventListener('message',onReply); reject(new Error('Prospect extension did not respond. Reload it in Chrome extensions, then refresh this page.')); },12000);
+      function onReply(event){
+        if(event.source!==window || event.origin!==window.location.origin || event.data?.source!=='reachr-prospect-extension' || event.data.requestId!==requestId) return;
+        clearTimeout(timer); window.removeEventListener('message',onReply); resolve(event.data);
+      }
+      window.addEventListener('message',onReply);
+      window.postMessage({source:'reachr-prospect-page',type:'REACHR_SCAN_PROSPECTS',requestId},window.location.origin);
+    });
+    if (!result.ok) throw new Error(result.error || 'Scan failed');
+    status.textContent=`Scanned ${result.scanned}/${result.tabCount} open group feeds · ${result.found} matching visible posts · ${result.rows.length} saved for review.`;
+    renderProspectRows(result.rows);
+  } catch(error){ status.textContent=error.message || 'Prospect scan failed.'; }
+  finally { button.disabled=false; }
+}
 
 function finderStorageKey(){ return 'group_finder_candidates'; }
 async function loadGroupCandidates(){
