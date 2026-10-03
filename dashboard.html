@@ -824,6 +824,7 @@ body[data-amplr-vibe='calm']{--accent:#14b8a6;--accent-2:#38bdf8;--grad:linear-g
           <div class="stat"><div class="stat-label">Submitted</div><div class="stat-value" id="opsTodayPosted">—</div><div class="stat-trend">recorded Facebook submissions; visibility may be pending</div></div>
           <div class="stat"><div class="stat-label">Verified</div><div class="stat-value" id="opsTodayVerified">—</div><div class="stat-trend">confirmed visible posts</div></div>
           <div class="stat"><div class="stat-label">Unreported</div><div class="stat-value" id="opsTodayUnreported">—</div><div class="stat-trend">queued, in progress, or awaiting review</div></div>
+          <div class="stat"><div class="stat-label">Handoff Needs Review</div><div class="stat-value" id="opsTodayHandoff">—</div><div class="stat-trend">posting command began; outcome was not saved</div></div>
           <div class="stat"><div class="stat-label">Failures</div><div class="stat-value" id="opsTodayFailed">—</div><div class="stat-trend" style="color:var(--red);">failed / blocked</div></div>
           <div class="stat"><div class="stat-label">Skipped</div><div class="stat-value" id="opsTodaySkipped">—</div><div class="stat-trend" style="color:var(--yellow);">cooldown / safety</div></div>
         </div>
@@ -2960,20 +2961,30 @@ function resultCounts(j){
   const skipped = Number.isFinite(r.skipped_count) ? r.skipped_count : countStatus(['skipped']);
   return { posted, failed, skipped };
 }
-function opsDailyCounts(rows, monitors){
+function opsDailyCounts(rows, monitors, attemptEvents=[]){
   const byJob=new Map();
   for(const m of monitors||[]){
     if(!byJob.has(m.source_job_id)) byJob.set(m.source_job_id,new Map());
     byJob.get(m.source_job_id).set(m.group_url,m);
   }
-  const totals={targets:0,submitted:0,verified:0,failed:0,skipped:0,unreported:0};
+  const eventsByJob=new Map();
+  for(const event of attemptEvents){
+    if(!eventsByJob.has(event.job_id)) eventsByJob.set(event.job_id,new Map());
+    const groupEvents=eventsByJob.get(event.job_id);
+    const state=groupEvents.get(event.group_url)||{};
+    state[event.kind]=event;
+    groupEvents.set(event.group_url,state);
+  }
+  const totals={targets:0,submitted:0,verified:0,failed:0,skipped:0,unreported:0,handoff:0};
   for(const j of rows){
     const items=resultItems(j);
     const results=new Map(items.map(x=>[x.group_url||x.url,x]));
     const tracked=byJob.get(String(j.id))||new Map();
+    const recorded=eventsByJob.get(String(j.id))||new Map();
     for(const g of j.groups||[]){
       const url=typeof g==='string'?g:(g.url||g.group_url);
-      const r=results.get(url)||{};
+      const event=recorded.get(url)||{};
+      const r=event.result?.payload||results.get(url)||{};
       const m=tracked.get(url);
       const status=String(r.status||'').toLowerCase();
       totals.targets++;
@@ -2983,7 +2994,12 @@ function opsDailyCounts(rows, monitors){
         if(m?.status==='published' || (!m && r.publication_verified===true && r.post_url)) totals.verified++;
       }else if(['failed','error'].includes(status)) totals.failed++;
       else if(status==='skipped') totals.skipped++;
-      else totals.unreported++;
+      else {
+        totals.unreported++;
+        const handoffAt=safeDate(event.command_handoff?.recorded_at);
+        if(event.command_handoff && (j.status!=='processing'
+            || (handoffAt && Date.now()-handoffAt.getTime()>10*60*1000))) totals.handoff++;
+      }
     }
   }
   return totals;
@@ -3008,11 +3024,11 @@ function hasDefenseSignal(j){
   const txt=JSON.stringify({error:j.error,result:j.result}, null, 0).toLowerCase();
   return /facebook_defense|checkpoint|temporarily blocked|action blocked|security check|unusual activity|account restricted|rate limit|identity_not_verified|composer/.test(txt);
 }
-function campaignCardHtml(name, jobs, monitors){
+function campaignCardHtml(name, jobs, monitors, attemptEvents){
   const today=jobs.filter(jobScheduledOrTouchedToday);
   const pending=jobs.filter(j=>j.status==='pending').length;
   const processing=jobs.filter(j=>j.status==='processing').length;
-  const counts=opsDailyCounts(today,monitors);
+  const counts=opsDailyCounts(today,monitors,attemptEvents);
   const badge=processing ? resultBadge('processing') : pending ? resultBadge('pending') : resultBadge('done');
   return `<div class="ops-campaign">
     <div class="ops-campaign-top"><h4>${esc(name)}</h4>${badge}</div>
@@ -3022,6 +3038,7 @@ function campaignCardHtml(name, jobs, monitors){
       <div class="ops-metric"><strong>${counts.verified}</strong><span>verified</span></div>
       <div class="ops-metric"><strong>${counts.failed}</strong><span>failed</span></div>
       <div class="ops-metric"><strong>${counts.skipped}</strong><span>skipped</span></div>
+      <div class="ops-metric"><strong>${counts.handoff}</strong><span>review</span></div>
     </div>
   </div>`;
 }
@@ -3046,17 +3063,19 @@ function opsAlertHtml(kind,title,body){
 function updateOpsBadge(n){ const el=document.getElementById('navOpsAlerts'); if(el) el.textContent=String(n||0); }
 async function loadOpsDashboard(){
   if (!user) return;
-  const [jobsRes, settingsRes, monitorsRes] = await Promise.all([
+  const [jobsRes, settingsRes, monitorsRes, eventsRes] = await Promise.all([
     sb.from('jsw_post_jobs').select('*').eq('user_id',user.id).order('created_at',{ascending:false}).limit(1000),
     sb.from('jsw_settings').select('*').eq('user_id',user.id).maybeSingle(),
-    sb.from('reachr_post_monitors').select('source_job_id,group_url,status,submitted_at').eq('user_id',user.id).gte('submitted_at',startOfLocalDay().toISOString()).lt('submitted_at',endOfLocalDay().toISOString()).limit(1000)
+    sb.from('reachr_post_monitors').select('source_job_id,group_url,status,submitted_at').eq('user_id',user.id).gte('submitted_at',startOfLocalDay().toISOString()).lt('submitted_at',endOfLocalDay().toISOString()).limit(1000),
+    sb.from('reachr_group_attempt_events').select('job_id,group_url,kind,result_status,payload,recorded_at').eq('user_id',user.id).gte('recorded_at',startOfLocalDay().toISOString()).lt('recorded_at',endOfLocalDay().toISOString()).limit(1000)
   ]);
-  if(jobsRes.error || monitorsRes.error){
+  if(jobsRes.error || monitorsRes.error || eventsRes.error){
     document.getElementById('opsHealthText').textContent='Daily counts unavailable. Refresh or check the connection.';
     return;
   }
   const jobs=jobsRes.data || [];
   const monitors=monitorsRes.data || [];
+  const attemptEvents=eventsRes.data || [];
   const settings=settingsRes.data || settingsCache || {};
   if (settingsRes.data) settingsCache=settingsRes.data;
   const activeStatuses=['pending','processing','paused'];
@@ -3067,17 +3086,18 @@ async function loadOpsDashboard(){
   });
   const today=relevant.filter(jobScheduledOrTouchedToday);
   const todayScheduled=today.filter(j=>['pending','processing'].includes(j.status));
-  const totals=opsDailyCounts(today,monitors);
+  const totals=opsDailyCounts(today,monitors,attemptEvents);
   document.getElementById('opsTodayScheduled').textContent=totals.targets;
   document.getElementById('opsTodayScheduledSub').textContent=`${todayScheduled.length} queued job${todayScheduled.length===1?'':'s'}`;
   document.getElementById('opsTodayPosted').textContent=totals.submitted;
   document.getElementById('opsTodayVerified').textContent=totals.verified;
   document.getElementById('opsTodayUnreported').textContent=totals.unreported;
+  document.getElementById('opsTodayHandoff').textContent=totals.handoff;
   document.getElementById('opsTodayFailed').textContent=totals.failed;
   document.getElementById('opsTodaySkipped').textContent=totals.skipped;
   const campaigns={};
   relevant.forEach(j=>{ const name=campaignNameForJob(j); (campaigns[name] ||= []).push(j); });
-  document.getElementById('opsCampaignCards').innerHTML = Object.keys(campaigns).length ? Object.entries(campaigns).map(([name,rows])=>campaignCardHtml(name,rows,monitors)).join('') : emptyState('No campaigns in queue','Create a schedule and it will appear here.');
+  document.getElementById('opsCampaignCards').innerHTML = Object.keys(campaigns).length ? Object.entries(campaigns).map(([name,rows])=>campaignCardHtml(name,rows,monitors,attemptEvents)).join('') : emptyState('No campaigns in queue','Create a schedule and it will appear here.');
   document.getElementById('opsQueueList').innerHTML = relevant.length ? relevant.slice(0,24).map(opsJobRow).join('') : emptyState('No active queue','No scheduled or recently touched jobs found.');
   const alerts=[];
   const heartbeat=settings.ext_heartbeat ? safeDate(settings.ext_heartbeat) : null;
@@ -3091,6 +3111,11 @@ async function loadOpsDashboard(){
   if (defense.length) alerts.push(['danger','Facebook defense signal detected',`${defense.length} recent job(s) mention checkpoint/block/identity/composer issues. Review before scaling.`]);
   const failedToday=today.filter(j=>j.status==='failed' || resultCounts(j).failed>0);
   if (failedToday.length) alerts.push(['warn','Failures today',`${failedToday.length} job(s) failed or have failed group results today.`]);
+  if (totals.handoff) alerts.push(['danger','Submission outcome needs review',
+    `${totals.handoff} group handoff(s) have no saved result. Check the exact group in Facebook before any retry.`]);
+  const pendingApproval=monitors.filter(m=>m.status==='pending_approval').length;
+  if (pendingApproval) alerts.push(['warn','Waiting on group approval',
+    `${pendingApproval} submitted post(s) are confirmed pending with group admins; they are not published yet.`]);
   const paused=jobs.filter(j=>j.status==='paused');
   if (paused.length) alerts.push(['warn','Paused schedules',`${paused.length} job(s) are paused and will not run until resumed.`]);
   if (!todayScheduled.length) alerts.push(['warn','Nothing else scheduled today','No remaining pending scheduled jobs for today.']);
