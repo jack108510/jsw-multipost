@@ -820,8 +820,10 @@ body[data-amplr-vibe='calm']{--accent:#14b8a6;--accent-2:#38bdf8;--grad:linear-g
           </div>
         </div>
         <div class="stats-grid">
-          <div class="stat"><div class="stat-label">Today Scheduled</div><div class="stat-value" id="opsTodayScheduled">—</div><div class="stat-trend" id="opsTodayScheduledSub">queued groups</div></div>
-          <div class="stat"><div class="stat-label">Today Posted</div><div class="stat-value" id="opsTodayPosted">—</div><div class="stat-trend">successful group posts</div></div>
+          <div class="stat"><div class="stat-label">Today Targets</div><div class="stat-value" id="opsTodayScheduled">—</div><div class="stat-trend" id="opsTodayScheduledSub">scheduled groups</div></div>
+          <div class="stat"><div class="stat-label">Submitted</div><div class="stat-value" id="opsTodayPosted">—</div><div class="stat-trend">recorded Facebook submissions; visibility may be pending</div></div>
+          <div class="stat"><div class="stat-label">Verified</div><div class="stat-value" id="opsTodayVerified">—</div><div class="stat-trend">confirmed visible posts</div></div>
+          <div class="stat"><div class="stat-label">Unreported</div><div class="stat-value" id="opsTodayUnreported">—</div><div class="stat-trend">queued, in progress, or awaiting review</div></div>
           <div class="stat"><div class="stat-label">Failures</div><div class="stat-value" id="opsTodayFailed">—</div><div class="stat-trend" style="color:var(--red);">failed / blocked</div></div>
           <div class="stat"><div class="stat-label">Skipped</div><div class="stat-value" id="opsTodaySkipped">—</div><div class="stat-trend" style="color:var(--yellow);">cooldown / safety</div></div>
         </div>
@@ -2958,6 +2960,34 @@ function resultCounts(j){
   const skipped = Number.isFinite(r.skipped_count) ? r.skipped_count : countStatus(['skipped']);
   return { posted, failed, skipped };
 }
+function opsDailyCounts(rows, monitors){
+  const byJob=new Map();
+  for(const m of monitors||[]){
+    if(!byJob.has(m.source_job_id)) byJob.set(m.source_job_id,new Map());
+    byJob.get(m.source_job_id).set(m.group_url,m);
+  }
+  const totals={targets:0,submitted:0,verified:0,failed:0,skipped:0,unreported:0};
+  for(const j of rows){
+    const items=resultItems(j);
+    const results=new Map(items.map(x=>[x.group_url||x.url,x]));
+    const tracked=byJob.get(String(j.id))||new Map();
+    for(const g of j.groups||[]){
+      const url=typeof g==='string'?g:(g.url||g.group_url);
+      const r=results.get(url)||{};
+      const m=tracked.get(url);
+      const status=String(r.status||'').toLowerCase();
+      totals.targets++;
+      if(m || (['submitted_unconfirmed','posted','success','done','pending_approval'].includes(status)
+          && isSameLocalDay(r.submitted_at||r.posted_at||j.completed_at))){
+        totals.submitted++;
+        if(m?.status==='published' || (!m && r.publication_verified===true && r.post_url)) totals.verified++;
+      }else if(['failed','error'].includes(status)) totals.failed++;
+      else if(status==='skipped') totals.skipped++;
+      else totals.unreported++;
+    }
+  }
+  return totals;
+}
 function campaignNameForJob(j){
   const text=JSON.stringify({message:j.message,groups:j.groups,result:j.result,error:j.error}, null, 0).toLowerCase();
   if(/wildrose|\$5\.99|5\.99|ai adoption|basic website|small business automation/.test(text)) return 'Wildrose';
@@ -2978,18 +3008,18 @@ function hasDefenseSignal(j){
   const txt=JSON.stringify({error:j.error,result:j.result}, null, 0).toLowerCase();
   return /facebook_defense|checkpoint|temporarily blocked|action blocked|security check|unusual activity|account restricted|rate limit|identity_not_verified|composer/.test(txt);
 }
-function campaignCardHtml(name, jobs){
+function campaignCardHtml(name, jobs, monitors){
   const today=jobs.filter(jobScheduledOrTouchedToday);
   const pending=jobs.filter(j=>j.status==='pending').length;
   const processing=jobs.filter(j=>j.status==='processing').length;
-  const scheduledGroups=today.filter(j=>['pending','processing'].includes(j.status)).reduce((n,j)=>n+groupCount(j),0);
-  const counts=today.reduce((a,j)=>{ const c=resultCounts(j); a.posted+=c.posted; a.failed+=c.failed; a.skipped+=c.skipped; return a; }, {posted:0,failed:0,skipped:0});
+  const counts=opsDailyCounts(today,monitors);
   const badge=processing ? resultBadge('processing') : pending ? resultBadge('pending') : resultBadge('done');
   return `<div class="ops-campaign">
     <div class="ops-campaign-top"><h4>${esc(name)}</h4>${badge}</div>
     <div class="ops-metrics">
-      <div class="ops-metric"><strong>${scheduledGroups}</strong><span>queued</span></div>
-      <div class="ops-metric"><strong>${counts.posted}</strong><span>posted</span></div>
+      <div class="ops-metric"><strong>${counts.targets}</strong><span>targets</span></div>
+      <div class="ops-metric"><strong>${counts.submitted}</strong><span>submitted</span></div>
+      <div class="ops-metric"><strong>${counts.verified}</strong><span>verified</span></div>
       <div class="ops-metric"><strong>${counts.failed}</strong><span>failed</span></div>
       <div class="ops-metric"><strong>${counts.skipped}</strong><span>skipped</span></div>
     </div>
@@ -3016,11 +3046,17 @@ function opsAlertHtml(kind,title,body){
 function updateOpsBadge(n){ const el=document.getElementById('navOpsAlerts'); if(el) el.textContent=String(n||0); }
 async function loadOpsDashboard(){
   if (!user) return;
-  const [jobsRes, settingsRes] = await Promise.all([
-    sb.from('jsw_post_jobs').select('*').eq('user_id',user.id).order('created_at',{ascending:false}).limit(120),
-    sb.from('jsw_settings').select('*').eq('user_id',user.id).maybeSingle()
+  const [jobsRes, settingsRes, monitorsRes] = await Promise.all([
+    sb.from('jsw_post_jobs').select('*').eq('user_id',user.id).order('created_at',{ascending:false}).limit(1000),
+    sb.from('jsw_settings').select('*').eq('user_id',user.id).maybeSingle(),
+    sb.from('reachr_post_monitors').select('source_job_id,group_url,status,submitted_at').eq('user_id',user.id).gte('submitted_at',startOfLocalDay().toISOString()).lt('submitted_at',endOfLocalDay().toISOString()).limit(1000)
   ]);
+  if(jobsRes.error || monitorsRes.error){
+    document.getElementById('opsHealthText').textContent='Daily counts unavailable. Refresh or check the connection.';
+    return;
+  }
   const jobs=jobsRes.data || [];
+  const monitors=monitorsRes.data || [];
   const settings=settingsRes.data || settingsCache || {};
   if (settingsRes.data) settingsCache=settingsRes.data;
   const activeStatuses=['pending','processing','paused'];
@@ -3031,16 +3067,17 @@ async function loadOpsDashboard(){
   });
   const today=relevant.filter(jobScheduledOrTouchedToday);
   const todayScheduled=today.filter(j=>['pending','processing'].includes(j.status));
-  const totals=today.reduce((a,j)=>{ const c=resultCounts(j); a.posted+=c.posted; a.failed+=c.failed; a.skipped+=c.skipped; return a; }, {posted:0,failed:0,skipped:0});
-  const scheduledGroups=todayScheduled.reduce((n,j)=>n+groupCount(j),0);
-  document.getElementById('opsTodayScheduled').textContent=todayScheduled.length;
-  document.getElementById('opsTodayScheduledSub').textContent=`${scheduledGroups} queued group${scheduledGroups===1?'':'s'}`;
-  document.getElementById('opsTodayPosted').textContent=totals.posted;
+  const totals=opsDailyCounts(today,monitors);
+  document.getElementById('opsTodayScheduled').textContent=totals.targets;
+  document.getElementById('opsTodayScheduledSub').textContent=`${todayScheduled.length} queued job${todayScheduled.length===1?'':'s'}`;
+  document.getElementById('opsTodayPosted').textContent=totals.submitted;
+  document.getElementById('opsTodayVerified').textContent=totals.verified;
+  document.getElementById('opsTodayUnreported').textContent=totals.unreported;
   document.getElementById('opsTodayFailed').textContent=totals.failed;
   document.getElementById('opsTodaySkipped').textContent=totals.skipped;
   const campaigns={};
   relevant.forEach(j=>{ const name=campaignNameForJob(j); (campaigns[name] ||= []).push(j); });
-  document.getElementById('opsCampaignCards').innerHTML = Object.keys(campaigns).length ? Object.entries(campaigns).map(([name,rows])=>campaignCardHtml(name,rows)).join('') : emptyState('No campaigns in queue','Create a schedule and it will appear here.');
+  document.getElementById('opsCampaignCards').innerHTML = Object.keys(campaigns).length ? Object.entries(campaigns).map(([name,rows])=>campaignCardHtml(name,rows,monitors)).join('') : emptyState('No campaigns in queue','Create a schedule and it will appear here.');
   document.getElementById('opsQueueList').innerHTML = relevant.length ? relevant.slice(0,24).map(opsJobRow).join('') : emptyState('No active queue','No scheduled or recently touched jobs found.');
   const alerts=[];
   const heartbeat=settings.ext_heartbeat ? safeDate(settings.ext_heartbeat) : null;
