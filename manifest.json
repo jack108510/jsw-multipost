@@ -38,7 +38,8 @@
         "*://*.facebook.com/*"
       ],
       "js": [
-        "content.js"
+        "content.js",
+        "prospect-content.js"
       ],
       "run_at": "document_idle"
     }

@@ -1,5 +1,6 @@
 // ============ Amplr Background Worker v2.1.3 ============
 // Orchestrates posting queue, AI refinement, and scheduled posts via chrome.alarms.
+if (typeof importScripts === 'function') importScripts('group-finder-scan.js', 'group-finder-background.js');
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 

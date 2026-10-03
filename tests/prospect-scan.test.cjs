@@ -1,0 +1,16 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const { acceptDashboardRequest, buildScanSummary } = require('../group-finder-scan.js');
+const manifest = require('../manifest.json');
+assert.equal(acceptDashboardRequest('https://jack108510.github.io/jsw-multipost/dashboard.html', 'REACHR_SCAN_PROSPECTS'), true);
+assert.equal(acceptDashboardRequest('https://evil.example/jsw-multipost/dashboard.html', 'REACHR_SCAN_PROSPECTS'), false);
+assert.equal(acceptDashboardRequest('https://jack108510.github.io/jsw-multipost/dashboard.html', 'SEND_MESSAGE'), false);
+const existing = [{ postUrl:'https://www.facebook.com/groups/1/posts/2', status:'approved' }];
+const fresh = [{ postUrl:'https://www.facebook.com/groups/1/posts/2',status:'pending_review' }, { postUrl:'https://www.facebook.com/groups/1/posts/3',status:'pending_review' }];
+const result = buildScanSummary(existing,[{ ok:true,candidates:fresh }],1);
+assert.equal(result.scanned,1); assert.equal(result.found,2); assert.equal(result.rows.length,2);
+assert.equal(result.rows.find(r=>r.postUrl.endsWith('/2')).status,'approved');
+assert.ok(manifest.content_scripts.find(s=>s.matches.includes('*://*.facebook.com/*')).js.includes('prospect-content.js'));
+assert.match(fs.readFileSync('dashboard_bridge.js','utf8'),/REACHR_SCAN_PROSPECTS/);
+assert.match(fs.readFileSync('background.js','utf8'),/group-finder-background.js/);
+console.log('prospect scanner wiring and dedupe passed');
