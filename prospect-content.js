@@ -57,21 +57,34 @@
       return null;
     }).filter(Boolean);
   }
+  function isCredibleProspect(record) {
+    if (!record || !record.businessName || record.businessName === 'Unlabeled visible post') return false;
+    if (/\b(message sent|enter, message|is this still available\?|chat with)\b/i.test(record.observedText || '')) return false;
+    try {
+      const url = new URL(record.postUrl || record.businessUrl);
+      return url.protocol === 'https:' && /(^|\.)facebook\.com$/i.test(url.hostname)
+        && (/\/groups\/[^/]+\/(posts|permalink|user)\//i.test(url.pathname) || /\/(profile\.php|people\/|pages\/)\b/i.test(url.pathname));
+    } catch { return false; }
+  }
+  function mergePostContainers(articles, fallbacks) {
+    const seen = new Set(articles);
+    return [...articles.map(node => ({ node })), ...fallbacks.filter(item => { if (seen.has(item.node)) return false; seen.add(item.node); return true; })];
+  }
   function scanVisibleGroupPromotions() {
     if (!/facebook\.com\/groups\/[^/]+/i.test(location.href) || /\/search\//i.test(location.pathname)) return { ok: false, error: 'This tab is not an open Facebook group feed.' };
     const sourceGroupUrl = `${location.origin}${location.pathname}`.replace(/\/$/, '');
     const sourceGroupName = clean(document.title.replace(/^\(\d+\+?\)\s*/, '').replace(/\s*\|\s*Facebook.*$/i, ''), 180);
     const seen = new Set();
     const articles = [...document.querySelectorAll('[role="article"]')].filter(visible).filter(article => cleanObservedText(article.innerText || article.textContent || '').length >= 80);
-    const containers = articles.length ? articles.map(node => ({ node })) : fallbackPostContainers();
+    const containers = mergePostContainers(articles, fallbackPostContainers());
     const rawRecords = containers.map(item => { const article = item.node; const identity = item.businessName ? { businessName: item.businessName, businessUrl: item.businessUrl } : author(article), rawText = article.innerText || article.textContent || '', observedText = cleanObservedText(rawText); return { ...identity, sourceGroupName, sourceGroupUrl, postUrl: canonicalPostUrl(article), observedText, websiteUrls: websiteUrls(article, rawText), promotionSignals: promotionSignals(observedText) }; });
     const candidates = rawRecords
-      .filter(record => record.observedText.length >= 80 && isLikelyPromotion(record.observedText))
+      .filter(record => record.observedText.length >= 80 && isLikelyPromotion(record.observedText) && isCredibleProspect(record))
       .filter(record => { const key = dedupeKey(record); if (seen.has(key)) return false; seen.add(key); return true; })
       .slice(0, 25).map(record => ({ ...record, status: 'pending_review', draft: composeReachrMessage(record.businessName), observedAt: new Date().toISOString() }));
     return { ok: true, mode: 'visible_posts_only', sourceGroupName, sourceGroupUrl, scannedAt: new Date().toISOString(), diagnostics: { articles: articles.length, containers: containers.length, promotional: rawRecords.filter(record => record.observedText.length >= 80 && isLikelyPromotion(record.observedText)).length, samples: rawRecords.map(record => ({ name: record.businessName, chars: record.observedText.length, signals: record.promotionSignals, text: record.observedText.slice(0, 240) })) }, candidates, count: candidates.length };
   }
   if (typeof globalThis !== 'undefined') globalThis.__reachrScanVisibleGroupPromotions = scanVisibleGroupPromotions;
-  if (typeof module !== 'undefined' && module.exports) module.exports = { promotionSignals, isLikelyPromotion, normalizeBusinessName, composeReachrMessage, dedupeKey, externalDestination, websitesFromText };
+  if (typeof module !== 'undefined' && module.exports) module.exports = { promotionSignals, isLikelyPromotion, isCredibleProspect, mergePostContainers, normalizeBusinessName, composeReachrMessage, dedupeKey, externalDestination, websitesFromText };
   if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) chrome.runtime.onMessage.addListener((msg, _sender, respond) => { if (msg?.type !== 'SCAN_VISIBLE_GROUP_PROMOTIONS') return; try { respond(scanVisibleGroupPromotions()); } catch (error) { respond({ ok: false, error: error?.message || 'Visible-post scan failed.' }); } });
 })();

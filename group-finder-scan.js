@@ -12,7 +12,7 @@ function key(row) {
   return `${String(row?.businessName || '').toLowerCase()}|${String(row?.sourceGroupUrl || '').toLowerCase()}`;
 }
 function buildScanSummary(existing, results, tabCount) {
-  const rows = new Map((Array.isArray(existing) ? existing : []).map(row => [key(row), row]));
+  const rows = new Map((Array.isArray(existing) ? existing : []).filter(row => row?.postUrl || row?.businessUrl).map(row => [key(row), row]));
   let scanned = 0, found = 0;
   for (const result of results) {
     if (!result?.ok) continue;
